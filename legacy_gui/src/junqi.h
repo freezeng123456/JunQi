@@ -184,6 +184,7 @@ struct Junqi
 	int socket_fd;
 	GtkWidget *comm;
 	u8 *pCommData;
+	size_t commDataLen;
 	pthread_mutex_t mutex;
 };
 

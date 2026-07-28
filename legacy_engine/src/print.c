@@ -60,7 +60,8 @@ static const char *level_tag(int level)
 void *print_thread(void *arg)
 {
 	int len;
-	u8 aBuf[REC_LEN];
+	/* One extra byte is reserved for the terminator appended below. */
+	u8 aBuf[REC_LEN + 1];
 	Junqi* pJunqi = (Junqi*)arg;
 	PrintMsg *pData;
 
@@ -85,7 +86,6 @@ void *print_thread(void *arg)
 		}
 	}
 
-	pthread_detach(pthread_self());
 	return NULL;
 }
 
@@ -198,11 +198,12 @@ pthread_t CreatePrintThread(Junqi* pJunqi)
 		return 0;
 	}
 
-	if (pthread_create(&tidp, NULL, (void*)print_thread, pJunqi) != 0) {
+	if (pthread_create(&tidp, NULL, print_thread, pJunqi) != 0) {
 		fprintf(stderr, "[print] pthread_create failed\n");
 		msg_queue_destroy(pJunqi->print_qid);
 		pJunqi->print_qid = NULL;
 		return 0;
 	}
+	pthread_detach(tidp);
 	return tidp;
 }

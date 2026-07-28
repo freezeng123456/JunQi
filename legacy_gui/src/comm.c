@@ -6,8 +6,11 @@
  */
 
 #include "comm.h"
+#include <errno.h>
 #include <pthread.h>
+#include <string.h>
 #include "junqi.h"
+#include "board.h"
 #include "rule.h"
 
 // Definition of aMagic (declared extern in junqi.h)
@@ -152,9 +155,16 @@ void SendEvent(Junqi* pJunqi, int iDir, u8 event)
 	SendData(pJunqi, &header, &data, 4);
 }
 
-void DealRecData(Junqi* pJunqi, u8 *data)
+void DealRecData(Junqi* pJunqi, u8 *data, size_t len)
 {
 	CommHeader *pHead;
+	size_t payload_len;
+
+	if (pJunqi == NULL || data == NULL || len < sizeof(CommHeader))
+	{
+		log_b("drop short packet: %zu bytes", len);
+		return;
+	}
 	pHead = (CommHeader *)data;
 	BoardChess *pSrc, *pDst;
 	BoardPoint p1,p2;
@@ -163,7 +173,47 @@ void DealRecData(Junqi* pJunqi, u8 *data)
 
 	if( memcmp(pHead->aMagic, aMagic, 4)!=0 )
 	{
+		log_b("drop packet with invalid magic");
 		return;
+	}
+	if (pHead->iDir > LEFT)
+	{
+		log_b("drop packet with invalid seat: %u", pHead->iDir);
+		return;
+	}
+
+	payload_len = len - sizeof(CommHeader);
+	switch (pHead->eFun)
+	{
+	case COMM_MOVE:
+		if (payload_len < 4)
+			goto malformed;
+		{
+			u8 *move = (u8 *)&pHead[1];
+			if (move[0] >= 17 || move[1] >= 17 ||
+					move[2] >= 17 || move[3] >= 17)
+				goto malformed;
+		}
+		break;
+	case COMM_EVNET:
+		if (payload_len < 1)
+			goto malformed;
+		break;
+	case COMM_LINEUP:
+		if (payload_len < 30)
+			goto malformed;
+		{
+			size_t i;
+			u8 *lineup = (u8 *)&pHead[1];
+			for (i = 0; i < 30; i++)
+			{
+				if (lineup[i] > GONGB)
+					goto malformed;
+			}
+		}
+		break;
+	default:
+		break;
 	}
 
 	//复盘的时候引擎发过来的行棋不要处理
@@ -201,10 +251,10 @@ void DealRecData(Junqi* pJunqi, u8 *data)
 		break;
 	case COMM_MOVE:
 		data = (u8*)&pHead[1];
-		p1.x = data[0]%17;
-		p1.y = data[1]%17;
-		p2.x = data[2]%17;
-		p2.y = data[3]%17;
+		p1.x = data[0];
+		p1.y = data[1];
+		p2.x = data[2];
+		p2.y = data[3];
 		if( pJunqi->bStart && pJunqi->eTurn==pHead->iDir
 #ifdef NOT_DEBUG2
 				&& pHead->iDir%2==1
@@ -315,6 +365,10 @@ void DealRecData(Junqi* pJunqi, u8 *data)
 	default:
 		break;
 	}
+	return;
+
+malformed:
+	log_b("drop malformed packet: function=%u length=%zu", pHead->eFun, len);
 
 }
 
@@ -325,17 +379,18 @@ void *comm_thread(void *arg)
 	int socket_fd;
 	struct sockaddr_in addr,local;
 	struct sockaddr_in addr1;
-	size_t recvbytes = 0;
+	ssize_t recvbytes;
 	u8 buf[200]={0};
 	u8 tmp_buf[200]={0};
 
 	socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
 	if (socket_fd < 0)
 	{
-		printf("Create Socket Failed!\n");
-		pthread_detach(pthread_self());
+		log_b("create UDP socket failed: %s", strerror(errno));
+		return NULL;
 	}
 
+	memset(&local, 0, sizeof(local));
 	local.sin_family = AF_INET;
 	local.sin_addr.s_addr=INADDR_ANY;
 	local.sin_port = htons(1234);
@@ -344,11 +399,12 @@ void *comm_thread(void *arg)
 
 	if(bind(socket_fd, (struct sockaddr *)&local, sizeof(struct sockaddr) )<0)
 	{
-		printf("Bind Error!\n");
-		pthread_detach(pthread_self());
+		log_b("bind UDP port %d failed: %s", LOCAL_PORT, strerror(errno));
+		close(socket_fd);
         return NULL;
 	}
 
+	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
 	addr.sin_port = htons(DST_PORT);
@@ -367,17 +423,30 @@ void *comm_thread(void *arg)
 
 	while(1)
 	{
-		recvbytes=recvfrom(socket_fd, buf, 200, 0,NULL ,NULL);
+		recvbytes=recvfrom(socket_fd, buf, sizeof(buf), 0,NULL ,NULL);
+		if (recvbytes < 0)
+		{
+			if (errno != EINTR)
+				log_b("UDP receive failed: %s", strerror(errno));
+			continue;
+		}
+		if ((size_t)recvbytes < sizeof(CommHeader))
+		{
+			log_b("drop short UDP packet: %zd bytes", recvbytes);
+			continue;
+		}
 
 		pthread_mutex_lock(&pJunqi->mutex);
-		memcpy(tmp_buf,buf,recvbytes);
+		memcpy(tmp_buf,buf,(size_t)recvbytes);
 		pJunqi->pCommData = tmp_buf;
+		pJunqi->commDataLen = (size_t)recvbytes;
 		//pthread_mutex_unlock(&pJunqi->mutex);
-		g_idle_add((GSourceFunc)pro_comm_msg, pJunqi);
+		if (g_idle_add((GSourceFunc)pro_comm_msg, pJunqi) == 0)
+			pthread_mutex_unlock(&pJunqi->mutex);
 
 	}
 
-	pthread_detach(pthread_self());
+	close(socket_fd);
 	return NULL;
 
 }
@@ -388,7 +457,7 @@ gboolean pro_comm_msg(gpointer data)
 
 	//pthread_mutex_lock(&pJunqi->mutex);
 #ifdef NOT_DEBUG2
-	DealRecData(pJunqi, pJunqi->pCommData);
+	DealRecData(pJunqi, pJunqi->pCommData, pJunqi->commDataLen);
 #else
 	CommHeader *pHead;
 	pHead = (CommHeader *)pJunqi->pCommData;
@@ -404,7 +473,7 @@ gboolean pro_comm_msg(gpointer data)
 		pJunqi->addr = pJunqi->addr_tmp[1];
 	}
 	//log_b("dir %d",pHead->iDir);
-	DealRecData(pJunqi, pJunqi->pCommData);
+	DealRecData(pJunqi, pJunqi->pCommData, pJunqi->commDataLen);
 
 
 #endif
@@ -416,7 +485,13 @@ gboolean pro_comm_msg(gpointer data)
 void CreatCommThread(Junqi* pJunqi)
 {
     pthread_t tidp;
-    pthread_create(&tidp,NULL,(void*)comm_thread,pJunqi);
+    if (pthread_create(&tidp, NULL, comm_thread, pJunqi) != 0)
+    {
+		log_b("failed to start communication thread");
+		ShowDialogMessage(pJunqi, "无法启动通信线程", 0);
+		return;
+    }
+    pthread_detach(tidp);
 
 //    pthread_t tidp1;
 //    pthread_create(&tidp1,NULL,(void*)comm_thread1,pJunqi);

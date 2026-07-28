@@ -109,6 +109,8 @@ int main(int argc, char *argv[])
 	install_signal_handlers();
 
 	pJunqi = JunqiOpen();
+	if (pJunqi == NULL)
+		return EXIT_FAILURE;
 
 	if (opt_seat >= 0 && opt_seat < 4) {
 		pJunqi->iEngineDir = (u8)opt_seat;
@@ -147,12 +149,14 @@ int main(int argc, char *argv[])
 		printf("[main] RNG seed = %u (deterministic)\n", (unsigned int)opt_seed);
 	}
 
+	if (CreatEngineThread(pJunqi) == 0)
+		return EXIT_FAILURE;
+	(void)CreatePrintThread(pJunqi);
 	t1 = CreatCommThread(pJunqi);
-	CreatEngineThread(pJunqi);
-	CreatePrintThread(pJunqi);
+	if (t1 == 0)
+		return EXIT_FAILURE;
 
 	pthread_join(t1, NULL);
 
 	return 0;
 }
-

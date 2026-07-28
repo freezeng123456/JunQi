@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include "junqi.h"
@@ -21,15 +22,29 @@ static const u8 aLineupBuf[] = {
 int OsRead(int fd, void *zBuf, int iAmt, long iOfst)
 {
   off_t ofst;
-  int nRead;
+  int total = 0;
 
+  if(zBuf == NULL || iAmt < 0)
+    return -1;
   ofst = lseek(fd, iOfst, SEEK_SET);
   if( ofst!=iOfst ){
-    return 0;
+    return -1;
   }
-  nRead = read(fd, zBuf, iAmt);
+  while(total < iAmt)
+  {
+    ssize_t nRead = read(fd, (u8 *)zBuf + total, (size_t)(iAmt - total));
+    if(nRead == 0)
+      break;
+    if(nRead < 0)
+    {
+      if(errno == EINTR)
+        continue;
+      return total > 0 ? total : -1;
+    }
+    total += (int)nRead;
+  }
 
-  return nRead;
+  return total;
 }
 
 int OsWrite(
@@ -39,15 +54,29 @@ int OsWrite(
   long iOfst
 ){
   off_t ofst;
-  int nWrite;
+  int total = 0;
 
+  if(zBuf == NULL || iAmt < 0)
+    return -1;
   ofst = lseek(fd, iOfst, SEEK_SET);
   if( ofst!=iOfst ){
-    return 0;
+    return -1;
   }
-  nWrite = write(fd, zBuf, iAmt);
+  while(total < iAmt)
+  {
+    ssize_t nWrite = write(fd, (u8 *)zBuf + total, (size_t)(iAmt - total));
+    if(nWrite < 0)
+    {
+      if(errno == EINTR)
+        continue;
+      return total > 0 ? total : -1;
+    }
+    if(nWrite == 0)
+      break;
+    total += (int)nWrite;
+  }
 
-  return nWrite;
+  return total;
 }
 
 void LoadChess(Junqi *pJunqi, enum ChessColor color)
@@ -1306,6 +1335,8 @@ void CreatBoardChess(GtkWidget *window, Junqi *pJunqi)
 Junqi *JunqiOpen(void)
 {
 	Junqi *pJunqi = (Junqi*)malloc(sizeof(Junqi));
+	if(pJunqi == NULL)
+		return NULL;
 	memset(pJunqi, 0, sizeof(Junqi));
 	pthread_mutex_init(&pJunqi->mutex, NULL);
 	AddDataToReplay(pJunqi, aMagic, 4);
@@ -1322,6 +1353,36 @@ void ConvertFilename(char *zName)
 		}
 		zName++;
 	}
+}
+
+static int ValidateLineupBytes(const u8 *chess)
+{
+	static const int expected_counts[GONGB + 1] = {
+		5, 0, 1, 3, 2, 1, 1, 2, 2, 2, 2, 3, 3, 3
+	};
+	static const int camp_slots[] = {6, 8, 12, 16, 18};
+	int counts[GONGB + 1] = {0};
+	int i;
+
+	if(chess == NULL)
+		return 0;
+	for(i = 0; i < 30; i++)
+	{
+		if(chess[i] > GONGB)
+			return 0;
+		counts[chess[i]]++;
+	}
+	for(i = 0; i <= GONGB; i++)
+	{
+		if(counts[i] != expected_counts[i])
+			return 0;
+	}
+	for(i = 0; i < (int)(sizeof(camp_slots) / sizeof(camp_slots[0])); i++)
+	{
+		if(chess[camp_slots[i]] != NONE)
+			return 0;
+	}
+	return 1;
 }
 
 void LoadLineup(Junqi *pJunqi, int iDir, u8 *chess)
@@ -1392,6 +1453,11 @@ void get_lineup_cb (GtkNativeDialog *dialog,
 			ShowDialogMessage(pJunqi, "不是有效的布阵文件", 0);
 			goto lineup_done;
 		}
+		if(!ValidateLineupBytes(pLineup->chess))
+		{
+			ShowDialogMessage(pJunqi, "布阵文件中的棋子数量或位置无效", 0);
+			goto lineup_done;
+		}
 
 		iDir = pJunqi->selectDir;
 
@@ -1447,12 +1513,21 @@ void OpenReplay(GtkNativeDialog *dialog,
 		if( bytes_read >= MOVE_OFFSET && memcmp(aBuf, aMagic, 4)==0 )
 		{
 			int max_step = 0;
+			int lineup_dir;
 			memcpy(&max_step, &aBuf[4], sizeof(max_step));
 			if (max_step < 0 || max_step > (bytes_read - MOVE_OFFSET) / 4 ||
 					max_step > (PAGE_SIZE - MOVE_OFFSET) / 4)
 			{
 				ShowDialogMessage(pJunqi, "复盘步数或文件长度无效", 0);
 				goto replay_done;
+			}
+			for(lineup_dir = 0; lineup_dir < 4; lineup_dir++)
+			{
+				if(!ValidateLineupBytes(&aBuf[8 + 30 * lineup_dir]))
+				{
+					ShowDialogMessage(pJunqi, "复盘中的布阵数据无效", 0);
+					goto replay_done;
+				}
 			}
 			memset(pJunqi->aReplay, 0, sizeof(pJunqi->aReplay));
 			memcpy(pJunqi->aReplay, aBuf, (size_t)bytes_read);
@@ -1485,11 +1560,23 @@ void OpenReplay(GtkNativeDialog *dialog,
 void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 {
 	int i;
+	int max_step;
 	BoardChess *pSrc, *pDst;
 	BoardPoint p1,p2;
 	static int preStep = 0;
 	u8 event;
 
+	if(pJunqi == NULL)
+		return;
+	memcpy(&max_step, &pJunqi->aReplay[4], sizeof(max_step));
+	if(max_step < 0 || max_step > (PAGE_SIZE - MOVE_OFFSET) / 4 ||
+			pJunqi->iRpStep < 0 || pJunqi->iRpStep > max_step)
+	{
+		log_b("invalid replay cursor: step=%d max=%d", pJunqi->iRpStep, max_step);
+		pJunqi->bStop = 1;
+		ShowDialogMessage(pJunqi, "复盘步数无效，已停止播放", 0);
+		return;
+	}
 
     if( !next_flag || pJunqi->bResetFlag )
     {
@@ -1509,7 +1596,10 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 			if (iDir < HOME || iDir > LEFT)
 			{
 				log_b("invalid replay event direction at step %d: %d", i, iDir);
-				continue;
+				pJunqi->bStop = 1;
+				preStep = i;
+				ShowDialogMessage(pJunqi, "复盘事件方向无效，已停止播放", 0);
+				return;
 			}
 			pJunqi->eTurn = iDir;
 			if( event==SURRENDER_EVENT )
@@ -1541,18 +1631,36 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 		p2.x = *(u8*)(pJunqi->aReplay+MOVE_OFFSET+4*i+2);
 		p2.y = *(u8*)(pJunqi->aReplay+MOVE_OFFSET+4*i+3);
 
-		assert( p1.x>=0 && p1.x<17 );
-		assert( p1.y>=0 && p1.y<17 );
-		assert( p2.y>=0 && p2.y<17 );
+		if(p1.x < 0 || p1.x >= 17 || p1.y < 0 || p1.y >= 17 ||
+				p2.x < 0 || p2.x >= 17 || p2.y < 0 || p2.y >= 17)
+		{
+			log_b("invalid replay coordinates at step %d: %d,%d -> %d,%d",
+					i, p1.x, p1.y, p2.x, p2.y);
+			pJunqi->bStop = 1;
+			preStep = i;
+			ShowDialogMessage(pJunqi, "复盘坐标无效，已停止播放", 0);
+			return;
+		}
 		if (pJunqi->aBoard[p1.x][p1.y].pAdjList == NULL ||
 				pJunqi->aBoard[p2.x][p2.y].pAdjList == NULL)
 		{
 			log_b("replay points to an empty board cell at step %d", i);
-			continue;
+			pJunqi->bStop = 1;
+			preStep = i;
+			ShowDialogMessage(pJunqi, "复盘包含无效棋盘位置，已停止播放", 0);
+			return;
 		}
-		assert( p2.x>=0 && p2.x<17 );
 		pSrc = pJunqi->aBoard[p1.x][p1.y].pAdjList->pChess;
 		pDst = pJunqi->aBoard[p2.x][p2.y].pAdjList->pChess;
+		if(pSrc == NULL || pDst == NULL || pSrc->pLineup == NULL ||
+				pSrc->type == NONE)
+		{
+			log_b("replay references a missing piece at step %d", i);
+			pJunqi->bStop = 1;
+			preStep = i;
+			ShowDialogMessage(pJunqi, "复盘棋子数据无效，已停止播放", 0);
+			return;
+		}
 		//设置当前下棋方
 		pJunqi->eTurn = pSrc->pLineup->iDir;
 
@@ -1574,7 +1682,10 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 			log_b("err %d %d %d %d %d",i,pSrc->point.x,pSrc->point.y,
 					pDst->point.x,pDst->point.y);
 			log_b("move %d %d %d %d",p1.x,p1.y,p2.x,p2.y);
-			assert(0);
+			pJunqi->bStop = 1;
+			preStep = i;
+			ShowDialogMessage(pJunqi, "复盘包含非法行棋，已停止播放", 0);
+			return;
 		}
 	}
 	preStep = pJunqi->iRpStep;

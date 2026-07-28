@@ -158,11 +158,15 @@ gboolean dialog_event(gpointer data)
 void ShowDialogMessage(Junqi *pJunqi, char *str, int num)
 {
 	DialogArg *pArg = (DialogArg*)malloc(sizeof(DialogArg));
+	if(pArg == NULL || pJunqi == NULL || str == NULL)
+	{
+		free(pArg);
+		return;
+	}
 	memset(pArg, 0, sizeof(DialogArg));
 
 	pArg->pJunqi = pJunqi;
-	if(strlen(str)<100)
-		strcpy(pArg->str,str);
+	snprintf(pArg->str, sizeof(pArg->str), "%s", str);
 	pArg->num = num;
     //把对话框的显示放在定时器里处理，否则这里会被阻塞，那么时间就会停顿
 	g_timeout_add(100, (GSourceFunc)dialog_event, pArg);
@@ -660,7 +664,7 @@ static void  surrender_cb(GtkWidget *button , gpointer data)
 	int iDir;
 
 	iDir = GetButtonDir(zDir);
-	if( iDir!=pJunqi->eTurn )
+	if( iDir!=(int)pJunqi->eTurn )
 	{
 		return;
 	}
@@ -704,7 +708,7 @@ static void  jump_cb(GtkWidget *button , gpointer data)
 	char *zDir = (char*)data;
 	int iDir;
 	iDir = GetButtonDir(zDir);
-	if( iDir==pJunqi->eTurn )
+	if( iDir==(int)pJunqi->eTurn )
 	{
 		AddEventToReplay(pJunqi, JUMP_EVENT, iDir);
 		IncJumpCnt(pJunqi, iDir);
@@ -910,7 +914,7 @@ void ShowTime( Junqi *pJunqi, int bClear )
 		tick = 30;
 		return;
 	}
-	if( now_dir!=pJunqi->eTurn )
+	if( now_dir!=(int)pJunqi->eTurn )
 	{
 		now_dir = pJunqi->eTurn;
 		tick = 30;
@@ -1054,6 +1058,21 @@ void *sound_thread(void *arg)
 	return NULL;
 }
 
+static void stop_audio_on_destroy(GtkWidget *widget, gpointer data)
+{
+	Junqi *pJunqi = (Junqi *)data;
+	(void)widget;
+	if(pJunqi != NULL)
+	{
+		pJunqi->bMute = 1;
+		pJunqi->sound_type = 0;
+		pJunqi->sound_replay = 0;
+		pJunqi->szPathForSound = 0;
+		pJunqi->szPath = 0;
+	}
+	StopActiveSound();
+}
+
 void SendSoundEvent(Junqi *pJunqi, enum CompareType type)
 {
 	if(pJunqi->bMute)
@@ -1137,12 +1156,11 @@ void CreatAPPIcon(Junqi *pJunqi)
 
 void SetTimeStr(char *label_str, int time)
 {
-	char str[100] = "<span foreground=\"#FFFF00\" font='16'>";
-	int szStr;
-	memcpy(label_str,str,strlen(str));
-	sprintf(label_str+strlen(str),"%02d",time);
-	szStr = strlen(label_str);
-	memcpy(label_str+szStr,"</span>",8);
+	snprintf(
+			label_str,
+			100,
+			"<span foreground=\"#FFFF00\" font='16'>%02d</span>",
+			time);
 }
 
 void CreatStepSlider(Junqi *pJunqi)
@@ -1202,9 +1220,16 @@ void OpenBoard(GtkWidget *window)
 	GtkWidget* draw_area = gtk_drawing_area_new();
 	GtkWidget *vbox, *hbox, *vbox2;
 	Junqi *pJunqi = JunqiOpen();
+	if(pJunqi == NULL)
+	{
+		g_warning("JunQi initialization failed");
+		gtk_main_quit();
+		return;
+	}
 	LoadConfig(pJunqi);
 	pJunqi->window = window;
 	gJunqi = pJunqi;
+	g_signal_connect(window, "destroy", G_CALLBACK(stop_audio_on_destroy), pJunqi);
     hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_container_add (GTK_CONTAINER (window), hbox);
     vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -1235,7 +1260,15 @@ void OpenBoard(GtkWidget *window)
         g_timeout_add(1000, (GSourceFunc)time_event, pJunqi);
     }
     pthread_t tidp;
-    pthread_create(&tidp,NULL,(void*)sound_thread,pJunqi);
+    if(pthread_create(&tidp, NULL, sound_thread, pJunqi) != 0)
+    {
+		g_warning("unable to start sound thread; continuing without audio");
+		pJunqi->bMute = 1;
+    }
+    else
+    {
+		pthread_detach(tidp);
+    }
     CreatStepSlider(pJunqi);
     CreatBoardChess(window, pJunqi);
     CreatCommThread(pJunqi);

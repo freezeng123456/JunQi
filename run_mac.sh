@@ -26,6 +26,9 @@ cleanup() {
     for pid in "${ENGINE_PIDS[@]}"; do
         kill "$pid" 2>/dev/null || true
     done
+    for pid in "${ENGINE_PIDS[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
 }
 trap cleanup EXIT
 
@@ -35,6 +38,12 @@ ENGINE_PIDS+=("$!")
 ENGINE_PIDS+=("$!")
 
 sleep 0.5
+for pid in "${ENGINE_PIDS[@]}"; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "Error: a JunQi engine failed to start; check whether UDP ports 5678/6678 are in use." >&2
+        exit 1
+    fi
+done
 echo "Starting GTK client. Close the window to stop both engines."
 cd "$GUI_DIR"
 ./JunQiGUI

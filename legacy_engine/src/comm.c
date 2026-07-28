@@ -28,10 +28,19 @@ void SendData(Junqi* pJunqi, CommHeader *header, void *data, int len)
 	u8 buf[100];
 	int length = 0;
 
+	if (pJunqi == NULL || header == NULL || len < 0 ||
+			len > (int)(sizeof(buf) - sizeof(CommHeader)) ||
+			(len > 0 && data == NULL))
+	{
+		LOG_ERROR(LOG_CAT_COMM, "refusing invalid outgoing packet: len=%d", len);
+		return;
+	}
+
 	length += sizeof(CommHeader);
 	memcpy(buf, header, length);
 
-	memcpy(buf+length, data, len);
+	if (len > 0)
+		memcpy(buf+length, data, (size_t)len);
 	length += len;
 
 	sendto(pJunqi->socket_fd, buf, length, 0,
@@ -85,6 +94,13 @@ void SendEvent(Junqi* pJunqi, int iDir, u8 event)
 void DealRecData(Junqi* pJunqi, u8 *data, size_t len)
 {
 	CommHeader *pHead;
+	size_t payload_len;
+
+	if (pJunqi == NULL || data == NULL || len < sizeof(CommHeader))
+	{
+		LOG_WARN(LOG_CAT_COMM, "dropping short packet: len=%zu", len);
+		return;
+	}
 	pHead = (CommHeader *)data;
 	/* isBoardInit used to be a function-scope static, which meant
 	 * a single process could only ever initialise its board once -
@@ -96,9 +112,78 @@ void DealRecData(Junqi* pJunqi, u8 *data, size_t len)
 
 	if( memcmp(pHead->aMagic, aMagic, 4)!=0 )
 	{
+		LOG_WARN(LOG_CAT_COMM, "dropping packet with invalid magic");
+		return;
+	}
+	if (pHead->iDir > LEFT)
+	{
+		LOG_WARN(LOG_CAT_COMM, "dropping packet with invalid seat=%u", pHead->iDir);
 		return;
 	}
 
+	payload_len = len - sizeof(CommHeader);
+	switch (pHead->eFun)
+	{
+	case COMM_INIT:
+		/* Four ownership flags followed by 30 bytes for each selected seat. */
+		if (payload_len < 4)
+			goto malformed;
+		{
+			size_t selected = 0;
+			size_t i;
+			u8 *payload = (u8 *)&pHead[1];
+			for (i = 0; i < 4; i++)
+			{
+				if (payload[i] > 1)
+					goto malformed;
+				selected += payload[i];
+			}
+			if (selected > 2 || payload_len < 4 + selected * 30)
+				goto malformed;
+			{
+				size_t piece_count = selected * 30;
+				for (i = 0; i < piece_count; i++)
+				{
+					if (payload[4 + i] > GONGB)
+						goto malformed;
+				}
+			}
+		}
+		break;
+	case COMM_LINEUP:
+		if (payload_len < 30)
+			goto malformed;
+		{
+			size_t i;
+			u8 *payload = (u8 *)&pHead[1];
+			for (i = 0; i < 30; i++)
+			{
+				if (payload[i] > GONGB)
+					goto malformed;
+			}
+		}
+		break;
+	case COMM_MOVE:
+		if (payload_len < sizeof(MoveResultData))
+			goto malformed;
+		{
+			MoveResultData *move = (MoveResultData *)&pHead[1];
+			if (move->src[0] >= 17 || move->src[1] >= 17 ||
+					move->dst[0] >= 17 || move->dst[1] >= 17 ||
+					move->result < MOVE || move->result > KILLED)
+				goto malformed;
+		}
+		break;
+	case COMM_EVNET:
+		if (payload_len < 1)
+			goto malformed;
+		if (*((u8 *)&pHead[1]) != JUMP_EVENT &&
+				*((u8 *)&pHead[1]) != SURRENDER_EVENT)
+			goto malformed;
+		break;
+	default:
+		break;
+	}
 
 	switch(pHead->eFun)
 	{
@@ -149,6 +234,13 @@ void DealRecData(Junqi* pJunqi, u8 *data, size_t len)
 		pthread_mutex_lock(&pJunqi->mutex);
 		memset(pJunqi->Lineup,0,sizeof(pJunqi->Lineup));
 		pJunqi->pEngine = OpenEngine(pJunqi);
+		if (pJunqi->pEngine == NULL)
+		{
+			pthread_mutex_unlock(&pJunqi->mutex);
+			LOG_ERROR(LOG_CAT_CORE, "cannot initialize board without engine");
+			SendHeader(pJunqi, pHead->iDir, COMM_ERROR);
+			break;
+		}
 		InitLineup(pJunqi, data, pJunqi->isBoardInit);
 		InitChess(pJunqi, data);
 		pthread_mutex_unlock(&pJunqi->mutex);
@@ -182,6 +274,11 @@ void DealRecData(Junqi* pJunqi, u8 *data, size_t len)
 		LOG_WARN(LOG_CAT_COMM, "recv unknown eFun=%d from dir=%d", pHead->eFun, pHead->iDir);
 		break;
 	}
+	return;
+
+malformed:
+	LOG_WARN(LOG_CAT_COMM, "dropping malformed packet: fn=%u len=%zu",
+	         pHead->eFun, len);
 }
 
 void *comm_thread(void *arg)
@@ -198,7 +295,6 @@ void *comm_thread(void *arg)
 	if (socket_fd < 0)
 	{
 		LOG_ERROR(LOG_CAT_COMM, "Create Socket Failed: errno=%d", errno);
-		pthread_detach(pthread_self());
 		return NULL;
 	}
 
@@ -221,7 +317,6 @@ void *comm_thread(void *arg)
 	{
 		LOG_ERROR(LOG_CAT_COMM, "Bind to port %d failed: errno=%d", local_port, errno);
 		close(socket_fd);  /* M4: was leaked before */
-		pthread_detach(pthread_self());
         return NULL;
 	}
 
@@ -253,13 +348,16 @@ void *comm_thread(void *arg)
 
 	/* Unreachable in current design; retained for completeness. */
 	close(socket_fd);
-	pthread_detach(pthread_self());
 	return NULL;
 }
 
 pthread_t CreateCommThread(Junqi* pJunqi)
 {
-    pthread_t tidp;
-    pthread_create(&tidp,NULL,(void*)comm_thread,pJunqi);
+    pthread_t tidp = 0;
+    if (pthread_create(&tidp, NULL, comm_thread, pJunqi) != 0)
+    {
+        LOG_ERROR(LOG_CAT_COMM, "CreateCommThread: pthread_create failed");
+        return 0;
+    }
     return tidp;
 }

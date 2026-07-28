@@ -67,9 +67,14 @@ void ProMoveEvent(Junqi* pJunqi, u8 iDir, u8 event)
 {
 	if( event==JUMP_EVENT )
 	{
+		if(iDir != pJunqi->eTurn)
+		{
+			LOG_WARN(LOG_CAT_CORE, "ignoring jump from seat=%d while turn=%d",
+			         iDir, pJunqi->eTurn);
+			return;
+		}
 		LOG_DEBUG(LOG_CAT_CORE, "player %d jumps (jump_cnt=%d)",
 		          iDir, pJunqi->aInfo[iDir].cntJump + 1);
-		assert( iDir==pJunqi->eTurn );
 		IncJumpCnt(pJunqi, iDir);
 		ChessTurn(pJunqi);
 	}
@@ -326,8 +331,13 @@ void ProRecMsg(Junqi* pJunqi, u8 *data)
 		break;
 	case COMM_MOVE:
 		pJunqi->preTurn = pJunqi->eTurn;
-		//log_c("turn %d %d",pHead->iDir,pJunqi->eTurn);
-		assert( pHead->iDir==pJunqi->eTurn );
+		if(pHead->iDir != pJunqi->eTurn)
+		{
+			LOG_WARN(LOG_CAT_COMM, "ignoring move from seat=%d while turn=%d",
+			         pHead->iDir, pJunqi->eTurn);
+			SendHeader(pJunqi, pHead->iDir, COMM_ERROR);
+			return;
+		}
 		data = (u8*)&pHead[1];
 
 		ProMoveResult(pJunqi, pHead->iDir, data);
@@ -351,6 +361,11 @@ void ProRecMsg(Junqi* pJunqi, u8 *data)
 		break;
 	}
 
+	if(pEngine == NULL)
+	{
+		LOG_WARN(LOG_CAT_CORE, "message received before engine initialization");
+		return;
+	}
 	if( !pJunqi->bStart || pJunqi->bStop )
 	{
 		return;
@@ -462,7 +477,6 @@ void *engine_thread(void *arg)
         }
     }
 
-	pthread_detach(pthread_self());
 	return NULL;
 }
 
@@ -481,11 +495,12 @@ pthread_t CreateEngineThread(Junqi* pJunqi)
         return 0;
     }
 
-    if (pthread_create(&tidp, NULL, (void*)engine_thread, pJunqi) != 0) {
+    if (pthread_create(&tidp, NULL, engine_thread, pJunqi) != 0) {
         LOG_ERROR(LOG_CAT_CORE, "CreateEngineThread: pthread_create failed");
         msg_queue_destroy(pJunqi->qid);
         pJunqi->qid = NULL;
         return 0;
     }
+    pthread_detach(tidp);
     return tidp;
 }

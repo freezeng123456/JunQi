@@ -53,4 +53,6 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install --yes libgtk-3-dev
       - run: make -C legacy_engine PROFILE=release
-      - run: make -C legacy_gui
+      - run: python tools/test_legacy_protocol.py legacy_engine/bin/JunQiEngine
+      - run: make -C legacy_gui PROFILE=release
+      - run: make legacy-sanitize

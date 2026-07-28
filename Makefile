@@ -12,6 +12,11 @@ legacy-engine:
 legacy-gui:
 	$(MAKE) -C legacy_gui
 
+legacy-sanitize:
+	$(MAKE) -C legacy_engine clean sanitize
+	python3 tools/test_legacy_protocol.py legacy_engine/bin/JunQiEngine
+	$(MAKE) -C legacy_gui clean sanitize
+
 test:
 	python3 run_tests.py --profile core
 
@@ -33,4 +38,4 @@ check: lint-critical lint-core typecheck test
 run:
 	./run_mac.sh
 
-.PHONY: all clean legacy-engine legacy-gui test test-rl lint-critical lint-core typecheck check run
+.PHONY: all clean legacy-engine legacy-gui legacy-sanitize test test-rl lint-critical lint-core typecheck check run
