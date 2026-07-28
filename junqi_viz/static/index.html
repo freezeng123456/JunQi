@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>四国军棋复盘</title>
+    <link rel="stylesheet" href="/assets/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">JUNQI REPLAY</p>
+        <h1>四国军棋复盘</h1>
+      </div>
+      <div class="file-meta">
+        <strong id="filename">读取中…</strong>
+        <span id="replay-kind">—</span>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="board-panel" aria-label="棋盘">
+        <div id="board" class="board">
+          <div id="track-layer" class="track-layer"></div>
+          <div id="cell-layer" class="cell-layer"></div>
+          <div id="piece-layer" class="piece-layer"></div>
+          <div id="arrow" class="move-arrow" hidden></div>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="step-heading">
+          <div>
+            <p class="eyebrow">CURRENT FRAME</p>
+            <h2>第 <span id="step-number">0</span> 步</h2>
+          </div>
+          <span id="turn-badge" class="seat-badge">—</span>
+        </div>
+
+        <div class="metric-grid">
+          <article><span>事件</span><strong id="event">开局</strong></article>
+          <article><span>已阵亡</span><strong id="dead-count">0</strong></article>
+          <article><span>Value</span><strong id="value">—</strong></article>
+          <article><span>动作来源</span><strong id="action-source">—</strong></article>
+        </div>
+
+        <section class="panel-block">
+          <div class="section-title">
+            <h3>策略候选</h3>
+            <span>Top‑K</span>
+          </div>
+          <ol id="policy-list" class="policy-list">
+            <li class="empty">普通对局没有策略数据</li>
+          </ol>
+        </section>
+
+        <section class="panel-block">
+          <div class="section-title"><h3>存活棋子</h3></div>
+          <div id="alive-list" class="alive-list"></div>
+        </section>
+
+        <label class="toggle">
+          <input id="label-toggle" type="checkbox" checked>
+          <span>显示棋子文字</span>
+        </label>
+      </aside>
+    </main>
+
+    <footer class="timeline">
+      <button id="first" type="button" aria-label="回到开局">|‹</button>
+      <button id="previous" type="button" aria-label="上一步">‹</button>
+      <button id="play" class="play" type="button" aria-label="播放">播放</button>
+      <button id="next" type="button" aria-label="下一步">›</button>
+      <button id="last" type="button" aria-label="跳到终局">›|</button>
+      <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="复盘进度">
+      <output id="progress">0 / 0</output>
+      <select id="speed" aria-label="播放速度">
+        <option value="1000">1×</option>
+        <option value="500">2×</option>
+        <option value="250">4×</option>
+      </select>
+    </footer>
+
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>
