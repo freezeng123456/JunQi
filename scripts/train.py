@@ -43,11 +43,16 @@ import time
 import traceback
 import yaml
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 import torch
 import torch.distributed as dist
+
+if TYPE_CHECKING:
+    from junqi_rl.gpu_rollout import GpuRollout
+    from junqi_rl.networks.belief_net import BeliefNetConfig
+    from junqi_rl.training.belief_ppo import BeliefPPOConfig
 
 
 # ---------------------------------------------------------------------------

@@ -1056,7 +1056,6 @@ class BatchedGameState:
         amortizes against the rail-BFS work the helper itself does.
         """
         from .move_gen import PieceRef
-        from .rules import Seat
         out: dict[tuple[int, int], PieceRef] = {}
         alive = self.alive[i]
         pos_x = self.pos_x[i]

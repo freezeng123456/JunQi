@@ -124,6 +124,8 @@ markers = [
   "slow: slow tests (> 1s); skip in default runs",
   "parity: tests that require a running legacy_engine process",
   "golden: tests driven by tests/golden/ JSON cases",
+  "torch: tests that require the optional PyTorch stack",
+  "cuda: tests that require the compiled junqi_cuda extension and an NVIDIA GPU",
 ]
 
 [tool.coverage.run]

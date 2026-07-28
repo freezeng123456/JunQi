@@ -37,6 +37,15 @@ venv/
 # Local work logs (terminal redirect targets to avoid pipe blocking)
 .junqi_tmp/
 
+# Local visual experiments and generated comparison assets.
+# Production client resources live under legacy_gui/res/.
+work/
+
+# One-shot local automation helpers must not be committed.  In particular,
+# never place credentials in a helper script.
+_do_*.sh
+_push*.sh
+
 # OS
 .DS_Store
 Thumbs.db

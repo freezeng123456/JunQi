@@ -42,9 +42,12 @@ observations (e.g. for league-of-opponents cross-play) can call
 from __future__ import annotations
 
 import random
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import torch
 
 try:
     import junqi_cuda as _cuda  # type: ignore[import]
@@ -100,14 +103,6 @@ class _CudaArrayInterfaceView:
             "data":    (int(ptr), False),  # read-write
             "version": 2,
         }
-
-
-def _pack_from_batched(b: BatchedGameState) -> dict[str, np.ndarray]:
-    """Flatten a BatchedGameState into the dict accepted by
-    ``DeviceGameStateBatch.copy_from_host``."""
-    N = b.num_envs
-    flat = lambda a: a.reshape(-1)
-    alv = flat(b.alive)
 
 
 def _build_reset_tables() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

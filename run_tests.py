@@ -1,96 +1,63 @@
-import sys, numpy as np, os
-os.chdir('/data/home/freezeng/data/workspace/JunQi')
-sys.path.insert(0, '.')
-from junqi_core.batched_state import BatchedGameState
-from junqi_core.state import GameState
-from junqi_core.setup import generate_random_setup
+#!/usr/bin/env python3
+"""Portable test entry point for local development and CI.
 
-def new_game():
-    return GameState.new_game(generate_random_setup())
+Examples:
 
-print("=" * 60)
-print("TEST 1: Legal action parity N=16")
-print("=" * 60)
-N = 16
-states = [new_game() for _ in range(N)]
-b = BatchedGameState.from_game_states(states)
-batch_ids = b.legal_action_ids_batch()
-ok = True
-for i, gs in enumerate(states):
-    expected = set(gs.legal_action_ids().tolist())
-    actual = set(batch_ids[i].tolist())
-    if actual != expected:
-        print(f'FAIL env {i}: expected {len(expected)} got {len(actual)}')
-        ok = False
-if ok:
-    print('PASS: legal action parity N=16')
+    python3 run_tests.py
+    python3 run_tests.py --profile rl
+    python3 run_tests.py --profile core -- -k replay -x
+"""
 
-print()
-print("=" * 60)
-print("TEST 2: step_matches_single_env")
-print("=" * 60)
-from junqi_core.board import NUM_CELLS
-from junqi_core.state import Action
+from __future__ import annotations
 
-N = 8
-states = [new_game() for _ in range(N)]
-b = BatchedGameState.from_game_states(states)
-action_ids = np.array([int(gs.legal_action_ids()[0]) for gs in states], dtype=np.int32)
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
 
-for i, gs in enumerate(states):
-    aid = int(action_ids[i])
-    src_flat = aid // NUM_CELLS
-    dst_flat = aid % NUM_CELLS
-    src = (src_flat % 17, src_flat // 17)
-    dst = (dst_flat % 17, dst_flat // 17)
-    gs.step_inplace(Action(seat=gs.turn, src=src, dst=dst))
 
-b.step_batch(action_ids)
+REPO_ROOT = Path(__file__).resolve().parent
 
-ok = True
-for i, gs in enumerate(states):
-    a1 = b.alive[i]; a2 = gs.alive
-    if not (a1 == a2).all():
-        print(f'FAIL env {i}: alive mismatch'); ok = False
-    p1 = b.pos_x[i]; p2 = gs.pos_x
-    if not (p1 == p2).all():
-        print(f'FAIL env {i}: pos_x mismatch'); ok = False
-if ok:
-    print('PASS: step_matches_single_env')
 
-print()
-print("=" * 60)
-print("TEST 3: Benchmark N=1024")
-print("=" * 60)
-import time
+def parse_args() -> tuple[argparse.Namespace, list[str]]:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--profile",
+        choices=("core", "rl"),
+        default="core",
+        help="core tolerates a missing Torch install; rl requires Torch",
+    )
+    parser.add_argument(
+        "--coverage",
+        action="store_true",
+        help="measure branch coverage for junqi_core",
+    )
+    return parser.parse_known_args()
 
-N = 1024
-TARGET = 50000
-states = [new_game() for _ in range(N)]
-b = BatchedGameState.from_game_states(states)
 
-# Warmup 20 steps
-for _ in range(20):
-    active_ids = b.legal_action_ids_batch()
-    action_ids = np.array([
-        int(ids[np.random.randint(len(ids))]) if len(ids) > 0 else 0
-        for ids in active_ids
-    ], dtype=np.int32)
-    b.step_batch(action_ids)
+def main() -> int:
+    args, pytest_args = parse_args()
+    if pytest_args and pytest_args[0] == "--":
+        pytest_args = pytest_args[1:]
 
-# Measure 200 steps
-t0 = time.perf_counter()
-for _ in range(200):
-    active_ids = b.legal_action_ids_batch()
-    action_ids = np.array([
-        int(ids[np.random.randint(len(ids))]) if len(ids) > 0 else 0
-        for ids in active_ids
-    ], dtype=np.int32)
-    b.step_batch(action_ids)
-elapsed = time.perf_counter() - t0
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    if args.profile == "rl":
+        env["JUNQI_REQUIRE_TORCH"] = "1"
 
-total_env_steps = N * 200
-throughput = total_env_steps / elapsed
-print(f'N={N}: {200} steps in {elapsed:.2f}s => {throughput:,.0f} env-steps/sec')
-print(f'Target: {TARGET:,}')
-print(f'PASS' if throughput >= TARGET else f'FAIL (need {TARGET - throughput:,.0f} more)')
+    command = [sys.executable, "-m", "pytest", "-q"]
+    if args.coverage:
+        command.extend(
+            [
+                "--cov=junqi_core",
+                "--cov-branch",
+                "--cov-report=term-missing",
+            ]
+        )
+    command.extend(pytest_args)
+    return subprocess.call(command, cwd=REPO_ROOT, env=env)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -34,6 +34,8 @@ Both operations are O(K) but performed entirely in NumPy (no Python loop).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from junqi_core.board import (
@@ -46,6 +48,9 @@ from junqi_core.board import (
 )
 from junqi_core.rotation import canonical_to_world, world_to_canonical
 from junqi_core.rules import ALL_SEATS, Seat
+
+if TYPE_CHECKING:
+    from junqi_rl.env import VectorJunqiEnv
 
 # ---------------------------------------------------------------------------
 # Compact action space constants
@@ -167,7 +172,7 @@ def batch_unrotate_action_ids(
 
 
 def build_legal_mask_batch(
-    env: "VectorJunqiEnv",  # type: ignore[name-defined]  # forward ref
+    env: "VectorJunqiEnv",
     current_seats: list[Seat],
 ) -> np.ndarray:
     """Fast legal-mask construction via compact cell indexing.

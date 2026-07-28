@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: Core / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python run_tests.py --profile core
+      - name: Block high-confidence static errors
+        run: >-
+          python -m ruff check junqi_core junqi_rl scripts tests
+          --select E9,F63,F7,F82,F811
+
+  rl-cpu:
+    name: RL / CPU
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[rl,dev]"
+      - run: python run_tests.py --profile rl -- -m "not slow"
+
+  legacy-build:
+    name: Legacy C / GTK build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update
+      - run: sudo apt-get install --yes libgtk-3-dev
+      - run: make -C legacy_engine PROFILE=release
+      - run: make -C legacy_gui
