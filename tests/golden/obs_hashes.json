@@ -4,7 +4,7 @@
     "steps": 0,
     "show_mode": "BRIGHT",
     "observer": "SOUTH",
-    "sha256": "00ba318ce23a7fc43eb8b815ae215ae910d26f38737c9029238c23253e974443",
+    "sha256": "691213b2b1d849f707f56a13cbc1338e80a5db7273ecba770825a375b728795a",
     "spatial_sums": {
       "piece_own": 25.0,
       "prob_teammate": 25.0,
@@ -34,7 +34,7 @@
     "steps": 0,
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
-    "sha256": "1d9a6f8a5451c84b9caddb1a4513e59d19dcfd4d498955d9ae4912300cb51bb8",
+    "sha256": "a705d757656d4b23c66ad81753c30d9524e791f957a0ab7fcad39358eca8b434",
     "spatial_sums": {
       "piece_own": 25.0,
       "prob_teammate": 25.0,
@@ -64,7 +64,7 @@
     "steps": 100,
     "show_mode": "BRIGHT",
     "observer": "SOUTH",
-    "sha256": "c75e12dd3f4477e0e694bd11b321fee846edb2965456464526b1193a8544df05",
+    "sha256": "47a06dcf02bb9b14dc11bb6aa4492bbb312b0e7f55b4b608fc9dcf2a03268a6e",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 21.0,
@@ -94,7 +94,7 @@
     "steps": 100,
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
-    "sha256": "0977664fb83df320e74445011baa14fdfe0b9fe6af9c8d6dd657a32447ae420a",
+    "sha256": "3905ba1d76c411d0e10f25d57eeadd3a912a0b9414947b681bead4a72aa02650",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 21.0,
@@ -124,7 +124,7 @@
     "steps": 0,
     "show_mode": "BRIGHT",
     "observer": "SOUTH",
-    "sha256": "4c05cafb7d537470f4504c444f354b9cfd9414af66d717dc60b3b16e590e60b8",
+    "sha256": "cc4a5ecc2eef4d4a61c81f94089a11bc97ba3d894f0755aab4194db5ea76b915",
     "spatial_sums": {
       "piece_own": 25.0,
       "prob_teammate": 25.0,
@@ -154,7 +154,7 @@
     "steps": 0,
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
-    "sha256": "cfcac5d918a3ac2a44fc13d0e705758321547e74f6e2d5e31290164d3bb2b82e",
+    "sha256": "cb575ab3b15dac2035a891ab133e906d2f682921c0d8cc99c82f18c1af44f581",
     "spatial_sums": {
       "piece_own": 25.0,
       "prob_teammate": 25.0,
@@ -184,7 +184,7 @@
     "steps": 100,
     "show_mode": "BRIGHT",
     "observer": "SOUTH",
-    "sha256": "3adf271735c8cf858c1b54dbb376c5e8c4df1391a8c45a1e31af3edd703a08ee",
+    "sha256": "911ade1e20e77fa98778c281460bdb31608e04e87e63cf8dd59be7dec70be7bf",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 20.0,
@@ -214,7 +214,7 @@
     "steps": 100,
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
-    "sha256": "92188cf047695ea7a87b5d3c9f3368fcc78128c33ef1a2984a36e8db82230366",
+    "sha256": "5e4e3180a69db3d403f12f2f7b3fa33f0cbb449cedd000faf42e31fb54fba5cb",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 20.0,
@@ -244,7 +244,7 @@
     "steps": 0,
     "show_mode": "BRIGHT",
     "observer": "SOUTH",
-    "sha256": "866c3d250acbcbde25d017b7bb0d765bbbc7581adff59be6d37a5cb72dbcf9bc",
+    "sha256": "e7da2fe11f695bb2053f7641524b62e717f4ac04f321e3ef741b217aec792019",
     "spatial_sums": {
       "piece_own": 25.0,
       "prob_teammate": 25.0,
@@ -274,7 +274,7 @@
     "steps": 0,
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
-    "sha256": "291e8f06b3d7ee18acff6f9b4de1366d4cc13bd7f7f60c00658d1b3fb5fd4f5b",
+    "sha256": "f7e9a0dd90a83976279e60d6b2b996bb3c73d4a2d1c49731ac7ba06d01ef8554",
     "spatial_sums": {
       "piece_own": 25.0,
       "prob_teammate": 25.0,
@@ -304,7 +304,7 @@
     "steps": 100,
     "show_mode": "BRIGHT",
     "observer": "SOUTH",
-    "sha256": "57806707f5b15f5f2ac14224b1129739627caca5f1d49de92ab1e6de7a9894df",
+    "sha256": "5fef96a8539a039bce05405442dbaddb1e741925885f2a6aeff7072d4594865a",
     "spatial_sums": {
       "piece_own": 22.0,
       "prob_teammate": 23.0,
@@ -334,7 +334,7 @@
     "steps": 100,
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
-    "sha256": "f0f962500d6d92cd57a3fca4df1b1c08cf99727f3f6b121ca0c5b208623e8d8f",
+    "sha256": "3f6a4e1b6af44a10ae5fc825735c497b7df8cff9dfdf156b0c185ce2b34015ce",
     "spatial_sums": {
       "piece_own": 22.0,
       "prob_teammate": 23.0,

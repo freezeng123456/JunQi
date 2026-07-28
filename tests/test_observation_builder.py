@@ -39,8 +39,6 @@ import pytest
 
 from junqi_core.info_model import BeliefTensor
 from junqi_core.observation import (
-    CHANNEL_LAYOUT,
-    GLOBAL_LAYOUT,
     OBS_CHANNELS,
     OBS_GLOBAL_DIMS,
     ObservationBuilder,
@@ -49,8 +47,7 @@ from junqi_core.observation import (
 )
 from junqi_core.rules import ALL_SEATS, Seat, ShowMode
 from junqi_core.setup import generate_random_setup
-from junqi_core.state import Action, GameState
-
+from junqi_core.state import GameState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -116,14 +113,7 @@ class TestBitIdentity:
         assert obs_new.observer is observer
 
     def test_golden_hashes_still_match(self) -> None:
-        """The 12 pre-M2 golden scenarios must all match.
-
-        NOTE: Skipped post-commit 3413281 (obs refactored from 101 → 256
-        channels). The golden hashes were captured under the old layout
-        and can't match the new output. Regenerate tests/golden/obs_hashes.json
-        with a one-shot script when the layout stabilises again.
-        """
-        pytest.skip("golden hashes stale after 101→256 channel refactor (3413281)")
+        """The 12 deterministic v6/412-channel scenarios must all match."""
         repo = Path(__file__).resolve().parent.parent
         golden_path = repo / "tests/golden/obs_hashes.json"
         if not golden_path.exists():
