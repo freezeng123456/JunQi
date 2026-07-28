@@ -496,7 +496,7 @@ class ObservationBuilder:
         out_spatial: np.ndarray,
         out_global: np.ndarray,
     ) -> None:
-        """Fill ``(N, 256, 17, 17)`` + ``(N, 28)`` buffers in place.
+        """Fill ``(N, 412, 17, 17)`` + ``(N, 28)`` buffers in place.
 
         Each index ``i`` is equivalent to::
 

@@ -3,7 +3,7 @@
  * DeviceObservationBatch memory management + full 256-channel observation kernel.
  *
  * Observation layout per (env, observer_seat) pair:
- *   Spatial:  [NUM_OBS_CHANNELS=256, BOARD_SIZE=17, BOARD_SIZE=17]  float32
+ *   Spatial:  [NUM_OBS_CHANNELS=412, BOARD_SIZE=17, BOARD_SIZE=17]  float32
  *   Global:   [NUM_GLOBAL_DIMS=28]                                   float32
  *
  * Channel layout (mirrors junqi_core/observation.py CHANNEL_LAYOUT):
@@ -154,7 +154,7 @@ __global__ void observation_kernel(
     const int16_t* d_move_history,       // (N, MOVE_HISTORY_LEN, 2)
     const int32_t* d_history_write_idx,  // (N,)
     const int32_t* d_history_count,      // (N,)
-    // CombatMemory v4 (N × 4 observers × 120 pids).  Read-only here.
+    // CombatMemory v6 (N × 4 observers × 120 pids).  Read-only here.
     const uint64_t* d_cm_direct_lo,
     const uint64_t* d_cm_direct_hi,
     const uint16_t* d_cm_direct_type,
@@ -170,6 +170,9 @@ __global__ void observation_kernel(
     const int16_t*  d_cm_last_direct_step,
     const int16_t*  d_cm_last_chain_step,
     const int16_t*  d_cm_rank_floor_step,
+    // CombatMemory v6 layer-4 reverse projection.
+    const uint64_t* d_cm_eaten_by_pid_lo,
+    const uint64_t* d_cm_eaten_by_pid_hi,
     // Outputs
     float*         d_obs_spatial,
     float*         d_obs_global,
@@ -194,7 +197,7 @@ __global__ void observation_kernel(
     const int tid = threadIdx.x;
     const int BLK = blockDim.x;
 
-    const int SPATIAL_SZ = NUM_OBS_CHANNELS * BOARD_SIZE * BOARD_SIZE;  // 256*17*17
+    const int SPATIAL_SZ = NUM_OBS_CHANNELS * BOARD_SIZE * BOARD_SIZE;  // 412*17*17
 
     // Observer seat + relationships (kept in shared so every thread reads
     // the same values without redundant per-thread gmem loads).
@@ -583,7 +586,8 @@ __global__ void observation_kernel(
     __syncthreads();
 
     // Pass 9 — CombatMemory v4 (50 channels at indices [256, 306)) +
-    // v5 layer-3 (46 channels at [306, 352)).
+    // v5 layer-3 (46 channels at [306, 352)) +
+    // v6 layer-4 (60 channels at [352, 412)).
     // The writer is sequential over the 120 pids; we let thread 0 do it
     // to avoid atomic contention.  All inputs are device-resident; no
     // host traffic.  Pre-condition: spatial slice [256:] has been zeroed
@@ -610,6 +614,8 @@ __global__ void observation_kernel(
             d_cm_last_direct_step         + cm_env_off,
             d_cm_last_chain_step          + cm_env_off,
             d_cm_rank_floor_step          + cm_env_off,
+            d_cm_eaten_by_pid_lo          + cm_env_off,
+            d_cm_eaten_by_pid_hi          + cm_env_off,
             (int)d_move_counter[env],
             piece_seat,
             piece_type,
@@ -665,7 +671,7 @@ void build_observation_batch(
         d_state.d_move_history,
         d_state.d_history_write_idx,
         d_state.d_history_count,
-        // CombatMemory v4 — device pointers, never copied through host.
+        // CombatMemory v6 — device pointers, never copied through host.
         d_state.d_cm_direct_lo,
         d_state.d_cm_direct_hi,
         d_state.d_cm_direct_type,
@@ -681,6 +687,8 @@ void build_observation_batch(
         d_state.d_cm_last_direct_step,
         d_state.d_cm_last_chain_step,
         d_state.d_cm_rank_floor_step,
+        d_state.d_cm_eaten_by_pid_lo,
+        d_state.d_cm_eaten_by_pid_hi,
         d_obs_out.d_spatial,
         d_obs_out.d_global,
         show_mode
@@ -689,7 +697,7 @@ void build_observation_batch(
 }
 
 // ===========================================================================
-// DeviceObservationSingleBatch — single-seat variant (N, 256, 17, 17)
+// DeviceObservationSingleBatch — single-seat variant (N, 412, 17, 17)
 // ===========================================================================
 DeviceObservationSingleBatch::DeviceObservationSingleBatch(int n) : num_envs(n) {
     CUDA_CHECK(cudaMalloc(&d_spatial,
@@ -712,7 +720,7 @@ DeviceObservationSingleBatch::~DeviceObservationSingleBatch() {
 //   output offset = (env * num_seats + slot) * SPATIAL_SZ
 //
 // With num_seats=1 and slot=0, each block builds exactly the acting seat's
-// observation and writes to a contiguous (N, 256, 17, 17) buffer.
+// observation and writes to a contiguous (N, 412, 17, 17) buffer.
 //
 // d_acting_seats is a device pointer (N,) int8 — the per-env seat to observe.
 // We copy it into a scratch buffer formatted as d_observer_seats[env * 1 + 0].
@@ -758,7 +766,7 @@ void build_observation_single_seat(
         d_state.d_move_history,
         d_state.d_history_write_idx,
         d_state.d_history_count,
-        // CombatMemory v4 — device pointers, never copied through host.
+        // CombatMemory v6 — device pointers, never copied through host.
         d_state.d_cm_direct_lo,
         d_state.d_cm_direct_hi,
         d_state.d_cm_direct_type,
@@ -774,6 +782,8 @@ void build_observation_single_seat(
         d_state.d_cm_last_direct_step,
         d_state.d_cm_last_chain_step,
         d_state.d_cm_rank_floor_step,
+        d_state.d_cm_eaten_by_pid_lo,
+        d_state.d_cm_eaten_by_pid_hi,
         d_obs_out.d_spatial,
         d_obs_out.d_global,
         show_mode
@@ -782,4 +792,3 @@ void build_observation_single_seat(
 }
 
 }  // namespace junqi_cuda
-

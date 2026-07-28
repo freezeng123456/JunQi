@@ -1,4 +1,4 @@
-"""tests/test_gpu_combat_memory_parity.py — GPU↔CPU CombatMemory v4 parity.
+"""tests/test_gpu_combat_memory_parity.py — GPU↔CPU CombatMemory v6 parity.
 
 Validates that the device-resident CombatMemory state mutated by
 ``junqi_cuda.step_batch`` matches the Python reference (``BatchedGameState.cm_*``)
@@ -11,18 +11,18 @@ for CombatMemory**.  All updates run inside ``step_batch_kernel``; the only
 legal transfers are:
 
   1. ``DeviceGameStateBatch`` constructor — one-time cudaMalloc / cudaMemset
-     of the 14 CombatMemory device buffers.
+     of the 16 CombatMemory device buffers.
   2. ``cm_copy_from_host`` / ``cm_copy_to_host`` — PARITY-TEST helpers,
      never invoked during training.
 
 This test exercises (2) to verify that the GPU update rules in
 ``combat_memory.cu::cm_apply_event_dev`` (chain propagation, per-observer
 DARK dispatch, ``attacked_by_known_gongb`` preflight) produce exactly
-the same 14 SoA arrays as ``junqi_core.combat_memory.apply_combat_event``.
+the same 16 SoA arrays as ``junqi_core.combat_memory.apply_combat_event``.
 
 Scope
 -----
-* 14 CombatMemory fields: every ``cm_*`` array in ``BatchedGameState``.
+* 16 CombatMemory fields: every ``cm_*`` array in ``BatchedGameState``.
 * Multi-step parity: 50 random plies on N=8 seeds.
 * Path-revealed-GONGB: a deliberate engineer-rail-walk test that exercises
   ``cm_move_requires_gongb_dev`` BFS.
@@ -97,8 +97,8 @@ def _pack_from_batched(b: BatchedGameState) -> dict:
     dra  = flat(b.death_reason_arr)
     dsa  = flat(b.death_step_arr)
     dlfa = flat(b.death_loc_flat_arr)
-    zx   = np.zeros_like(px)
-    zy   = np.zeros_like(py_)
+    zx   = flat(b.zero_x)
+    zy   = flat(b.zero_y)
     cpip = np.where(
         alv, py_.astype(np.int16) * np.int16(17) + px.astype(np.int16), np.int16(-1)
     ).astype(np.int16, copy=False)
@@ -154,6 +154,8 @@ def _push_state(b: BatchedGameState):
         b.cm_chain_hi.reshape(-1),
         b.cm_chain_type.reshape(-1),
         b.cm_last_chain_step.reshape(-1),
+        b.cm_eaten_by_pid_lo.reshape(-1),
+        b.cm_eaten_by_pid_hi.reshape(-1),
         b.cm_rank_floor.reshape(-1),
         b.cm_rank_floor_step.reshape(-1),
         b.cm_is_gongb.reshape(-1),
@@ -178,6 +180,8 @@ _CM_FIELDS: tuple[tuple[str, str], ...] = (
     ("cm_chain_hi",                 "chain_hi"),
     ("cm_chain_type",               "chain_type"),
     ("cm_last_chain_step",          "last_chain_step"),
+    ("cm_eaten_by_pid_lo",          "eaten_by_pid_lo"),
+    ("cm_eaten_by_pid_hi",          "eaten_by_pid_hi"),
     ("cm_rank_floor",               "rank_floor"),
     ("cm_rank_floor_step",          "rank_floor_step"),
     ("cm_is_gongb",                 "is_gongb"),
@@ -187,7 +191,7 @@ _CM_FIELDS: tuple[tuple[str, str], ...] = (
 
 
 def _assert_cm_parity(b: BatchedGameState, gpu_cm: dict, *, step_index: int) -> None:
-    """All 14 CombatMemory arrays must be bit-identical."""
+    """All 16 CombatMemory arrays must be bit-identical."""
     N = b.num_envs
     expected_shape = (N, 4, 120)
     for cpu_attr, gpu_key in _CM_FIELDS:
@@ -372,6 +376,8 @@ def test_cm_roundtrip_only() -> None:
     b.cm_chain_hi[:]                 = rng.integers(0, 1 << 56, size=b.cm_chain_hi.shape, dtype=np.uint64)
     b.cm_chain_type[:]               = rng.integers(0, 4096,    size=b.cm_chain_type.shape, dtype=np.uint16)
     b.cm_last_chain_step[:]          = rng.integers(-1, 2000,   size=b.cm_last_chain_step.shape, dtype=np.int16)
+    b.cm_eaten_by_pid_lo[:]          = rng.integers(0, 1 << 60, size=b.cm_eaten_by_pid_lo.shape, dtype=np.uint64)
+    b.cm_eaten_by_pid_hi[:]          = rng.integers(0, 1 << 56, size=b.cm_eaten_by_pid_hi.shape, dtype=np.uint64)
     b.cm_rank_floor[:]               = rng.integers(0, 10,      size=b.cm_rank_floor.shape, dtype=np.int8)
     b.cm_rank_floor_step[:]          = rng.integers(-1, 2000,   size=b.cm_rank_floor_step.shape, dtype=np.int16)
     b.cm_is_gongb[:]                 = rng.integers(0, 2,       size=b.cm_is_gongb.shape, dtype=np.uint8).astype(bool)

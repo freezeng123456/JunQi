@@ -1,7 +1,7 @@
 /*
  * combat_memory.cuh
  *
- * GPU-side CombatMemory v4.  Mirror of junqi_core/combat_memory.py: same
+ * GPU-side CombatMemory v6.  Mirror of junqi_core/combat_memory.py: same
  * data layout, same update rules, same observation projection.
  *
  * NO HOST INTERACTION in the hot path.  The only legal CPU↔GPU traffic
@@ -112,6 +112,8 @@ struct CMEnvPtrs {
     uint64_t* chain_hi;              // (4, 120) uint64
     uint16_t* chain_type;            // (4, 120) uint16
     int16_t*  last_chain_step;       // (4, 120) int16
+    uint64_t* eaten_by_pid_lo;       // (4, 120) uint64
+    uint64_t* eaten_by_pid_hi;       // (4, 120) uint64
     int8_t*   rank_floor;            // (4, 120) int8
     int16_t*  rank_floor_step;       // (4, 120) int16
     bool*     is_gongb;              // (4, 120) bool
@@ -179,6 +181,9 @@ __device__ void cm_write_channels_device(
     const int16_t*  cm_last_direct_step_env,
     const int16_t*  cm_last_chain_step_env,
     const int16_t*  cm_rank_floor_step_env,
+    // Layer-4 (v6): victim-anchored reverse projection.
+    const uint64_t* cm_eaten_by_pid_lo_env,
+    const uint64_t* cm_eaten_by_pid_hi_env,
     int             move_counter,
     // Per-(env, pid) game state (for dilei_candidate runtime check)
     const int8_t*   piece_seat_env,            // (120,)

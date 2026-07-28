@@ -1,5 +1,5 @@
 /*
- * combat_memory.cu — GPU-side CombatMemory v4.
+ * combat_memory.cu — GPU-side CombatMemory v6.
  *
  * Strict no-host-interaction rule:
  *   * cm_apply_event_dev runs INSIDE step_batch_kernel (no host calls).
@@ -287,6 +287,33 @@ __device__ void cm_apply_event_dev(
         }
     }
 
+    // ---------- v6 reverse projection (DARK-safe) ----------
+    // For every observer-owned pid that is represented in V's direct or
+    // chain history (plus V itself when V belongs to the observer), record
+    // K as a direct/chain eater.  Iterating the observer's fixed 30-pid
+    // range is cheaper and less error-prone than materialising four
+    // 120-bit masks in local memory.
+    uint64_t k_bit_lo = 0, k_bit_hi = 0;
+    if (K < 64) k_bit_lo = (uint64_t)1 << K;
+    else        k_bit_hi = (uint64_t)1 << (K - 64);
+    for (int obs = 0; obs < CM_NUM_OBSERVERS_DEV; ++obs) {
+        int vIdx = cm_idx(obs, V);
+        uint64_t victims_lo = cm.direct_lo[vIdx] | cm.chain_lo[vIdx];
+        uint64_t victims_hi = cm.direct_hi[vIdx] | cm.chain_hi[vIdx];
+        const int own_first = obs * 30;
+        const int own_last = own_first + 30;
+        for (int mpid = own_first; mpid < own_last; ++mpid) {
+            bool linked;
+            if (mpid < 64) linked = ((victims_lo >> mpid) & 1ULL) != 0ULL;
+            else           linked = ((victims_hi >> (mpid - 64)) & 1ULL) != 0ULL;
+            if (V_seat == obs && mpid == V) linked = true;
+            if (!linked) continue;
+            int mIdx = cm_idx(obs, mpid);
+            cm.eaten_by_pid_lo[mIdx] |= k_bit_lo;
+            cm.eaten_by_pid_hi[mIdx] |= k_bit_hi;
+        }
+    }
+
     // ---------- Per-observer dispatch on V visibility ----------
     for (int obs = 0; obs < CM_NUM_OBSERVERS_DEV; ++obs) {
         int kIdx = cm_idx(obs, K);
@@ -391,7 +418,9 @@ static constexpr int CH_CM_MY_DILEI_CANDIDATE    = CH_CM_BASE +  49;
 static constexpr int CH_CM_KILL_MINE_COUNT       = CH_CM_BASE +  50;  // 12 channels
 static constexpr int CH_CM_KILL_MINE_SLOT        = CH_CM_BASE +  62;  // 30 channels
 static constexpr int CH_CM_RECENCY               = CH_CM_BASE +  92;  //  4 channels
-// Total v5 tail: 96 channels (0..95).
+// Layer 4 (ADR-129 v6) — victim-anchored reverse projection.
+static constexpr int CH_CM_EATEN_BY_PID           = CH_CM_BASE +  96;  // 60 channels
+// Total CombatMemory tail: 156 channels (0..155).
 
 static constexpr int CM_PLANE = 17 * 17;   // 289
 
@@ -422,6 +451,8 @@ __device__ void cm_write_channels_device(
     const int16_t*  cm_last_direct_step_env,
     const int16_t*  cm_last_chain_step_env,
     const int16_t*  cm_rank_floor_step_env,
+    const uint64_t* cm_eaten_by_pid_lo_env,
+    const uint64_t* cm_eaten_by_pid_hi_env,
     int             move_counter,
     const int8_t*   piece_seat_env,
     const int8_t*   piece_type_env,
@@ -604,6 +635,41 @@ __device__ void cm_write_channels_device(
                 && !public_atk)
             {
                 cm_set_plane(spatial, CH_CM_MY_DILEI_CANDIDATE, cx, cy);
+            }
+        }
+    }
+
+    // ============== Layer 4 (v6) — reverse projection ==============
+    // Unlike the per-live-piece loops above, this iterates all 30 of the
+    // observer's own pid slots.  Dead victims are projected at zero_pos,
+    // exactly matching junqi_core.observation._write_combat_memory.
+    const int own_first = observer_seat * 30;
+    for (int slot = 0; slot < 30; ++slot) {
+        int mpid = own_first + slot;
+        int wx = alive_env[mpid] ? (int)pos_x_env[mpid] : (int)zero_x_env[mpid];
+        int wy = alive_env[mpid] ? (int)pos_y_env[mpid] : (int)zero_y_env[mpid];
+        if (wx < 0 || wy < 0 || wx >= 17 || wy >= 17) continue;
+
+        int cx, cy;
+        cm_rotate(wx, wy, observer_seat, cx, cy);
+        int mIdx = cm_idx(observer_seat, mpid);
+        uint64_t eaten_lo = cm_eaten_by_pid_lo_env[mIdx];
+        uint64_t eaten_hi = cm_eaten_by_pid_hi_env[mIdx];
+
+        const int left_opp = (observer_seat + 1) & 3;
+        const int right_opp = (observer_seat + 3) & 3;
+        for (int side = 0; side < 2; ++side) {
+            int opp = (side == 0) ? left_opp : right_opp;
+            int channel_base = CH_CM_EATEN_BY_PID + side * 30;
+            int opp_first = opp * 30;
+            for (int enemy_slot = 0; enemy_slot < 30; ++enemy_slot) {
+                int gp = opp_first + enemy_slot;
+                bool hit = (gp < 64)
+                    ? (((eaten_lo >> gp) & 1ULL) != 0ULL)
+                    : (((eaten_hi >> (gp - 64)) & 1ULL) != 0ULL);
+                if (hit) {
+                    cm_set_plane(spatial, channel_base + enemy_slot, cx, cy);
+                }
             }
         }
     }

@@ -16,9 +16,6 @@ constexpr int NUM_CELLS = 289;
 constexpr int BOARD_SIZE = 17;
 constexpr int NUM_SEATS = 4;
 constexpr int NUM_OBS_CHANNELS = 412;  // 256 base + 50 v4 tail + 46 v5 layer-3 + 60 v6 layer-4
-// NOTE: v6 layer-4 (cm_eaten_by_pid[60], channels 352..412) is currently
-// CPU-only.  GPU kernels MUST zero-fill these channels until the
-// reverse-projection update logic is ported to combat_memory.cu.
 constexpr int NUM_GLOBAL_DIMS = 28;
 // Compact on-board action space: only 129 on-board cells (of 289 total)
 constexpr int NUM_ON_BOARD = 129;
@@ -103,6 +100,8 @@ struct DeviceGameStateBatch {
   uint64_t* d_cm_chain_hi                  = nullptr;  // full chain pid bitmap high
   uint16_t* d_cm_chain_type                = nullptr;  // chain type multi-hot
   int16_t*  d_cm_last_chain_step           = nullptr;
+  uint64_t* d_cm_eaten_by_pid_lo           = nullptr;  // reverse index low
+  uint64_t* d_cm_eaten_by_pid_hi           = nullptr;  // reverse index high
   int8_t*   d_cm_rank_floor                = nullptr;  // 0..9
   int16_t*  d_cm_rank_floor_step           = nullptr;
   bool*     d_cm_is_gongb                  = nullptr;
@@ -169,11 +168,11 @@ struct DeviceObservationBatch {
   void copy_to_host(float* h_spatial, float* h_global, int stream_id = 0) const;
 };
 
-// Single-seat observation batch: (N, 256, 17, 17) instead of (N, 4, 256, 17, 17).
+// Single-seat observation batch: (N, 412, 17, 17) instead of (N, 4, 412, 17, 17).
 // Used in the PPO collect hot-path where only the acting seat's observation is needed.
 struct DeviceObservationSingleBatch {
   int num_envs = 0;
-  float* d_spatial = nullptr;  // (N, 256, 17, 17)
+  float* d_spatial = nullptr;  // (N, 412, 17, 17)
   float* d_global = nullptr;   // (N, 28)
 
   DeviceObservationSingleBatch(int num_envs);
@@ -359,7 +358,7 @@ void build_observation_batch(
 
 // Single-seat variant: builds observation for ONE seat per env.
 // d_acting_seats: device pointer (N,) int8 — per-env seat to observe.
-// Output: d_obs_out.d_spatial (N, 256, 17, 17), d_obs_out.d_global (N, 28).
+// Output: d_obs_out.d_spatial (N, 412, 17, 17), d_obs_out.d_global (N, 28).
 void build_observation_single_seat(
   const DeviceGameStateBatch& d_state, const float* d_beliefs,
   const int8_t* d_acting_seats, DeviceObservationSingleBatch& d_obs_out,

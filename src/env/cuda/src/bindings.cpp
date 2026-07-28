@@ -245,7 +245,7 @@ static py::dict py_copy_termination_to_host(const DeviceGameStateBatch& self) {
 }
 
 // ---------------------------------------------------------------------------
-// CombatMemory v4 host↔device parity helpers.
+// CombatMemory v6 host↔device parity helpers.
 //
 // IMPORTANT: these functions are for PARITY TESTING only.  In the
 // production training hot path, CombatMemory state lives entirely on the
@@ -265,6 +265,8 @@ static void py_cm_copy_from_host(
     py::array_t<uint64_t, py::array::c_style | py::array::forcecast> chain_hi,
     py::array_t<uint16_t, py::array::c_style | py::array::forcecast> chain_type,
     py::array_t<int16_t,  py::array::c_style | py::array::forcecast> last_chain_step,
+    py::array_t<uint64_t, py::array::c_style | py::array::forcecast> eaten_by_pid_lo,
+    py::array_t<uint64_t, py::array::c_style | py::array::forcecast> eaten_by_pid_hi,
     py::array_t<int8_t,   py::array::c_style | py::array::forcecast> rank_floor,
     py::array_t<int16_t,  py::array::c_style | py::array::forcecast> rank_floor_step,
     py::array_t<bool,     py::array::c_style | py::array::forcecast> is_gongb,
@@ -286,6 +288,8 @@ static void py_cm_copy_from_host(
     check(chain_hi.size(),                "chain_hi");
     check(chain_type.size(),              "chain_type");
     check(last_chain_step.size(),         "last_chain_step");
+    check(eaten_by_pid_lo.size(),         "eaten_by_pid_lo");
+    check(eaten_by_pid_hi.size(),         "eaten_by_pid_hi");
     check(rank_floor.size(),              "rank_floor");
     check(rank_floor_step.size(),         "rank_floor_step");
     check(is_gongb.size(),                "is_gongb");
@@ -304,6 +308,8 @@ static void py_cm_copy_from_host(
     CM_H2D(d_cm_chain_hi,                  chain_hi,                uint64_t);
     CM_H2D(d_cm_chain_type,                chain_type,              uint16_t);
     CM_H2D(d_cm_last_chain_step,           last_chain_step,         int16_t);
+    CM_H2D(d_cm_eaten_by_pid_lo,           eaten_by_pid_lo,         uint64_t);
+    CM_H2D(d_cm_eaten_by_pid_hi,           eaten_by_pid_hi,         uint64_t);
     CM_H2D(d_cm_rank_floor,                rank_floor,              int8_t);
     CM_H2D(d_cm_rank_floor_step,           rank_floor_step,         int16_t);
     CM_H2D(d_cm_is_gongb,                  is_gongb,                bool);
@@ -324,6 +330,8 @@ static py::dict py_cm_copy_to_host(const DeviceGameStateBatch& self) {
     auto a_chi  = py::array_t<uint64_t>(cm_n);
     auto a_cty  = py::array_t<uint16_t>(cm_n);
     auto a_lcs  = py::array_t<int16_t>(cm_n);
+    auto a_eblo = py::array_t<uint64_t>(cm_n);
+    auto a_ebhi = py::array_t<uint64_t>(cm_n);
     auto a_rf   = py::array_t<int8_t>(cm_n);
     auto a_rfs  = py::array_t<int16_t>(cm_n);
     auto a_isg  = py::array_t<bool>(cm_n);
@@ -342,6 +350,8 @@ static py::dict py_cm_copy_to_host(const DeviceGameStateBatch& self) {
     CM_D2H(a_chi,  d_cm_chain_hi,                  uint64_t);
     CM_D2H(a_cty,  d_cm_chain_type,                uint16_t);
     CM_D2H(a_lcs,  d_cm_last_chain_step,           int16_t);
+    CM_D2H(a_eblo, d_cm_eaten_by_pid_lo,            uint64_t);
+    CM_D2H(a_ebhi, d_cm_eaten_by_pid_hi,            uint64_t);
     CM_D2H(a_rf,   d_cm_rank_floor,                int8_t);
     CM_D2H(a_rfs,  d_cm_rank_floor_step,           int16_t);
     CM_D2H(a_isg,  d_cm_is_gongb,                  bool);
@@ -359,6 +369,8 @@ static py::dict py_cm_copy_to_host(const DeviceGameStateBatch& self) {
     d["chain_hi"]                  = a_chi;
     d["chain_type"]                = a_cty;
     d["last_chain_step"]           = a_lcs;
+    d["eaten_by_pid_lo"]           = a_eblo;
+    d["eaten_by_pid_hi"]           = a_ebhi;
     d["rank_floor"]                = a_rf;
     d["rank_floor_step"]           = a_rfs;
     d["is_gongb"]                  = a_isg;
@@ -637,13 +649,15 @@ cell_piece_id   : int16, shape (N * 289)
              py::arg("chain_hi"),
              py::arg("chain_type"),
              py::arg("last_chain_step"),
+             py::arg("eaten_by_pid_lo"),
+             py::arg("eaten_by_pid_hi"),
              py::arg("rank_floor"),
              py::arg("rank_floor_step"),
              py::arg("is_gongb"),
              py::arg("not_gongb"),
              py::arg("attacked_by_known_gongb"),
              R"doc(
-PARITY-TEST ONLY.  Upload CombatMemory v4 state from host arrays.
+PARITY-TEST ONLY.  Upload CombatMemory v6 state from host arrays.
 
 Each array has shape ``(N * 4 * 120,)`` flattened row-major as
 ``(env, observer, pid)``.  In production training there is no host-side
@@ -654,7 +668,7 @@ CPU-built reference and verify GPU updates match bit-for-bit.
 )doc")
         .def("cm_copy_to_host", &py_cm_copy_to_host,
              R"doc(
-PARITY-TEST ONLY.  Download CombatMemory v4 state into a numpy dict.
+PARITY-TEST ONLY.  Download CombatMemory v6 state into a numpy dict.
 
 Returned arrays are flattened ``(N * 4 * 120,)`` mirrors of the device
 SoA fields.  Compare against
@@ -675,7 +689,7 @@ same sequence of actions through both backends.
             "Raw device pointer (int) to the spatial tensor. Useful for\n"
             "zero-copy torch integration via ``torch.from_dlpack`` or a\n"
             "manually-constructed cuda tensor wrapper.  Shape is\n"
-            "(N, 4, 101, 17, 17) float32, row-major.")
+            "(N, 4, 412, 17, 17) float32, row-major.")
         .def_property_readonly("d_global_ptr",
             [](const DeviceObservationBatch& self) {
                 return reinterpret_cast<uintptr_t>(self.d_global);

@@ -94,8 +94,7 @@ Layer 4 (60 ch, v6; projected to observer's own pieces — alive cell or zero_po
 OBS_CHANNELS: 256 + 50 + 46 + 60 = 412.
 
 This module is the CPU reference; ``BatchedGameState`` and CUDA kernels
-must replicate the same updates byte-identically (CUDA layer-4 kernel
-implementation pending — see src/env/cuda/src/combat_memory.cu TODOs).
+must replicate the same updates byte-identically.
 """
 
 from __future__ import annotations

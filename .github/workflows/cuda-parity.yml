@@ -1,0 +1,33 @@
+name: CUDA parity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cuda-parity:
+    name: Build CUDA extension and run parity tests
+    runs-on: [self-hosted, linux, x64, gpu]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[rl,dev]"
+      - run: python build_cuda.py
+      - name: Verify CUDA extension
+        run: >-
+          python -c "import junqi_cuda;
+          assert junqi_cuda.get_gpu_count() > 0;
+          assert junqi_cuda.NUM_OBS_CHANNELS == 412"
+      - name: CombatMemory and observation parity
+        run: >-
+          python -m pytest -q
+          tests/test_gpu_combat_memory_parity.py
+          tests/test_gpu_obs_parity.py
+          tests/test_gpu_step_batch.py

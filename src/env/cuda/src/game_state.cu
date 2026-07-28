@@ -66,7 +66,7 @@ DeviceGameStateBatch::DeviceGameStateBatch(int n) : num_envs(n) {
     CUDA_CHECK(cudaMemset(d_history_write_idx, 0, (size_t)n * sizeof(int32_t)));
     CUDA_CHECK(cudaMemset(d_history_count,     0, (size_t)n * sizeof(int32_t)));
 
-    // CombatMemory v4 — per-(env, observer, pid) SoA, shape (n, 4, 120).
+    // CombatMemory v6 — per-(env, observer, pid) SoA, shape (n, 4, 120).
     // Allocated once and ZEROED here; updated entirely on-device by
     // step_batch_kernel and observation_kernel.  Only copy_from_host_v4 /
     // copy_to_host_v4 (parity-test path) ever transfer these to/from
@@ -81,6 +81,8 @@ DeviceGameStateBatch::DeviceGameStateBatch(int n) : num_envs(n) {
     CUDA_CHECK(cudaMalloc(&d_cm_chain_hi,                  CM_N * sizeof(uint64_t)));
     CUDA_CHECK(cudaMalloc(&d_cm_chain_type,                CM_N * sizeof(uint16_t)));
     CUDA_CHECK(cudaMalloc(&d_cm_last_chain_step,           CM_N * sizeof(int16_t)));
+    CUDA_CHECK(cudaMalloc(&d_cm_eaten_by_pid_lo,           CM_N * sizeof(uint64_t)));
+    CUDA_CHECK(cudaMalloc(&d_cm_eaten_by_pid_hi,           CM_N * sizeof(uint64_t)));
     CUDA_CHECK(cudaMalloc(&d_cm_rank_floor,                CM_N * sizeof(int8_t)));
     CUDA_CHECK(cudaMalloc(&d_cm_rank_floor_step,           CM_N * sizeof(int16_t)));
     CUDA_CHECK(cudaMalloc(&d_cm_is_gongb,                  CM_N * sizeof(bool)));
@@ -96,6 +98,8 @@ DeviceGameStateBatch::DeviceGameStateBatch(int n) : num_envs(n) {
     CUDA_CHECK(cudaMemset(d_cm_chain_hi,                  0, CM_N * sizeof(uint64_t)));
     CUDA_CHECK(cudaMemset(d_cm_chain_type,                0, CM_N * sizeof(uint16_t)));
     CUDA_CHECK(cudaMemset(d_cm_last_chain_step,        0xff, CM_N * sizeof(int16_t)));   // -1
+    CUDA_CHECK(cudaMemset(d_cm_eaten_by_pid_lo,          0, CM_N * sizeof(uint64_t)));
+    CUDA_CHECK(cudaMemset(d_cm_eaten_by_pid_hi,          0, CM_N * sizeof(uint64_t)));
     CUDA_CHECK(cudaMemset(d_cm_rank_floor,                0, CM_N * sizeof(int8_t)));
     CUDA_CHECK(cudaMemset(d_cm_rank_floor_step,        0xff, CM_N * sizeof(int16_t)));   // -1
     CUDA_CHECK(cudaMemset(d_cm_is_gongb,                  0, CM_N * sizeof(bool)));
@@ -135,7 +139,7 @@ DeviceGameStateBatch::~DeviceGameStateBatch() {
     f(d_move_history);
     f(d_history_write_idx);
     f(d_history_count);
-    // CombatMemory v4
+    // CombatMemory v6
     f(d_cm_direct_lo);
     f(d_cm_direct_hi);
     f(d_cm_direct_type);
@@ -145,6 +149,8 @@ DeviceGameStateBatch::~DeviceGameStateBatch() {
     f(d_cm_chain_hi);
     f(d_cm_chain_type);
     f(d_cm_last_chain_step);
+    f(d_cm_eaten_by_pid_lo);
+    f(d_cm_eaten_by_pid_hi);
     f(d_cm_rank_floor);
     f(d_cm_rank_floor_step);
     f(d_cm_is_gongb);
@@ -1320,7 +1326,7 @@ __global__ void step_batch_kernel(
     bool*    d_terminated,
     int8_t*  d_winner_team,
     bool*    d_draw,
-    // CombatMemory v4 (N × 4 observers × 120 pids)
+    // CombatMemory v6 (N × 4 observers × 120 pids)
     uint64_t* d_cm_direct_lo_all,
     uint64_t* d_cm_direct_hi_all,
     uint16_t* d_cm_direct_type_all,
@@ -1330,6 +1336,8 @@ __global__ void step_batch_kernel(
     uint64_t* d_cm_chain_hi_all,
     uint16_t* d_cm_chain_type_all,
     int16_t*  d_cm_last_chain_step_all,
+    uint64_t* d_cm_eaten_by_pid_lo_all,
+    uint64_t* d_cm_eaten_by_pid_hi_all,
     int8_t*   d_cm_rank_floor_all,
     int16_t*  d_cm_rank_floor_step_all,
     bool*     d_cm_is_gongb_all,
@@ -1373,7 +1381,7 @@ __global__ void step_batch_kernel(
     bool* seat_dead_env  = d_seat_dead_arr_all         + env * 4;
     bool* seat_flag_rev  = d_seat_flag_revealed_arr_all+ env * 4;
 
-    // CombatMemory v4 — per-env slice (4×120 each).
+    // CombatMemory v6 — per-env slice (4×120 each).
     CMEnvPtrs cm;
     {
         const size_t off = (size_t)env * 4 * 120;
@@ -1386,6 +1394,8 @@ __global__ void step_batch_kernel(
         cm.chain_hi                = d_cm_chain_hi_all                  + off;
         cm.chain_type              = d_cm_chain_type_all                + off;
         cm.last_chain_step         = d_cm_last_chain_step_all           + off;
+        cm.eaten_by_pid_lo         = d_cm_eaten_by_pid_lo_all           + off;
+        cm.eaten_by_pid_hi         = d_cm_eaten_by_pid_hi_all           + off;
         cm.rank_floor              = d_cm_rank_floor_all                + off;
         cm.rank_floor_step         = d_cm_rank_floor_step_all           + off;
         cm.is_gongb                = d_cm_is_gongb_all                  + off;
@@ -2539,7 +2549,7 @@ void step_batch(
         d_state.d_terminated,
         d_state.d_winner_team,
         d_state.d_draw,
-        // CombatMemory v4 — all device-resident, no host traffic.
+        // CombatMemory v6 — all device-resident, no host traffic.
         d_state.d_cm_direct_lo,
         d_state.d_cm_direct_hi,
         d_state.d_cm_direct_type,
@@ -2549,6 +2559,8 @@ void step_batch(
         d_state.d_cm_chain_hi,
         d_state.d_cm_chain_type,
         d_state.d_cm_last_chain_step,
+        d_state.d_cm_eaten_by_pid_lo,
+        d_state.d_cm_eaten_by_pid_hi,
         d_state.d_cm_rank_floor,
         d_state.d_cm_rank_floor_step,
         d_state.d_cm_is_gongb,
@@ -2939,7 +2951,7 @@ __global__ void reset_terminated_envs_kernel(
     int16_t* d_move_history,        // (N, 32, 2)
     int32_t* d_history_write_idx,   // (N,)
     int32_t* d_history_count,       // (N,)
-    // CombatMemory v4 — must be wiped to initial state on episode reset, or
+    // CombatMemory v6 — must be wiped to initial state on episode reset, or
     // carry-over from the previous game pollutes the new game's observation.
     uint64_t* d_cm_direct_lo,
     uint64_t* d_cm_direct_hi,
@@ -2950,6 +2962,8 @@ __global__ void reset_terminated_envs_kernel(
     uint64_t* d_cm_chain_hi,
     uint16_t* d_cm_chain_type,
     int16_t*  d_cm_last_chain_step,
+    uint64_t* d_cm_eaten_by_pid_lo,
+    uint64_t* d_cm_eaten_by_pid_hi,
     int8_t*   d_cm_rank_floor,
     int16_t*  d_cm_rank_floor_step,
     bool*     d_cm_is_gongb,
@@ -2998,8 +3012,8 @@ __global__ void reset_terminated_envs_kernel(
         int8_t py = is_alive ? POS_Y_INIT[pid] : (int8_t)-1;
         d_pos_x[base120 + pid] = px;
         d_pos_y[base120 + pid] = py;
-        d_zero_x[base120 + pid] = (int8_t)0;
-        d_zero_y[base120 + pid] = (int8_t)0;
+        d_zero_x[base120 + pid] = px;
+        d_zero_y[base120 + pid] = py;
 
         // cell_piece_id_per_piece: flat = py * 17 + px for alive pieces
         d_cell_piece_id_per_piece[base120 + pid] =
@@ -3044,7 +3058,7 @@ __global__ void reset_terminated_envs_kernel(
         hist[i] = 0;
     }
 
-    // === Clear CombatMemory v4 (4 observers × 120 piece_ids) ===
+    // === Clear CombatMemory v6 (4 observers × 120 piece_ids) ===
     // Without this wipe the new episode inherits the previous game's
     // chain bitmaps, is_gongb / not_gongb / dilei_candidate flags, etc. —
     // every CombatMemory channel becomes stale "ghost" data after the
@@ -3064,6 +3078,8 @@ __global__ void reset_terminated_envs_kernel(
         d_cm_chain_hi                [cm_base + j] = (uint64_t)0;
         d_cm_chain_type              [cm_base + j] = (uint16_t)0;
         d_cm_last_chain_step         [cm_base + j] = (int16_t)-1;
+        d_cm_eaten_by_pid_lo         [cm_base + j] = (uint64_t)0;
+        d_cm_eaten_by_pid_hi         [cm_base + j] = (uint64_t)0;
         d_cm_rank_floor              [cm_base + j] = (int8_t)0;
         d_cm_rank_floor_step         [cm_base + j] = (int16_t)-1;
         d_cm_is_gongb                [cm_base + j] = false;
@@ -3116,7 +3132,7 @@ void reset_terminated_envs(
         d_state.d_move_history,
         d_state.d_history_write_idx,
         d_state.d_history_count,
-        // CombatMemory v4 — must wipe on episode reset.
+        // CombatMemory v6 — must wipe on episode reset.
         d_state.d_cm_direct_lo,
         d_state.d_cm_direct_hi,
         d_state.d_cm_direct_type,
@@ -3126,6 +3142,8 @@ void reset_terminated_envs(
         d_state.d_cm_chain_hi,
         d_state.d_cm_chain_type,
         d_state.d_cm_last_chain_step,
+        d_state.d_cm_eaten_by_pid_lo,
+        d_state.d_cm_eaten_by_pid_hi,
         d_state.d_cm_rank_floor,
         d_state.d_cm_rank_floor_step,
         d_state.d_cm_is_gongb,

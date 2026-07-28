@@ -135,7 +135,7 @@ def _cpu_obs_batch(
     """Build observation tensors using the Python ObservationBuilder.
 
     Returns (spatial, global_) with shapes
-      spatial : (N, 4, 256, 17, 17) float32
+      spatial : (N, 4, 412, 17, 17) float32
       global_ : (N, 4, 28)          float32
 
     Each slot ``(env_idx, seat_slot)`` uses observer = seat_slot
@@ -216,7 +216,7 @@ def _gpu_obs_batch(
 
 
 def _pack_combat_memory(envs: list[JunqiEnv]) -> tuple[np.ndarray, ...]:
-    """Pack each env's ``state.combat_memory`` into the 14-array tuple
+    """Pack each env's ``state.combat_memory`` into the 16-array tuple
     expected by ``DeviceGameStateBatch.cm_copy_from_host``.
 
     Each output array is shape ``(N * 4 * 120,)`` with the dtype declared
@@ -235,6 +235,8 @@ def _pack_combat_memory(envs: list[JunqiEnv]) -> tuple[np.ndarray, ...]:
         cat("chain_pid_hi"),
         cat("chain_ate_my_type_mask"),
         cat("last_chain_step"),
+        cat("eaten_by_pid_lo"),
+        cat("eaten_by_pid_hi"),
         cat("rank_floor"),
         cat("rank_floor_step"),
         cat("is_gongb"),
