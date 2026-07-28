@@ -29,7 +29,6 @@ from typing import Final
 
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -364,7 +363,7 @@ if __name__ == "__main__":
     print(rail_map_str())
     print(f"\nTotal rail cells: {NUM_RAIL_CELLS}")
     print(f"Total undirected edges: {sum(len(v) for v in _adj_map.values()) // 2}")
-    deg = {}
+    deg: dict[int, int] = {}
     for nbrs in _adj_map.values():
         deg[len(nbrs)] = deg.get(len(nbrs), 0) + 1
     print(f"Degree distribution: {sorted(deg.items())}")

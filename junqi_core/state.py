@@ -30,7 +30,6 @@ from . import _zobrist as _ZOB
 from .board import (
     BOARD_SIZE,
     NUM_CELLS,
-    all_cells_of_seat,
     index_to_pos,
     is_on_board,
     xy_to_flat,
@@ -44,9 +43,7 @@ from .move_gen import (
     PieceMap,
     PieceRef,
     generate_legal_action_ids_batch,
-    generate_legal_actions,
     has_any_legal_move,
-    has_any_legal_move_soa,
     is_legal_move,
     legal_moves_from,
     move_requires_gongb,
@@ -63,14 +60,12 @@ from .rules import (
     ShowMode,
     classify_death_reason,
     resolve_combat,
-    same_team,
     siling_reveals_dst,
     siling_reveals_src,
 )
 from .setup import (
     SetupArray,
     assign_piece_ids,
-    lineup_from_names,
     validate_setup,
 )
 
@@ -322,7 +317,7 @@ class GameState:
 
     # Move history ring buffer for src_dst_planes observation channels.
     # List of (src_flat, dst_flat) int tuples, most recent last. Capped at 32.
-    move_history: list = field(default_factory=list)
+    move_history: list[tuple[int, int]] = field(default_factory=list)
 
     # Incremental Zobrist hash (ADR-117). Updated in-place by
     # `step_inplace` via XOR against the tables in `_zobrist.py`. The
@@ -708,11 +703,11 @@ class GameState:
         # ``move_requires_gongb`` whether the path is GONGB-only — if so,
         # broadcast the reveal to all four observers.  Done before the
         # piece is moved, so blockers along the path are still present.
-        if src_piece.piece_type.is_engineer:
-            if move_requires_gongb(pieces, action.src, action.dst):
-                apply_path_revealed_gongb(
-                    self.combat_memory, src_piece.piece_id
-                )
+        if (
+            src_piece.piece_type.is_engineer
+            and move_requires_gongb(pieces, action.src, action.dst)
+        ):
+            apply_path_revealed_gongb(self.combat_memory, src_piece.piece_id)
 
         # -------------------------------------------------------------------
         # Phase 1 + 2: apply move OR combat, update pieces, compute reveals
@@ -909,10 +904,9 @@ class GameState:
         # Update counters (move count + combat freshness)
         # -------------------------------------------------------------------
         new_move_counter = self.move_counter + 1
-        if event is Event.MOVE:
-            new_moves_since_combat = self.moves_since_last_combat + 1
-        else:
-            new_moves_since_combat = 0  # any combat resets the counter
+        new_moves_since_combat = (
+            self.moves_since_last_combat + 1 if event is Event.MOVE else 0
+        )
 
         # -------------------------------------------------------------------
         # Phase 5: Check team victory (incl. Q14 mutual destruction)
@@ -1574,8 +1568,6 @@ class GameState:
             # is left empty — callers of loaded-v1 states that want T7
             # observation channels need to re-run ``new_game`` from the
             # setups instead.
-            for pid_set_flag_revealed in ():  # no-op placeholder
-                pass
             for _, ref in pieces.items():
                 if ref.piece_id >= 0 and ref.piece_id not in piece_state:
                     piece_state[ref.piece_id] = PieceState()
@@ -1641,10 +1633,7 @@ class GameState:
 
 
 def _seat_has_any_piece(pieces: PieceMap, seat: Seat) -> bool:
-    for p in pieces.values():
-        if p.alive and p.seat is seat:
-            return True
-    return False
+    return any(p.alive and p.seat is seat for p in pieces.values())
 
 
 def _remove_all_pieces_of_seat(
@@ -1679,12 +1668,20 @@ def _remove_all_pieces_of_seat(
         and death_reason is not None
         and death_step is not None
     )
+    if record_deaths:
+        # Narrow all three optional arguments together for type checkers and
+        # document the all-or-nothing contract enforced above.
+        assert deaths is not None
+        assert death_reason is not None
+        assert death_step is not None
     for pos in to_remove:
         ref = pieces[pos]
         pid = ref.piece_id
         if piece_state is not None:
             piece_state.pop(pid, None)
-        if record_deaths and pid not in deaths:
+        if record_deaths and deaths is not None and pid not in deaths:
+            assert death_reason is not None
+            assert death_step is not None
             deaths[pid] = DeathInfo(
                 piece_id=pid,
                 reason=death_reason,
@@ -1820,8 +1817,9 @@ def _recompute_zobrist(
 
 
 def _self_test() -> None:  # pragma: no cover
-    from .setup import generate_random_setup
     import random as _random
+
+    from .setup import generate_random_setup
 
     # 1. new_game from a random setup
     rng = _random.Random(42)

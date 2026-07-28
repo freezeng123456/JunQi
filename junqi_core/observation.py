@@ -41,27 +41,19 @@ Design contract (see `docs/ARCHITECTURE.md` §4 and ADR-106, ADR-118):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 import numpy as np
 
 from .board import (
     BOARD_SIZE,
-    NUM_CELLS,
     cell_info,
     is_camp,
     is_nine_grid,
     is_railway,
     is_stronghold,
 )
-from .combat_memory import (
-    NUM_OBSERVERS,
-    NUM_PIDS,
-    NUM_TRACKED_TYPES as CM_NUM_TRACKED_TYPES,
-    ORDINARY_RANKS,
-    is_in_seat_back_two_rows,
-)
-from .info_model import BeliefTensor, NUM_TRACKED_TYPES, TRACKED_TYPES
+from .info_model import NUM_TRACKED_TYPES, TRACKED_TYPES, BeliefTensor
 from .rotation import rotate_planes
 from .rules import (
     MAX_NUM_MOVES,
@@ -367,7 +359,7 @@ class ObservationTensor:
         """Return the named global feature range (view, not copy)."""
         return self.global_[GLOBAL_LAYOUT[name]]
 
-    def snapshot(self) -> "ObservationTensor":
+    def snapshot(self) -> ObservationTensor:
         """Return a detached copy whose buffers are NOT shared with any builder.
 
         Required if the caller wants to hold an ObservationTensor across
@@ -403,7 +395,7 @@ class ObservationBuilder:
     Thread-safety: each thread needs its own instance.
     """
 
-    __slots__ = ("_world", "_canonical", "_global")
+    __slots__ = ("_canonical", "_global", "_world")
 
     def __init__(self) -> None:
         self._world = np.zeros(
@@ -498,9 +490,9 @@ class ObservationBuilder:
 
     def build_observations_batch(
         self,
-        states: "list[GameState] | tuple[GameState, ...]",
-        beliefs: "list[BeliefTensor] | tuple[BeliefTensor, ...]",
-        observers: "list[Seat] | tuple[Seat, ...]",
+        states: list[GameState] | tuple[GameState, ...],
+        beliefs: list[BeliefTensor] | tuple[BeliefTensor, ...],
+        observers: list[Seat] | tuple[Seat, ...],
         out_spatial: np.ndarray,
         out_global: np.ndarray,
     ) -> None:
@@ -801,7 +793,7 @@ class ObservationBuilder:
 # returned tensor owns its own buffers (no shared state between calls).
 # M3 is the scheduled removal point once all call sites migrate.
 
-_DEFAULT_BUILDER_SLOT: "ObservationBuilder | None" = None
+_DEFAULT_BUILDER_SLOT: ObservationBuilder | None = None
 
 
 def build_observation(
@@ -917,7 +909,7 @@ def _write_belief_side(
 
 def _write_constant_per_seat(
     out: np.ndarray,
-    order_vals: tuple,
+    order_vals: tuple[int, ...],
     per_seat_values: np.ndarray,
 ) -> None:
     """(K, H, W): constant planes in observer-sorted order.
@@ -1124,7 +1116,8 @@ def _write_dead_at_zero(
     valid = (zx >= 0) & (zy >= 0)
     if not valid.all():
         seat_vals = seat_vals[valid]
-        zx = zx[valid]; zy = zy[valid]
+        zx = zx[valid]
+        zy = zy[valid]
     ours = (_SEAT_TEAM[seat_vals] == obs_team).astype(np.intp, copy=False)
     # ours -> plane 0, theirs -> plane 1.
     ch = (1 - ours)
@@ -1231,9 +1224,8 @@ def _write_combat_memory(
 
     obs_team = int(_SEAT_TEAM[observer_val])
     seats = state.piece_seat_arr[live_pids]
-    enemy_mask = (_SEAT_TEAM[seats] != obs_team)
-    own_team_mask = ~enemy_mask
-    mine_mask = (seats == observer_val)
+    enemy_mask = _SEAT_TEAM[seats] != obs_team
+    mine_mask = seats == observer_val
 
     # ===========================================================================
     # Layer 1 — projected to enemy alive pieces
@@ -1322,11 +1314,11 @@ def _write_combat_memory(
         e_seats = seats[enemy_mask]
         # vectorized seat-back-two-rows test
         in_back = np.zeros(epids.shape, dtype=bool)
-        for s_val, mask_axis, pos_axis, lo, hi in (
-            (Seat.SOUTH.value, "y", zero_y, 15, 16),
-            (Seat.NORTH.value, "y", zero_y, 0, 1),
-            (Seat.WEST.value,  "x", zero_x, 0, 1),
-            (Seat.EAST.value,  "x", zero_x, 15, 16),
+        for s_val, pos_axis, lo, hi in (
+            (Seat.SOUTH.value, zero_y, 15, 16),
+            (Seat.NORTH.value, zero_y, 0, 1),
+            (Seat.WEST.value, zero_x, 0, 1),
+            (Seat.EAST.value, zero_x, 15, 16),
         ):
             sel = (e_seats == s_val) & (pos_axis >= lo) & (pos_axis <= hi)
             in_back |= sel
@@ -1652,7 +1644,7 @@ def channel_name(channel_idx: int) -> str:
 # after Phase 1's batched CPU env lands.
 
 
-def numpy_view_of_torch_cpu(tensor):  # type: ignore[no-untyped-def]
+def numpy_view_of_torch_cpu(tensor: Any) -> np.ndarray:
     """Return a numpy view sharing storage with a CPU torch tensor.
 
     Kept import-light: we do NOT unconditionally import torch at module
@@ -1660,7 +1652,7 @@ def numpy_view_of_torch_cpu(tensor):  # type: ignore[no-untyped-def]
     bridge have torch installed; callers that only use numpy paths never
     pay the import cost.
     """
-    import torch  # local import: only materialized when the bridge is used
+    import torch  # type: ignore[import-not-found]  # optional runtime dependency
     if not isinstance(tensor, torch.Tensor):
         raise TypeError(f"expected torch.Tensor, got {type(tensor).__name__}")
     if tensor.device.type != "cpu":
@@ -1678,19 +1670,19 @@ def numpy_view_of_torch_cpu(tensor):  # type: ignore[no-untyped-def]
             "torch bridge requires a contiguous tensor; call .contiguous() "
             "before binding"
         )
-    return tensor.numpy()      # zero-copy; shares storage
+    return np.asarray(tensor.numpy())  # zero-copy; shares storage
 
 
 # Monkey-patch builder methods onto ObservationBuilder below so we do
 # not clutter the main class body.  Kept here to keep the torch-specific
 # code isolated from the numpy hot path above.
 def _builder_build_observations_batch_torch(
-    self,
-    states: "list[GameState] | tuple[GameState, ...]",
-    beliefs: "list[BeliefTensor] | tuple[BeliefTensor, ...]",
-    observers: "list[Seat] | tuple[Seat, ...]",
-    spatial_tensor,  # torch.Tensor (N, OBS_CHANNELS, 17, 17) float32 CPU
-    global_tensor,   # torch.Tensor (N, OBS_GLOBAL_DIMS)       float32 CPU
+    self: ObservationBuilder,
+    states: list[GameState] | tuple[GameState, ...],
+    beliefs: list[BeliefTensor] | tuple[BeliefTensor, ...],
+    observers: list[Seat] | tuple[Seat, ...],
+    spatial_tensor: Any,  # torch.Tensor (N, OBS_CHANNELS, 17, 17) float32 CPU
+    global_tensor: Any,   # torch.Tensor (N, OBS_GLOBAL_DIMS)       float32 CPU
 ) -> None:
     """Write a batch of observations directly into CPU torch tensors.
 

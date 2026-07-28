@@ -39,6 +39,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+import numpy as np
+
 from .rules import (
     ALL_SEATS,
     CAMP_INDICES,
@@ -228,7 +230,7 @@ def _build_cell_table() -> tuple[CellInfo, ...]:
                 is_on_board=False,
             )
 
-    return tuple(ci for ci in table if ci is not None)  # type: ignore[misc]
+    return tuple(ci for ci in table if ci is not None)
 
 
 CELL_TABLE: Final[tuple[CellInfo, ...]] = _build_cell_table()
@@ -256,14 +258,12 @@ assert NUM_ON_BOARD_CELLS == 129, f"expected 129, got {NUM_ON_BOARD_CELLS}"
 
 ON_BOARD_INDICES: Final[tuple[int, ...]] = tuple(_on_board_flat_list)
 
-import numpy as _np
-
-COMPACT_TO_FLAT: Final[_np.ndarray] = _np.array(
-    _on_board_flat_list, dtype=_np.int16
+COMPACT_TO_FLAT: Final[np.ndarray] = np.array(
+    _on_board_flat_list, dtype=np.int16
 )
 
-FLAT_TO_COMPACT: Final[_np.ndarray] = _np.full(
-    NUM_CELLS, -1, dtype=_np.int16
+FLAT_TO_COMPACT: Final[np.ndarray] = np.full(
+    NUM_CELLS, -1, dtype=np.int16
 )
 for _compact_i, _flat_i in enumerate(_on_board_flat_list):
     FLAT_TO_COMPACT[_flat_i] = _compact_i

@@ -56,9 +56,8 @@ from typing import Final
 
 import numpy as np
 
-from .board import BOARD_SIZE, NUM_CELLS
+from .board import NUM_CELLS
 from .rules import NUM_SEATS
-
 
 # ---------------------------------------------------------------------------
 # Constants

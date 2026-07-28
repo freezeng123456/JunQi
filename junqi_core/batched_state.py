@@ -26,10 +26,16 @@ Design notes
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .move_gen import PieceRef
+    from .state import GameState
 
 from . import _zobrist as _ZOB
 from .board import BOARD_SIZE, NUM_CELLS
@@ -39,17 +45,16 @@ from .combat_memory import (
     apply_path_revealed_gongb,
 )
 from .move_gen import (
-    generate_legal_action_ids_batch,
+    _TEAM_OF_PID,
     generate_legal_action_ids_n,
     has_legal_moves_soa,
     move_requires_gongb,
-    _TEAM_OF_PID,
 )
 from .rules import (
-    DeathReason,
-    Event,
     MAX_NUM_MOVES,
     MAX_NUM_MOVES_BETWEEN_ATTACKS,
+    DeathReason,
+    Event,
     PieceType,
     Seat,
     classify_death_reason,
@@ -76,16 +81,14 @@ def _build_combat_table() -> np.ndarray:
             d = PieceType(dv)
             if d in (PieceType.NONE, PieceType.DARK):
                 continue  # invalid defender
-            try:
+            with suppress(ValueError, AssertionError):
                 tbl[av, dv] = resolve_combat(a, d).value
-            except (ValueError, AssertionError):
-                pass
     return tbl
 
 _COMBAT_EVENT_TABLE: np.ndarray = _build_combat_table()
 
 # SILING reveal tables: 14×14 bool
-def _build_siling_tables():
+def _build_siling_tables() -> tuple[np.ndarray, np.ndarray]:
     rs = np.zeros((_NUM_PT, _NUM_PT), dtype=bool)
     rd = np.zeros((_NUM_PT, _NUM_PT), dtype=bool)
     for av in range(_NUM_PT):
@@ -263,7 +266,9 @@ class BatchedGameState:
     # ==================================================================
 
     @classmethod
-    def from_game_states(cls, states: Sequence) -> "BatchedGameState":
+    def from_game_states(
+        cls, states: Sequence[GameState]
+    ) -> BatchedGameState:
         """Build a BatchedGameState by stacking a list of GameState objects.
 
         Parameters
@@ -373,7 +378,7 @@ class BatchedGameState:
         )
 
     @classmethod
-    def allocate(cls, num_envs: int) -> "BatchedGameState":
+    def allocate(cls, num_envs: int) -> BatchedGameState:
         """Allocate zero-initialised arrays for ``num_envs`` environments.
 
         Useful for pre-allocating the struct and then filling via
@@ -651,7 +656,7 @@ class BatchedGameState:
         # ------------------------------------------------------------------
         if combat_mask.any():
             cb_ai = ai[combat_mask]
-            for k, i in enumerate(cb_ai):
+            for i in cb_ai:
                 self._step_single(
                     int(i),
                     int(action_ids[i]),
@@ -766,9 +771,6 @@ class BatchedGameState:
         red_dead  = seat_dead[:, 0] & seat_dead[:, 2]  # (P,) — red team fully dead?
         blue_dead = seat_dead[:, 1] & seat_dead[:, 3]  # (P,)
 
-        red_alive  = ~red_dead
-        blue_alive = ~blue_dead
-
         terminated = np.zeros(P, dtype=bool)
         winner     = np.full(P, -1, dtype=np.int8)
         draw       = np.zeros(P, dtype=bool)
@@ -783,8 +785,10 @@ class BatchedGameState:
         # Standard victory: one team fully dead
         red_wins  = blue_dead & ~both_dead
         blue_wins = red_dead  & ~both_dead
-        terminated[red_wins]  = True;  winner[red_wins]  = np.int8(0)
-        terminated[blue_wins] = True;  winner[blue_wins] = np.int8(1)
+        terminated[red_wins] = True
+        winner[red_wins] = np.int8(0)
+        terminated[blue_wins] = True
+        winner[blue_wins] = np.int8(1)
 
         # Draw thresholds
         draw_mc   = new_mc   >= MAX_NUM_MOVES
@@ -1047,7 +1051,9 @@ class BatchedGameState:
     # Internal helpers
     # ==================================================================
 
-    def _build_pieces_view(self, i: int) -> "dict[tuple[int, int], object]":
+    def _build_pieces_view(
+        self, i: int
+    ) -> dict[tuple[int, int], PieceRef]:
         """Construct an ad-hoc PieceMap (only the data ``move_requires_gongb``
         reads — seat + piece_type + alive) for env ``i``.
 
@@ -1279,15 +1285,16 @@ class BatchedGameState:
     # Conversion back to list of game states
     # ==================================================================
 
-    def to_game_states(self) -> list:
+    def to_game_states(self) -> list[GameState]:
         """Reconstruct a list of :class:`GameState` objects from this batch.
 
         Useful for testing round-trip fidelity.  This is NOT a hot path.
         """
+        from .rules import Seat as _Seat
+        from .rules import ShowMode
         from .state import GameState
-        from .rules import Seat as _Seat, ShowMode
 
-        states = []
+        states: list[GameState] = []
         for i in range(self.num_envs):
             # We rebuild a GameState with only SoA columns set (no dict state).
             # The dict state (pieces, info, etc.) is NOT reconstructed here —
@@ -1338,7 +1345,7 @@ class BatchedGameState:
     # Clone
     # ==================================================================
 
-    def clone(self) -> "BatchedGameState":
+    def clone(self) -> BatchedGameState:
         """Return a deep copy of this batch."""
         return BatchedGameState(
             num_envs=self.num_envs,
@@ -1372,7 +1379,7 @@ class BatchedGameState:
     # Repr
     # ==================================================================
 
-    def __repr__(self) -> str:  # type: ignore[override]
+    def __repr__(self) -> str:
         n_terminated = int(self.terminated.sum())
         return (
             f"BatchedGameState(num_envs={self.num_envs}, "

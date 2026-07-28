@@ -224,8 +224,10 @@ def _self_check() -> None:
     plane = np.arange(BOARD_SIZE * BOARD_SIZE).reshape(BOARD_SIZE, BOARD_SIZE)
     for seat in Seat:
         rotated = rotate_plane(plane, seat)
-        back = unrotate_plane(rotated, seat)
-        assert np.array_equal(back, plane), f"plane round-trip failed for {seat.name}"
+        restored_plane = unrotate_plane(rotated, seat)
+        assert np.array_equal(restored_plane, plane), (
+            f"plane round-trip failed for {seat.name}"
+        )
 
     # Check that point rotation is consistent with plane rotation.
     # plane[y, x] indexes the value at cell (x, y). After rotate_plane, the

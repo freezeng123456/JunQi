@@ -33,8 +33,7 @@ from typing import Final
 
 import numpy as np
 
-from .board import BOARD_SIZE, index_to_pos, xy_to_flat
-from .move_gen import PieceRef
+from .board import BOARD_SIZE, index_to_pos
 from .rules import (
     ALL_PLACEABLE_PIECES,
     ALL_SEATS,
@@ -47,7 +46,6 @@ from .rules import (
     PieceType,
     Seat,
     ShowMode,
-    TOTAL_PIECES_PER_SEAT,
     same_team,
 )
 from .state import GameState, MoveResult
@@ -131,7 +129,7 @@ def _per_slot_prior_vector(index_local: int) -> np.ndarray:
         raise RuntimeError(
             f"no admissible types at slot {index_local}; prior is degenerate"
         )
-    return vec / s
+    return np.asarray(vec / s, dtype=np.float32)
 
 
 # Precomputed 30×12 initial-prior table (seat-local slot → distribution).
@@ -315,20 +313,19 @@ class BeliefTensor:
         # -----------------------------------------------------------------
         # R5/R7: GONGB signature (attacker eats DILEI)
         # -----------------------------------------------------------------
-        gongb_revealed = False
         if (
             event is Event.EAT
             and prev_dst_piece is not None
             and prev_dst_piece.piece_type is PieceType.DILEI
+            and attacker_belief is not None
+            and not _is_one_hot(attacker_belief)
         ):
             # Only GONGB can eat DILEI → attacker is provably GONGB (unless
             # observer already knew, e.g., because attacker is own/teammate).
             # Update attacker's belief to GONGB one-hot.
-            if attacker_belief is not None and not _is_one_hot(attacker_belief):
-                attacker_belief = one_hot(PieceType.GONGB)
-                self.probs[src] = attacker_belief
-                self._decrement_remaining(attacker_seat, PieceType.GONGB)
-                gongb_revealed = True
+            attacker_belief = one_hot(PieceType.GONGB)
+            self.probs[src] = attacker_belief
+            self._decrement_remaining(attacker_seat, PieceType.GONGB)
 
         # Also: if we just observed a KILLED event where the defender
         # (stationary, on back-row cell) survives → defender is at least
@@ -345,11 +342,11 @@ class BeliefTensor:
         elif (
             event is Event.EAT
             and prev_dst_piece is not None
-            and dst in _stronghold_positions_of(defender_seat)  # type: ignore[arg-type]
+            and defender_seat is not None
+            and dst in _stronghold_positions_of(defender_seat)
         ):
             # R6: the flag is guaranteed to be at the OTHER stronghold of
             # defender_seat (since dst was a stronghold but NOT the flag).
-            assert defender_seat is not None
             strongholds = _stronghold_positions_of(defender_seat)
             other = strongholds[0] if strongholds[1] == dst else strongholds[1]
             if other in self.probs and not _is_one_hot(self.probs[other]):
@@ -577,9 +574,7 @@ def _observer_sees_truth(
     if observer is owner:
         return True
     # HALF_DARK / DARK: teammate pieces are visible iff HALF_DARK (Q11)
-    if show_mode is ShowMode.HALF_DARK and same_team(observer, owner):
-        return True
-    return False
+    return show_mode is ShowMode.HALF_DARK and same_team(observer, owner)
 
 
 def _is_one_hot(vec: np.ndarray, eps: float = 1e-6) -> bool:
@@ -606,6 +601,7 @@ def _stronghold_positions_of(seat: Seat | None) -> tuple[tuple[int, int], tuple[
 
 def _self_test() -> None:  # pragma: no cover
     import random as _random
+
     from .setup import generate_random_setup
 
     rng = _random.Random(0)

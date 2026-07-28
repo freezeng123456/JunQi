@@ -23,18 +23,19 @@ Performance target: < 100 µs per `generate_legal_actions` call on CPU with
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Final, Iterator
+from typing import Final
 
 import numpy as np
 
 from .board import (
     BOARD_SIZE,
     NUM_CELLS,
+    CellInfo,
     cell_info,
     eight_neighbors,
     is_camp,
-    is_nine_grid,
     is_on_board,
     is_railway,
     is_stronghold,
@@ -115,11 +116,8 @@ def _can_end_on(
     if same_team(occupant.seat, acting_seat):
         return False
 
-    # Enemy piece sitting in a camp — unattackable.
-    if is_camp(*dst):
-        return False
-
-    return True
+    # Enemy piece sitting in a camp is unattackable.
+    return not is_camp(*dst)
 
 
 # ===========================================================================
@@ -427,10 +425,10 @@ def _curve_rail_clear(
 
 
 # Cache: curve id → tuple of CellInfo
-_CURVE_CELLS_CACHE: dict[int, tuple] = {}
+_CURVE_CELLS_CACHE: dict[int, tuple[CellInfo, ...]] = {}
 
 
-def _curve_cells_cache(curve_id: int) -> tuple:
+def _curve_cells_cache(curve_id: int) -> tuple[CellInfo, ...]:
     from .board import CELL_TABLE
     if curve_id not in _CURVE_CELLS_CACHE:
         _CURVE_CELLS_CACHE[curve_id] = tuple(
@@ -470,9 +468,13 @@ def legal_moves_from(
                 continue
             sx, sy = src
             # Only diagonal neighbors we haven't already covered
-            if abs(sx - nbr[0]) == 1 and abs(sy - nbr[1]) == 1:
-                if is_camp(*nbr) and is_legal_move(pieces, src, nbr, acting_seat):
-                    destinations.append(nbr)
+            if (
+                abs(sx - nbr[0]) == 1
+                and abs(sy - nbr[1]) == 1
+                and is_camp(*nbr)
+                and is_legal_move(pieces, src, nbr, acting_seat)
+            ):
+                destinations.append(nbr)
 
     # ---- (2) Rail moves ----
     if is_railway(*src):
@@ -650,8 +652,7 @@ def iter_legal_actions(
 # (fuzz: 1 000+ random positions).
 # ===========================================================================
 
-from . import _movegen_tables as _T                                 # noqa: E402
-
+from . import _movegen_tables as _T  # noqa: E402
 
 # Module-level "empty int16 result" reused instead of ``np.empty(0, ...)``
 # in every call where no moves are legal — shaves ~0.3 us per call per
@@ -717,9 +718,10 @@ def _build_eng_rail_adj_padded() -> tuple[np.ndarray, np.ndarray]:
     return adj, valid
 
 
-_ENG_RAIL_ADJ: Final[np.ndarray]
-_ENG_RAIL_ADJ_VALID: Final[np.ndarray]
-_ENG_RAIL_ADJ, _ENG_RAIL_ADJ_VALID = _build_eng_rail_adj_padded()
+_ENG_RAIL_ADJ_PAIR: Final[tuple[np.ndarray, np.ndarray]] = (
+    _build_eng_rail_adj_padded()
+)
+_ENG_RAIL_ADJ, _ENG_RAIL_ADJ_VALID = _ENG_RAIL_ADJ_PAIR
 # Clamp -1 pads to 0 so they index safely; the valid mask filters them out.
 _ENG_RAIL_ADJ_CLAMP: Final[np.ndarray] = np.where(
     _ENG_RAIL_ADJ >= 0, _ENG_RAIL_ADJ, 0
@@ -1082,7 +1084,7 @@ def generate_legal_action_ids(
         )
         if dests.size == 0:
             continue
-        parts.append((src_flat * NUM_CELLS + dests.astype(np.int32, copy=False)))
+        parts.append(src_flat * NUM_CELLS + dests.astype(np.int32, copy=False))
 
     if not parts:
         return _EMPTY_INT32
@@ -1109,7 +1111,8 @@ def has_any_legal_move_soa(
         tv = int(piece_type_arr[pid])
         if _T.IS_IMMOBILE_TYPE[tv]:
             continue
-        sx = int(pos_x[pid]); sy = int(pos_y[pid])
+        sx = int(pos_x[pid])
+        sy = int(pos_y[pid])
         if sx < 0 or sy < 0:
             continue
         src_flat = sy * BOARD_SIZE + sx
@@ -1468,7 +1471,6 @@ def generate_legal_action_ids_n(
     if not active_mask.any():
         return result
     active_idx = np.nonzero(active_mask)[0]     # (A,)
-    A = len(active_idx)
     ai = active_idx
 
     # Sub-batch views
@@ -1607,7 +1609,7 @@ def generate_legal_action_ids_n(
             ev, av = _batch_engineer_bfs_n(
                 eng_sf, eng_a, eng_env, empty, enemy_att
             )
-            if ev is not None:
+            if ev is not None and av is not None:
                 env_parts.append(ev)
                 act_parts.append(av)
         else:
@@ -1801,7 +1803,6 @@ def has_legal_moves_soa(
 
 
 def _self_test() -> None:  # pragma: no cover
-    from .board import index_to_pos
 
     # ---- Test 1: simple adjacent forward move for HOME PAIZH ----
     # HOME index 2 → world (8, 11). Move to (8, 10) (empty, on-board).
@@ -1860,10 +1861,6 @@ def _self_test() -> None:  # pragma: no cover
     assert not is_legal_move(pieces7b, (6, 11), (10, 15), Seat.SOUTH)
 
     # ---- Test 9: attack enemy ----
-    pieces8: PieceMap = {
-        (8, 10): PieceRef(Seat.SOUTH, PieceType.SILING),
-        (8, 5):  PieceRef(Seat.NORTH, PieceType.JUNZH),
-    }
     # Via rail: y=10 for HOME is not front-row rail. Wait: HOME front is y=11.
     # (8, 10) is NineGrid cell (8,10) is actually NineGrid = True.
     # Let's check via an attackable scenario: HOME SILING at (8, 11) attacks

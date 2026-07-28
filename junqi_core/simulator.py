@@ -28,13 +28,10 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any
 
-import numpy as np
-
 from .info_model import BeliefTensor
 from .rules import ALL_SEATS, Seat, ShowMode
 from .setup import generate_random_setup
 from .state import Action, GameState, MoveResult
-
 
 # ===========================================================================
 # Trace dataclass

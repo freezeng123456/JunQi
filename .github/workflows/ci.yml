@@ -25,6 +25,8 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: python run_tests.py --profile core
+      - run: python -m ruff check junqi_core
+      - run: python -m mypy junqi_core
       - name: Block high-confidence static errors
         run: >-
           python -m ruff check junqi_core junqi_rl scripts tests

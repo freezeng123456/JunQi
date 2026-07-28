@@ -22,9 +22,10 @@ Strict invariants:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import IntEnum, unique
 from types import MappingProxyType
-from typing import Final, Mapping
+from typing import Final
 
 # ===========================================================================
 # Rule version (see ADR-015)
@@ -360,10 +361,7 @@ def classify_death_reason(
 
     # At this point event is EAT or KILLED (exactly one side dies).
     # Determine whether `own_piece` is the loser of this combat.
-    if event is Event.EAT:
-        loser_is_attacker = False   # attacker ate defender; defender died.
-    else:  # Event.KILLED
-        loser_is_attacker = True    # attacker died; defender survived.
+    loser_is_attacker = event is Event.KILLED
 
     if own_is_attacker != loser_is_attacker:
         # `own_piece` is not the loser, so it shouldn't die in this call.

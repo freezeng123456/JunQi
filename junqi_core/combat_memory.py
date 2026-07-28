@@ -237,9 +237,8 @@ def _build_obs_pid_masks() -> tuple[np.ndarray, np.ndarray]:
     return lo, hi
 
 
-_OBS_PID_MASK_LO: Final[np.ndarray]
-_OBS_PID_MASK_HI: Final[np.ndarray]
-_OBS_PID_MASK_LO, _OBS_PID_MASK_HI = _build_obs_pid_masks()
+_OBS_PID_MASKS: Final[tuple[np.ndarray, np.ndarray]] = _build_obs_pid_masks()
+_OBS_PID_MASK_LO, _OBS_PID_MASK_HI = _OBS_PID_MASKS
 
 
 # ===========================================================================
@@ -291,7 +290,7 @@ class CombatMemoryState:
     attacked_by_known_gongb: np.ndarray   # bool
 
     @classmethod
-    def zeros(cls) -> "CombatMemoryState":
+    def zeros(cls) -> CombatMemoryState:
         sh = (NUM_OBSERVERS, NUM_PIDS)
         return cls(
             direct_ate_my_pid_lo    = np.zeros(sh, dtype=np.uint64),
@@ -312,7 +311,7 @@ class CombatMemoryState:
             attacked_by_known_gongb = np.zeros(sh, dtype=bool),
         )
 
-    def clone(self) -> "CombatMemoryState":
+    def clone(self) -> CombatMemoryState:
         return CombatMemoryState(
             direct_ate_my_pid_lo    = self.direct_ate_my_pid_lo.copy(),
             direct_ate_my_pid_hi    = self.direct_ate_my_pid_hi.copy(),
@@ -380,12 +379,12 @@ def apply_combat_event(
     # Dispatch K / V
     if event_is_eat:
         K, V = attacker_pid, defender_pid
-        K_seat, V_seat = attacker_seat, defender_seat
+        V_seat = defender_seat
         V_type = defender_type
     else:
         # KILLED
         K, V = defender_pid, attacker_pid
-        K_seat, V_seat = defender_seat, attacker_seat
+        V_seat = attacker_seat
         V_type = attacker_type
 
     if K < 0 or V < 0:

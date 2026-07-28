@@ -74,25 +74,25 @@ import numpy as np
 
 from .board import (
     BOARD_SIZE,
-    CELL_TABLE,
     NUM_CELLS,
-    cell_info,
     is_camp,
-    is_nine_grid,
     is_on_board,
-    is_railway,
     is_stronghold,
-    orthogonal_neighbors,
     xy_to_flat,
 )
 from .rail_topology import (
     CURVE_RAIL_OF as _CURVE_RAIL_OF_ARR,
+)
+from .rail_topology import (
     IS_NINEGRID as _IS_NG_ARR,
+)
+from .rail_topology import (
     IS_RAILWAY as _IS_RAIL_ARR,
+)
+from .rail_topology import (
     RAIL_ADJ as _RAIL_ADJ,
 )
 from .rules import ALL_PLACEABLE_PIECES, PieceType
-
 
 # ===========================================================================
 # Cell-indexed bool masks
@@ -331,10 +331,10 @@ def _build_engineer_tables() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return rail_cells, rail_to_idx, degrees
 
 
-ENG_RAIL_CELLS: Final[np.ndarray]
-ENG_RAIL_TO_IDX: Final[np.ndarray]
-ENG_RAIL_DEG: Final[np.ndarray]
-ENG_RAIL_CELLS, ENG_RAIL_TO_IDX, ENG_RAIL_DEG = _build_engineer_tables()
+_ENGINEER_TABLES: Final[tuple[np.ndarray, np.ndarray, np.ndarray]] = (
+    _build_engineer_tables()
+)
+ENG_RAIL_CELLS, ENG_RAIL_TO_IDX, ENG_RAIL_DEG = _ENGINEER_TABLES
 
 
 # ===========================================================================
@@ -444,9 +444,6 @@ def _build_curve_chain_rays_pad() -> np.ndarray:
     out = np.full((NUM_CELLS, 2, _MAX_CURVE_RAY_LEN), -1, dtype=np.int16)
     for cid in CURVE_CELLS:
         chain = _linearize_curve(cid)
-        L = len(chain)
-        # Build a position map: flat -> index in chain
-        pos_of = {flat: idx for idx, flat in enumerate(chain)}
         for idx, flat in enumerate(chain):
             # Forward ray: idx+1, idx+2, ..., L-1
             fwd = chain[idx + 1:]

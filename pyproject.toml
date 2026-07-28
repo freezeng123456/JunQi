@@ -85,6 +85,10 @@ select = [
 ]
 ignore = [
   "E501",  # line too long (handled by formatter)
+  # Chinese technical prose intentionally uses full-width punctuation.
+  "RUF001",
+  "RUF002",
+  "RUF003",
 ]
 
 [tool.ruff.format]

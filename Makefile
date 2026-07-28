@@ -22,9 +22,15 @@ lint-critical:
 	python3 -m ruff check junqi_core junqi_rl scripts tests \
 		--select E9,F63,F7,F82,F811
 
-check: lint-critical test
+lint-core:
+	python3 -m ruff check junqi_core
+
+typecheck:
+	python3 -m mypy junqi_core
+
+check: lint-critical lint-core typecheck test
 
 run:
 	./run_mac.sh
 
-.PHONY: all clean legacy-engine legacy-gui test test-rl lint-critical check run
+.PHONY: all clean legacy-engine legacy-gui test test-rl lint-critical lint-core typecheck check run

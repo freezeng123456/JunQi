@@ -15,20 +15,18 @@ Also provides a uniform-random setup generator for test data / RL rollouts
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from .rules import (
-    ALL_PLACEABLE_PIECES,
     ALL_SEATS,
     CAMP_INDICES,
     PIECE_COUNTS,
-    PieceType,
     SLOTS_PER_SEAT,
     STRONGHOLD_INDICES,
+    PieceType,
     Seat,
     is_back_two_rows_index,
-    is_camp_index,
     is_front_row_index,
     is_stronghold_index,
 )
@@ -145,7 +143,7 @@ def validate_setup(setups: Sequence[Sequence[PieceType | int]]) -> ValidationRes
         )
 
     all_violations: list[str] = []
-    for seat, lineup in zip(ALL_SEATS, setups):
+    for seat, lineup in zip(ALL_SEATS, setups, strict=True):
         result = validate_lineup(lineup)
         for v in result.violations:
             all_violations.append(f"{seat.name}:{v}")
@@ -233,7 +231,7 @@ def generate_random_lineup(rng: random.Random | None = None) -> Lineup:
             f"piece/slot count mismatch: {len(remaining_pieces)} pieces "
             f"vs {len(remaining_slots)} slots"
         )
-    for slot, piece in zip(remaining_slots, remaining_pieces):
+    for slot, piece in zip(remaining_slots, remaining_pieces, strict=True):
         placements[slot] = piece
 
     # Camps get NONE
@@ -330,7 +328,7 @@ def assign_piece_ids(
         )
 
     mapping: dict[tuple[Seat, int], int] = {}
-    for seat, lineup in zip(ALL_SEATS, setups):
+    for seat, lineup in zip(ALL_SEATS, setups, strict=True):
         if len(lineup) != SLOTS_PER_SEAT:
             raise ValueError(
                 f"lineup for {seat.name} has wrong length: "
@@ -428,7 +426,7 @@ def _self_test() -> None:  # pragma: no cover
         assert pid == seat.value * SLOTS_PER_SEAT + slot
         assert 0 <= pid < 4 * SLOTS_PER_SEAT
     # Camp slots never appear in the mapping
-    for (seat, slot) in ids:
+    for (_seat, slot) in ids:
         assert slot not in CAMP_INDICES
 
     print("junqi_core.setup self-test: OK")
