@@ -23,6 +23,23 @@ print(frame.state.move_counter, frame.result)
 snapshots. A UI can therefore scrub freely without mutating the saved
 trajectory or sharing mutable engine state between frames.
 
+## Local visual viewer
+
+Install the optional web dependencies and point the viewer at one explicit
+replay file:
+
+```bash
+python -m pip install -e ".[viz]"
+junqi-replay runs/game.npz
+# open http://127.0.0.1:8765
+```
+
+The service binds to `127.0.0.1` by default and exposes only the replay selected
+on the command line; it has no arbitrary filesystem browsing endpoint. The UI
+supports play/pause, first/previous/next/last, timeline scrubbing, keyboard
+arrows, playback speed, piece labels, event summaries, alive counts and RL
+Top-K/value inspection.
+
 ## RL policy replay
 
 `junqi_rl.analysis.record_game_with_policy(..., record_beliefs=True)` writes a
@@ -30,6 +47,16 @@ trajectory or sharing mutable engine state between frames.
 probabilities, value estimate, and the actual rule-based belief tensor at each
 step. Belief snapshots use shape `(T, 4, 12, 289)` and are no longer silent
 all-zero placeholders.
+
+Policy replay schema v2 also stores an `action_source` for every step:
+
+- `policy_sample`
+- `policy_greedy`
+- `random_opponent`
+
+Schema v1 files remain readable and default to `policy_sample`. Top-K action
+IDs are stored in full 17×17 world coordinates, so terminal and web viewers
+decode the same move.
 
 ```bash
 python tools/replay_viewer.py runs/game.npz --all --json > runs/game.jsonl
@@ -39,3 +66,29 @@ python tools/replay_viewer.py runs/game.npz --step 120 --validate
 The JSONL output is backend-neutral and can feed a notebook, web dashboard, or
 future GTK overlay. It includes step/turn, public combat event, alive-piece
 counts, and policy value/top-K explanations when present.
+
+## Automatic training progress replays
+
+`scripts/train.py` records greedy EMA-policy games against a random opponent
+after each evaluation. Relevant `TrainConfig` fields are:
+
+```yaml
+eval_every: 50
+eval_num_games: 128
+eval_record_games: 1
+eval_record_beliefs: false
+league_max_checkpoints: 12
+league_eval_games: 16
+```
+
+Outputs are written below `save_dir`:
+
+```text
+replays/eval_000050_00_team0.npz
+league.json
+```
+
+Evaluation uses paired seeds and runs the policy on both teams before merging
+exact win/loss/draw/ongoing counts. Metrics include a Wilson 95% confidence
+interval. The league registry stores checkpoint SHA-256 values, bounded
+history, Elo ratings and deterministic historical-opponent sampling.

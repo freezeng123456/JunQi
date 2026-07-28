@@ -25,7 +25,11 @@ make
 ```
 
 也可以使用 `make run`。启动脚本会同时启动 C 引擎和 GTK 客户端。
-客户端中载入或随机生成四方布局后，点击“开始”进入游戏。
+客户端启动后已经带有四方默认布局，直接点击右下角“开始”即可进入游戏；
+需要换布局时，先点击对应一方的“调入布局”并选择 `.jql` 文件。
+
+客户端自身的声音开关位于“设置 → 静音”。它会持久化到
+`legacy_gui/bin/config.ini`，并立即终止仍在播放的声音进程。
 
 ### 安装 Python 核心
 
@@ -63,6 +67,7 @@ make lint-critical     # 阻止未定义名称、重复定义等高置信问题
 make check             # lint-critical + core tests
 make legacy-engine     # 构建 C 引擎
 make legacy-gui        # 构建 GTK 客户端
+make legacy-sanitize   # ASan/UBSan 构建 + 畸形 UDP 协议冒烟
 ```
 
 GitHub Actions 分别验证 Python 核心、RL CPU 和遗留 C/GTK 构建。CUDA
@@ -74,11 +79,19 @@ parity 仍需在带 NVIDIA GPU 的执行器上运行。
 任意步定位，并验证最终状态哈希。
 
 ```bash
+# 本地可视化界面
+python -m pip install -e ".[viz]"
+junqi-replay game.npz
+# 浏览器访问 http://127.0.0.1:8765
+
+# 终端检查/导出
 python tools/replay_viewer.py game.npz --step 120 --validate
 python tools/replay_viewer.py rl_game.npz --all --json
 ```
 
 RL 轨迹可以包含每步 Top-K 动作概率、Value、Belief 快照及训练元数据。
+训练每次评估默认在 `<save_dir>/replays/` 写入进度复盘，并在
+`<save_dir>/league.json` 维护历史 checkpoint、Elo 和交叉对局结果。
 详见 `docs/REPLAY.md`。
 
 ## 训练
@@ -106,6 +119,7 @@ python scripts/train.py --config configs/default.yaml
 - `docs/CUDA_ARCHITECTURE.md`：CUDA 状态和内核布局。
 - `docs/DECISIONS.md`：架构决策记录。
 - `docs/REPLAY.md`：复盘格式和工具。
+- `docs/MAINTENANCE_2026-07-28.md`：本轮修复、验证边界与后续建议。
 - `docs/PROGRESS_2026Q2_CURRICULUM.md`：当前训练实验状态。
 
 ## 安全

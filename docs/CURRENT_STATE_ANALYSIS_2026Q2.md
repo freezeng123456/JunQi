@@ -1,5 +1,9 @@
 # JunQi 项目现状分析 (2026 Q2)
 
+> 历史分析快照：文中“待做”列表保留当时的判断过程。2026-07-28 的实际
+> 维护状态以 `docs/MAINTENANCE_2026-07-28.md` 为准；其中 CombatMemory
+> v6 CUDA、成对评估、checkpoint league 和可视化复盘已经完成。
+
 **日期**：2026-05-17
 **分析者**：本次接手
 **作用**：为本轮特征通道优化与"打过 90% 胜率"训练目标提供基线
@@ -273,9 +277,8 @@ DDP 双卡 (`scripts/launch_h20_ddp.sh`)：
 | 5 | BeliefNet DDP NaN 全 rank 同步 skip | ✅ `belief_ppo.py` |
 | 6 | `eaten_by_pid` 反向投影（layer 4） | ✅ `0c9ecca` (v6) |
 | 7 | v44 配置（v6 + Plan B + Belief） | ✅ `configs/v44_planB_v6_eaten_by_pid.yaml` |
-| 8 | CUDA kernel 同步 v6（layer-4 写入） | 待办（CPU only 暂可训） |
+| 8 | CUDA kernel 同步 v6（layer-4 写入） | ✅ 已完成，待 NVIDIA CI 持续验证 |
 | 9 | 长跑至 Wilson95 下界 ≥ 0.90 | 待 H20 训练 |
-| 7 | 长跑至 Wilson95 下界 ≥ 0.90 | 待 H20 训练 |
 
 ---
 

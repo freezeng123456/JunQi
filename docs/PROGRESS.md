@@ -1,5 +1,8 @@
 # JunQi RL — Progress Log
 
+> Historical experiment log. For the 2026-07-28 implementation and validation
+> baseline, see `docs/MAINTENANCE_2026-07-28.md`.
+
 ## Current status
 
 - **T4 single-GPU phase**: COMPLETE (v17 → v32, 16 runs).
