@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "rules_version": "1.1.0",
+  "category": "siling_flag",
+  "id": "siling_eats_junzh_no_reveal",
+  "description": "SOUTH SILING eats WEST JUNZH. Attacker survived → no reveal.",
+  "tags": [
+    "Q7",
+    "siling",
+    "no-reveal"
+  ],
+  "legacy_divergence": null,
+  "debug_include_private": false,
+  "pre_state": {
+    "turn": 0,
+    "move_counter": 0,
+    "moves_since_last_combat": 0,
+    "pieces": [
+      {
+        "seat": 0,
+        "index": 3,
+        "type": "SILING",
+        "pos": [
+          6,
+          10
+        ],
+        "dead": false
+      },
+      {
+        "seat": 1,
+        "index": 0,
+        "type": "JUNZH",
+        "pos": [
+          5,
+          10
+        ],
+        "dead": false
+      },
+      {
+        "seat": 0,
+        "index": 0,
+        "type": "PAIZH",
+        "pos": [
+          10,
+          11
+        ],
+        "dead": false
+      },
+      {
+        "seat": 2,
+        "index": 0,
+        "type": "PAIZH",
+        "pos": [
+          6,
+          5
+        ],
+        "dead": false
+      },
+      {
+        "seat": 1,
+        "index": 5,
+        "type": "PAIZH",
+        "pos": [
+          4,
+          10
+        ],
+        "dead": false
+      },
+      {
+        "seat": 3,
+        "index": 0,
+        "type": "PAIZH",
+        "pos": [
+          11,
+          6
+        ],
+        "dead": false
+      }
+    ],
+    "info": [
+      {
+        "seat": 0,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      },
+      {
+        "seat": 1,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      },
+      {
+        "seat": 2,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      },
+      {
+        "seat": 3,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      }
+    ]
+  },
+  "actions": [
+    {
+      "seat": 0,
+      "src": [
+        6,
+        10
+      ],
+      "dst": [
+        5,
+        10
+      ]
+    }
+  ],
+  "expected": {
+    "results": [
+      {
+        "src": [
+          6,
+          10
+        ],
+        "dst": [
+          5,
+          10
+        ],
+        "event": "EAT",
+        "flag_reveal_src": false,
+        "flag_reveal_dst": false,
+        "flag_captured": false
+      }
+    ],
+    "terminated": false,
+    "winner_team": null,
+    "draw": false
+  }
+}

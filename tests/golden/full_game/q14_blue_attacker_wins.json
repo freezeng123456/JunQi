@@ -1,0 +1,42 @@
+
+{
+  "schema_version": "1.0",
+  "rules_version": "1.1.0",
+  "category": "full_game",
+  "id": "q14_blue_attacker_wins",
+  "description": "Q14 mirror: blue team (RIGHT) attacker wins via mutual destruction. Pre: OPPS + LEFT dead. RIGHT's SHIZH attacks HOME's SHIZH adjacent → same-rank BOMB → both die simultaneously → both teams fully dead → attacker (RIGHT, team=1) wins.",
+  "tags": ["Q14", "mutual-destruction", "attacker-wins", "full-game", "blue-attacker"],
+  "legacy_divergence": "Q14 not in legacy (ADR-016).",
+  "debug_include_private": false,
+  "pre_state": {
+    "turn": 1,
+    "move_counter": 220,
+    "moves_since_last_combat": 5,
+    "pieces": [
+      { "seat": 0, "index": 14, "type": "SHIZH", "pos": [6, 10], "dead": false },
+      { "seat": 1, "index": 0,  "type": "SHIZH", "pos": [5, 10], "dead": false }
+    ],
+    "info": [
+      { "seat": 0, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 1, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 2, "dead": true,  "flag_revealed": true,  "jump_count": 0 },
+      { "seat": 3, "dead": true,  "flag_revealed": true,  "jump_count": 0 }
+    ]
+  },
+  "actions": [
+    { "seat": 1, "src": [5, 10], "dst": [6, 10] }
+  ],
+  "expected": {
+    "results": [
+      {
+        "src": [5, 10], "dst": [6, 10],
+        "event": "BOMB",
+        "flag_reveal_src": false, "flag_reveal_dst": false, "flag_captured": false,
+        "seats_died_this_step": [0, 1]
+      }
+    ],
+    "terminated": true,
+    "winner_team": 1,
+    "draw": false
+  }
+}

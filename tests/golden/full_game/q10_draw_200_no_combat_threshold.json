@@ -1,0 +1,44 @@
+
+{
+  "schema_version": "1.0",
+  "rules_version": "1.1.0",
+  "category": "full_game",
+  "id": "q10_draw_199_no_combat_combat_resets",
+  "description": "Q10 no-combat-counter edge: moves_since_last_combat is 199 (one away from 200 threshold). HOME moves (empty destination, MOVE event) → counter reaches 200 → draw triggers. Verifies the counter increments on MOVE and is reset only by EAT/KILLED/BOMB.",
+  "tags": ["Q10", "draw-threshold", "no-combat-counter", "full-game"],
+  "legacy_divergence": "Q10 not in legacy (ADR-010).",
+  "debug_include_private": false,
+  "pre_state": {
+    "turn": 0,
+    "move_counter": 500,
+    "moves_since_last_combat": 199,
+    "pieces": [
+      { "seat": 0, "index": 2, "type": "PAIZH", "pos": [8, 11], "dead": false },
+      { "seat": 1, "index": 2, "type": "PAIZH", "pos": [5, 8],  "dead": false },
+      { "seat": 2, "index": 2, "type": "PAIZH", "pos": [8, 5],  "dead": false },
+      { "seat": 3, "index": 2, "type": "PAIZH", "pos": [11, 8], "dead": false }
+    ],
+    "info": [
+      { "seat": 0, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 1, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 2, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 3, "dead": false, "flag_revealed": false, "jump_count": 0 }
+    ]
+  },
+  "actions": [
+    { "seat": 0, "src": [8, 11], "dst": [8, 12] }
+  ],
+  "expected": {
+    "results": [
+      {
+        "src": [8, 11], "dst": [8, 12],
+        "event": "MOVE",
+        "flag_reveal_src": false, "flag_reveal_dst": false, "flag_captured": false,
+        "seats_died_this_step": []
+      }
+    ],
+    "terminated": true,
+    "winner_team": null,
+    "draw": true
+  }
+}

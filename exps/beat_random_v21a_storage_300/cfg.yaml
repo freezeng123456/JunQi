@@ -1,0 +1,132 @@
+# ============================================================================
+# beat_random_v21a_storage_300 — middle-ground: big buffer but bounded.
+#
+# Follow-up to v20 (which confirmed the "big buffer → good win_rate"
+# hypothesis but crashed OOM at rollout ~420). This run tests whether
+# we need the FULL history or whether a sliding window of 300 rollouts'
+# worth of samples is sufficient.
+#
+# Change vs v17/v20: storage_duration: 2048 → 300.
+#
+# Memory budget (T4 14.9 GB):
+#   Steady-state buffer rows: 300 × 1024 = 307k
+#     arrangements (one-hot fp32) : 307k × 30 × 13 × 4 B  = 478 MB
+#     log_probs   (fp32)          : 307k × 30 × 13 × 4 B  = 478 MB
+#     values      (fp32)          : 307k × 30 ×  3 × 4 B  = 110 MB
+#     ents        (fp32)          : 307k × 30 ×  4 B      =  37 MB
+#     misc (seat, step)           :                       =   5 MB
+#                                 total                   ≈ 1.1 GB
+#   add_arrangements peak (cat temp): ~0.7 GB extra
+#   Steady-state budget remaining for PPO + torch.compile: ~12 GB
+#
+# Prediction bracket:
+#   - If win_rate ≥ 0.80 peak, we don't need full history — storage_duration
+#     of a few hundred rollouts is enough for arr replay diversity.
+#   - If win_rate ≤ 0.60, we need to try v21b (more samples per iter
+#     rather than longer replay).
+# ============================================================================
+
+arr:
+  enabled: true
+  ema_decay: 0.999
+  n_arr: 1024
+  refresh_every: 1
+  # MIDDLE GROUND: 300 rollouts × 1024 = 307k rows. Large enough that the
+  # arr value net sees early-training "winning" samples for ~a full run,
+  # but small enough that we stay under OOM (v20 crashed at ~420k rows).
+  storage_duration: 300
+  reg_temp_init: 0.1
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_norm: 10.0
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: float32
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+
+device: cuda
+env:
+  max_num_moves: 4000
+  num_envs: 128
+  seed: 42
+  steps_per_env: 512
+  use_gpu_rollout: true
+eval_every: 10
+log_every: 5
+
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.2
+  dtype: float16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.1
+  lr_ceil: 0.0001
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.267
+  num_epochs_per_rollout: 1
+  minibatch_size: 512
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: true
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+  net:
+    action_key_dim: 32
+    cnn_channels: 64
+    cnn_layers: 2
+    depth: 4
+    dropout: 0.0
+    embed_dim: 128
+    ff_factor: 4
+    n_head: 4
+    pos_emb_std: 0.02
+    use_cat_vf: true
+
+resume: ''
+save_dir: exps/beat_random_v21a_storage_300
+save_every: 50
+seed: 42
+torch_deterministic: false
+total_rollouts: 500
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: ''

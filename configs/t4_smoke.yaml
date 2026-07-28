@@ -1,0 +1,71 @@
+# configs/t4_smoke.yaml — T4-optimized config for T-11 smoke experiment
+# Goal: verify PPO training converges on a single Tesla T4 (4 TFLOPS FP32)
+# Usage: python scripts/train.py --config configs/t4_smoke.yaml
+#
+# Expected: 24h training, win-rate vs random reaches ≥70%
+# Network: small (d_model=128, depth=4) for fast iterations on T4
+
+# ── Environment ───────────────────────────────────────────────────────────
+env:
+  num_envs: 64           # 64 envs — balanced for T4 memory
+  steps_per_env: 128     # 128 steps per env per rollout
+  max_num_moves: 4000    # standard draw threshold
+  seed: 42
+  use_gpu_rollout: true  # use GpuRollout for all-GPU game logic
+
+# ── Network (small, T4-friendly) ──────────────────────────────────────────
+net:
+  cnn_channels: 64       # smaller CNN stem
+  cnn_layers: 2          # 2 conv layers
+  depth: 4               # 4 transformer blocks (vs 6 default)
+  embed_dim: 128         # 128-d embedding (vs 256 default)
+  n_head: 4              # 4 attention heads
+  ff_factor: 4           # FFN hidden = 4 × 128 = 512
+  dropout: 0.0
+  use_cat_vf: false
+  action_key_dim: 32
+
+# ── PPO ───────────────────────────────────────────────────────────────────
+ppo:
+  clip_range: 0.2
+  vf_coef: 1.0
+  policy_coef: 1.0
+  temperature_coef: 0.05
+  temperature_ceil: 0.1
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true
+  kl_coef: 0.1
+  gamma: 1.0
+  gae_lambda: 0.5
+  td_lambda: 0.8
+  adv_filt_thresh: 0.01
+  adv_filt_rate: 0.75
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_ceil: 2.0e-4        # slightly higher LR for faster convergence
+  lr_floor: 5.0e-6
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+  ema_decay: 0.999
+  num_epochs_per_rollout: 3  # 3 PPO epochs per rollout
+  minibatch_size: 256        # fits in T4 memory
+  dtype: "float32"           # T4 has limited bf16 support
+  torch_compile: false
+
+# ── Run logistics ─────────────────────────────────────────────────────────
+save_dir: "exps/t4_smoke"
+total_rollouts: 5000         # ~5000 rollouts for 24h on T4
+save_every: 100
+eval_every: 50               # evaluate every 50 rollouts
+log_every: 10
+
+# ── Logging ───────────────────────────────────────────────────────────────
+use_wandb: false
+wandb_project: "junqi-rl"
+wandb_run_name: "t4-smoke-v1"
+
+# ── Misc ──────────────────────────────────────────────────────────────────
+seed: 42
+device: "cuda"
+torch_deterministic: false

@@ -1,0 +1,83 @@
+# configs/default.yaml — Default PPO training config for 四国军棋
+# Usage: python scripts/train.py --config configs/default.yaml
+
+# ── Environment ───────────────────────────────────────────────────────────
+env:
+  num_envs: 32          # parallel environments; increase for faster data
+  steps_per_env: 128    # steps per env per rollout; total = num_envs × steps
+  max_num_moves: 4000   # max moves per episode (draws after this)
+  seed: 42
+
+# ── Network ───────────────────────────────────────────────────────────────
+net:
+  cnn_channels: 128     # CNN stem output channels
+  cnn_layers: 3         # number of conv layers
+  depth: 6              # transformer depth (number of blocks)
+  embed_dim: 256        # token embedding dimension
+  n_head: 8             # number of attention heads
+  ff_factor: 4          # FFN hidden dim = ff_factor × embed_dim
+  dropout: 0.0          # dropout (use 0.0 for RL)
+  use_cat_vf: false     # categorical value function (false = scalar MSE)
+  action_key_dim: 64    # dimension for bilinear action head Q/K projections
+
+# ── PPO ───────────────────────────────────────────────────────────────────
+ppo:
+  # Core PPO
+  clip_range: 0.2
+  vf_coef: 1.0
+  policy_coef: 1.0
+
+  # Entropy / temperature annealing
+  temperature_coef: 0.05
+  temperature_ceil: 0.1
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true  # magnet loss (uniform distribution target)
+
+  # KL regularisation
+  kl_coef: 0.1
+
+  # GAE / returns
+  gamma: 1.0
+  gae_lambda: 0.5
+  td_lambda: 0.8
+  adv_filt_thresh: 0.01
+  adv_filt_rate: 0.75
+
+  # Optimiser (AdamW + power schedule)
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_ceil: 1.0e-4
+  lr_floor: 5.0e-6
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+
+  # EMA
+  ema_decay: 0.999
+
+  # Schedule
+  num_epochs_per_rollout: 4
+  minibatch_size: 512
+
+  # Mixed precision
+  dtype: "bfloat16"
+
+  # torch.compile (set true on PyTorch >= 2.0 for ~20% speedup)
+  torch_compile: false
+
+# ── Run logistics ─────────────────────────────────────────────────────────
+save_dir: "exps/default"
+total_rollouts: 10000
+save_every: 200
+eval_every: 100
+log_every: 10
+
+# ── Logging ───────────────────────────────────────────────────────────────
+use_wandb: false
+wandb_project: "junqi-rl"
+wandb_run_name: ""
+
+# ── Misc ──────────────────────────────────────────────────────────────────
+seed: 42
+device: "cuda"
+torch_deterministic: false

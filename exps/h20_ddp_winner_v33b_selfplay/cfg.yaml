@@ -1,0 +1,167 @@
+# v33b — 6-card DDP self-play, retry after v33a R107 NaN crash.
+#
+# v33a crash root cause (see exps/_crash_diagnosis_v33a/ + commit log):
+#   * R69 loss_v=0.2186 (10x spike) -> R70 win_rate dropped 0.641 -> 0.422
+#   * Recovered to R100 win_rate=0.664 (best so far)
+#   * R107: gradient explosion produced NaN params; existing forward-NaN
+#     guard only caught it AFTER params poisoned. EMA shadow = 0.999*shadow
+#     + 0.001*NaN = NaN within ~10 steps. trainer.ema.model became all-NaN
+#     and eval permanently degraded to ~0.5.
+#
+# v33b code-level fixes (committed alongside this cfg):
+#   1. PPOTrainer & ArrangementPPOTrainer now have a DDP-safe gradient-NaN
+#      guard: any rank with non-finite grad_norm triggers all_reduce(MAX)
+#      that propagates the skip decision to every rank, optimizer.step()
+#      is skipped, params remain at last-known-good state. Counter
+#      train/grad_skip_total surfaced in logs.
+#   2. _value_loss switched from hard NLL to Ataraxos soft CE (paper
+#      Appendix D.4): scalar return -> linear-interp 3-bin soft target ->
+#      soft cross-entropy with predicted log-probs. Bounds the per-sample
+#      gradient magnitude (was ~200 in worst case), eliminates the loss_v
+#      spikes that seeded the v33a R69 explosion.
+#
+# v33b cfg-level conservatism (vs v33a, lower=safer):
+#   - lr_ceil:        1e-4 -> 5e-5    (half the peak LR)
+#   - clip_range:     0.20 -> 0.15    (tighter PPO trust region)
+#   - max_grad_norm:  0.267 -> 0.2    (more aggressive grad clipping)
+#   - kl_coef:        0.10 -> 0.20    (stronger KL anchor to old policy)
+#
+# Resume strategy: NONE — start from scratch.
+#
+#   We initially planned to resume from v33a's R100 ckpt, but a 30R smoke
+#   showed every gradient on the resume path was NaN (forces guard to skip
+#   every step, no actual training). The R100 weights themselves are
+#   clean (verified: 72/72 tensors finite); the failure is at the Adam
+#   optimizer-state mismatch level. Specifically: the saved Adam moments
+#   were accumulated from ~4800 hard-NLL value-loss gradient steps. With
+#   the new soft-CE loss, gradient magnitudes/directions differ, and the
+#   stale momentum + variance estimates produce numerical instability
+#   on the first few resumed steps.
+#
+#   By contrast, a from-scratch 30R smoke under v33b code is healthy:
+#   win_rate climbed 0.570 -> 0.719 with no NaN, loss_v stays bounded
+#   (~0.6, vs v33a's wild 0.001-0.05+ swings under hard NLL). So the
+#   cleanest path is just start over with fresh optimizer state.
+#
+# Estimated wall-clock: 1500R x 14s/R ~= 5.8 hours on this 6xH20 box.
+
+arr:
+  ema_decay: 0.999
+  enabled: true
+  n_arr: 1024
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    # See v33a cfg for why fp32: torch 2.1 + DDP + bf16 ArrangementNet -> SIGFPE.
+    autocast_dtype: float32
+    batch_size: 256
+    clip_range: 0.15        # was 0.20; tighter trust region for self-play
+    ent_pred_coef: 0.5
+    kl_coef: 0.2            # was 0.1 (paper-aligned); 2x stronger anchor
+    lr: 0.0003
+    max_grad_norm: 0.4      # was 0.5; tighter clip
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+  refresh_every: 1
+  reg_norm: 10.0
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_temp_init: 0.1
+  storage_duration: 300
+belief:
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  enabled: true
+  infer_chunk_size: 256
+  net: null
+  ppo: null
+  refresh_every: 5
+  warmup_rollouts: 100
+device: cuda
+# Tightened early-stop after the v33a near-collapse: if win_rate stays below
+# 0.45 for 5 evals after R200 we abort. v33a actually RECOVERED to 0.664 at
+# R100 from a temporary R70 dip; the threshold accommodates similar
+# transient drops without aborting prematurely.
+early_stop_min_rollout: 200
+early_stop_patience: 5
+early_stop_win_rate: 0.45
+env:
+  max_num_moves: 4000
+  num_envs: 512
+  # Different seed than v33a (was 105) to avoid retracing the exact
+  # trajectory that hit the R107 instability. Combined with the gradient
+  # guard + soft CE loss + tighter cfg this gives us a genuine second roll
+  # of the dice rather than a re-test of identical data.
+  seed: 205
+  steps_per_env: 512
+  use_gpu_rollout: true
+eval_every: 10
+log_every: 5
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.15          # was 0.20; tighter PPO trust region
+  dtype: bfloat16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.2              # was 0.1; 2x stronger KL anchor (anti-drift)
+  lr_ceil: 5.0e-05          # was 1e-4; halved peak LR for self-play stability
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.2        # was 0.267; tighter grad clip
+  minibatch_size: 2048
+  net:
+    action_key_dim: 32
+    cnn_channels: 64
+    cnn_layers: 2
+    depth: 4
+    dropout: 0.0
+    embed_dim: 128
+    ff_factor: 4
+    n_head: 4
+    pos_emb_std: 0.02
+    use_cat_vf: true
+  num_epochs_per_rollout: 1
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: false
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+random_opponent: false        # the structural change for breaking 0.80
+# From scratch (see "Resume strategy" comment above for rationale).
+resume: ''
+save_dir: exps/h20_ddp_winner_v33b_selfplay
+save_every: 25
+seed: 205
+torch_deterministic: false
+total_rollouts: 1500
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: v33b_ddp_selfplay_fresh

@@ -1,0 +1,122 @@
+# ============================================================================
+# beat_random_v16_arrnet — P0 ArrangementNet validation experiment.
+#
+# Goal: measure whether joint training of the arrangement network with
+#       the move network yields a measurable win-rate improvement over
+#       v15_3bin (fixed uniform-random setup pool).
+#
+# Changes vs v15_3bin:
+#   * arr.enabled = true
+#   * arr.n_arr = 1024     (256 pool entries, ×4 seats each)
+#   * arr.refresh_every = 1  (regenerate every rollout — Ataraxos default)
+#   * arr.storage_duration = 2048  (= 4 × steps_per_env)
+#   * ArrangementNet: depth=4, embed_dim=512, n_head=8, use_cat_vf=true
+#   * ArrangementPPO: lr=3e-4, clip_range=0.2, kl_coef=0.01, batch=256,
+#     num_epoch_per_train=4, ent_pred_coef=0.5
+#
+# Everything else (move net, main-PPO, env) is identical to v15_3bin so
+# the win-rate delta isolates the arrangement-net contribution.
+# ============================================================================
+
+device: cuda
+
+env:
+  max_num_moves: 4000
+  num_envs: 128
+  seed: 42
+  steps_per_env: 512
+  use_gpu_rollout: true
+
+eval_every: 10
+log_every: 5
+
+# ---- Move network (identical to v15_3bin) ----
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+
+# ---- Move PPO (identical to v15_3bin) ----
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.2
+  dtype: float16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.1
+  lr_ceil: 0.0001
+  lr_coef: 0.5
+  lr_decay: 0.6
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.267
+  minibatch_size: 512
+  net:
+    action_key_dim: 32
+    cnn_channels: 64
+    cnn_layers: 2
+    depth: 4
+    dropout: 0.0
+    embed_dim: 128
+    ff_factor: 4
+    n_head: 4
+    pos_emb_std: 0.02
+    use_cat_vf: true
+  num_epochs_per_rollout: 4
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: true
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+
+# ---- Arrangement net (NEW for v16) ----
+arr:
+  enabled: true
+  n_arr: 1024
+  refresh_every: 1
+  storage_duration: 2048
+  ema_decay: 0.999
+  net:
+    depth: 4
+    n_head: 8
+    embed_dim: 512
+    ff_factor: 4
+    dropout: 0.0
+    pos_emb_std: 0.1
+    use_cat_vf: true
+    n_vf_cat: 3
+  ppo:
+    lr: 3.0e-4
+    weight_decay: 0.0
+    clip_range: 0.2
+    policy_coef: 1.0
+    vf_coef: 0.5
+    ent_pred_coef: 0.5
+    kl_coef: 0.01
+    max_grad_norm: 1.0
+    batch_size: 256
+    num_epoch_per_train: 4
+    autocast_dtype: float32
+
+resume: ''
+save_dir: exps/beat_random_v16_arrnet
+save_every: 50
+seed: 42
+torch_deterministic: false
+total_rollouts: 2000
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: ''

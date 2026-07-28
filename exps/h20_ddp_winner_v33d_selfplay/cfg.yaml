@@ -1,0 +1,147 @@
+# v33d — 6-card DDP self-play, fp16-collect NaN root cause fix.
+#
+# v33c post-mortem (see exps/_crash_diagnosis_v33c/ + commit log):
+#
+#   v33c had real self-play (random_opponent fix worked, ret hovered ~0).
+#   But around R69-R99 the value head over-fit (loss_v dropped to 0.05),
+#   and at R100-R104 the collect path produced NaN log_probs / NaN values
+#   then propagated through compute_returns into every advantage. Every
+#   minibatch hit the grad-NaN guard; train_step froze at 9345; metrics
+#   went all-NaN; eval went to win_rate=0 (avg_len=512064 = stall mode).
+#
+#   ROOT CAUSE: gpu_collector.py hardcoded
+#       torch.amp.autocast("cuda", dtype=torch.float16)
+#   around the EMA collect's policy.act(...). fp16 has only ±65504
+#   dynamic range; once self-play made the policy confident (extreme
+#   logits, saturated value-head outputs), the forward overflowed and
+#   returned NaN. bf16 has fp32 dynamic range so the same forward stays
+#   finite. The trainer was already using bf16 — the inconsistency is
+#   what hit us.
+#
+# v33d code-level fix (commit follows):
+#
+#   * gpu_collector.collect_rollout_gpu_v2 now takes ``autocast_dtype``
+#     (defaults to bf16). train.py passes ``cfg.ppo.get_dtype()``.
+#   * Both autocast blocks (main collect loop + bootstrap value at
+#     end-of-rollout) use the configured dtype.
+#   * tests/test_collect_autocast_bf16.py: 3 cases verifying bf16 stays
+#     finite where fp16 overflows + locks the default.
+#
+# v33d cfg-level changes (vs v33c): NONE. Same hyperparams; the fix is
+# purely in the code path. We restart from scratch (resume='') with a
+# new seed (305 -> 405) to get a fresh trajectory; v33c's R75 ckpt is
+# clean but the policy at R100 had already drifted toward stalling and
+# isn't useful as a warm start.
+#
+# Estimated wall-clock: 1500R x ~14s/R ~= 5.8 hours.
+
+arr:
+  ema_decay: 0.999
+  enabled: true
+  n_arr: 1024
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: float32
+    batch_size: 256
+    clip_range: 0.15
+    ent_pred_coef: 0.5
+    kl_coef: 0.2
+    lr: 0.0003
+    max_grad_norm: 0.4
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+  refresh_every: 1
+  reg_norm: 10.0
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_temp_init: 0.1
+  storage_duration: 300
+belief:
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  enabled: true
+  infer_chunk_size: 256
+  net: null
+  ppo: null
+  refresh_every: 5
+  warmup_rollouts: 100
+device: cuda
+early_stop_min_rollout: 200
+early_stop_patience: 5
+early_stop_win_rate: 0.45
+env:
+  max_num_moves: 4000
+  num_envs: 512
+  seed: 405
+  steps_per_env: 512
+  use_gpu_rollout: true
+eval_every: 10
+log_every: 5
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.15
+  dtype: bfloat16             # <- now also drives the COLLECT autocast in v33d
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.2
+  lr_ceil: 5.0e-05
+  lr_coef: 0.5
+  lr_decay: 0.6
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.2
+  minibatch_size: 2048
+  net:
+    action_key_dim: 32
+    cnn_channels: 64
+    cnn_layers: 2
+    depth: 4
+    dropout: 0.0
+    embed_dim: 128
+    ff_factor: 4
+    n_head: 4
+    pos_emb_std: 0.02
+    use_cat_vf: true
+  num_epochs_per_rollout: 1
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: false
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+random_opponent: false
+resume: ''
+save_dir: exps/h20_ddp_winner_v33d_selfplay
+save_every: 25
+seed: 405
+torch_deterministic: false
+total_rollouts: 1500
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: v33d_collect_bf16

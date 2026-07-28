@@ -1,0 +1,55 @@
+# configs/small.yaml — Small-scale config for quick smoke-tests / development
+# Usage: python scripts/train.py --config configs/small.yaml
+
+env:
+  num_envs: 8
+  steps_per_env: 64
+  max_num_moves: 2000
+  seed: 0
+
+net:
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 3
+  embed_dim: 128
+  n_head: 4
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: false
+  action_key_dim: 32
+
+ppo:
+  clip_range: 0.2
+  vf_coef: 1.0
+  policy_coef: 1.0
+  temperature_coef: 0.05
+  temperature_ceil: 0.1
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true
+  kl_coef: 0.1
+  gamma: 1.0
+  gae_lambda: 0.5
+  td_lambda: 0.8
+  adv_filt_thresh: 0.01
+  adv_filt_rate: 0.75
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_ceil: 1.0e-4
+  lr_floor: 5.0e-6
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+  ema_decay: 0.999
+  num_epochs_per_rollout: 2
+  minibatch_size: 128
+  dtype: "float32"    # float32 for CPU-friendly testing
+  torch_compile: false
+
+save_dir: "exps/smoke"
+total_rollouts: 50
+save_every: 10
+eval_every: 20
+log_every: 5
+use_wandb: false
+seed: 0
+device: "cpu"

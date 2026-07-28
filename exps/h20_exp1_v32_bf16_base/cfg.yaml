@@ -1,0 +1,119 @@
+# H20 Experiment 1 — v32 baseline with bf16 + 4x envs.
+# This is the "does H20 deliver the expected 4-5x speedup with no surprises"
+# sanity control. Same algorithmic config as the completed v32 run (1M
+# JunqiNet, 3.89M BeliefNet, 12.6M ArrNet, lr_decay=1.1) with the only
+# changes being:
+#   - dtype: float16 -> bfloat16 (native H20, no grad scaler needed)
+#   - num_envs: 128 -> 512 (H20 has 6.4x T4 memory)
+#   - total_rollouts: 1500 -> 500 (same wall-clock budget as T4 500R
+#     baseline thanks to faster hardware)
+# Expected: matches v25/v32 final win_rate (~0.70) at ~110 min wall-clock.
+arr:
+  ema_decay: 0.999
+  enabled: true
+  n_arr: 1024
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+  refresh_every: 1
+  reg_norm: 10.0
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_temp_init: 0.1
+  storage_duration: 300
+belief:
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  enabled: true
+  infer_chunk_size: 256
+  net: null
+  ppo: null
+  refresh_every: 5
+  warmup_rollouts: 100
+device: cuda
+early_stop_min_rollout: 200
+early_stop_patience: 5
+early_stop_win_rate: 0.3
+env:
+  max_num_moves: 4000
+  num_envs: 512
+  seed: 101
+  steps_per_env: 512
+  use_gpu_rollout: true
+eval_every: 10
+log_every: 5
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.2
+  dtype: bfloat16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.1
+  lr_ceil: 0.0001
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.267
+  minibatch_size: 2048
+  net:
+    action_key_dim: 32
+    cnn_channels: 64
+    cnn_layers: 2
+    depth: 4
+    dropout: 0.0
+    embed_dim: 128
+    ff_factor: 4
+    n_head: 4
+    pos_emb_std: 0.02
+    use_cat_vf: true
+  num_epochs_per_rollout: 1
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: true
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+resume: ''
+save_dir: exps/h20_exp1_v32_bf16_base
+save_every: 100
+seed: 101
+torch_deterministic: false
+total_rollouts: 500
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: h20_exp1_v32_bf16_base

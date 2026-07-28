@@ -1,0 +1,166 @@
+# v33c — 6-card DDP self-play, real self-play this time.
+#
+# v33b post-mortem (see exps/_crash_diagnosis_v33b/ + commit log):
+#
+#   The "self-play" we ran in v33a/b was actually HALF-self-play: the
+#   collector played seats 1, 3 with the trainable policy, but
+#   ``RolloutBufferGPU.compute_returns`` then unconditionally ZEROED
+#   advantages for seats 1, 3 (a leftover from vs-random training). So:
+#     - Data distribution: self-play (good)
+#     - Gradient signal: ONLY seats 0, 2 = team 0 perspective (bad)
+#   Symptom: training-data ``ret`` was persistently +0.6 (team 0 winning
+#   self-play), win_rate vs random eval climbed slowly to ~0.6 not 0.85.
+#
+#   Additionally, GAE used ``δ_t = r_t + γ·V_{t+1} - V_t`` straight,
+#   even though consecutive seats in 4-player JunQi are usually on
+#   OPPOSITE teams (S→W→N→E rotation). With value head outputs in the
+#   ACTING seat's canonical frame, V_{t+1} should be NEGATED across
+#   team boundaries before being added to r_t. The old code didn't do
+#   this, contaminating advantage estimates with sign-flipped V values
+#   on every cross-team step.
+#
+# v33c code-level fixes (committed alongside this cfg):
+#   1. RolloutBufferGPU.__init__ now takes ``random_opponent: bool``;
+#      compute_returns gates the seats-1,3 zeroing on this flag.
+#      train.py passes cfg.random_opponent through.
+#   2. compute_returns now flips V_{t+1}'s sign when teams differ.
+#      Bootstrap value (last_seats arg) lets the very last delta also
+#      use the correct flip. Caller in gpu_collector passes acting_t.
+#   3. minibatches() handles self-play case (no zeroed advantages) with
+#      an exact own_mask = all-True instead of relying on adv != 0.
+#   4. New unit tests in tests/test_gae_perspective.py — 5 cases
+#      including the regression sentinel that catches reverts of fix #2.
+#
+# v33c cfg-level changes (vs v33b):
+#   - lr_decay:    1.1 -> 0.6  (slower decay; lr stays near ceiling longer)
+#   - random_opponent: false   (unchanged; combined with fix #1 = real self-play)
+#   - All other knobs identical to v33b conservative settings (already
+#     verified safe by v33b's no-NaN-crash record over 218 rollouts).
+#
+# Expected behaviour shift on R0-R30:
+#   - v33b training ret: persistently positive (+0.18 -> +0.60 climbing)
+#   - v33c training ret: should hover near 0 (true self-play balance —
+#     team 0 and team 1 share the same policy, so neither wins systematically)
+#   - eval win_rate vs random should now climb FASTER than v33b (since both
+#     team perspectives contribute to gradient and we have ~2x effective
+#     learning data).
+#
+# Estimated wall-clock: 1500R x ~14s/R ~= 5.8 hours.
+
+arr:
+  ema_decay: 0.999
+  enabled: true
+  n_arr: 1024
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: float32        # bf16+DDP+ArrNet -> SIGFPE on torch 2.1
+    batch_size: 256
+    clip_range: 0.15
+    ent_pred_coef: 0.5
+    kl_coef: 0.2
+    lr: 0.0003
+    max_grad_norm: 0.4
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+  refresh_every: 1
+  reg_norm: 10.0
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_temp_init: 0.1
+  storage_duration: 300
+belief:
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  enabled: true
+  infer_chunk_size: 256
+  net: null
+  ppo: null
+  refresh_every: 5
+  warmup_rollouts: 100
+device: cuda
+early_stop_min_rollout: 200
+early_stop_patience: 5
+early_stop_win_rate: 0.45
+env:
+  max_num_moves: 4000
+  num_envs: 512
+  # Different seed than v33a/b — completely fresh.
+  seed: 305
+  steps_per_env: 512
+  use_gpu_rollout: true
+eval_every: 10
+log_every: 5
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.15
+  dtype: bfloat16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.2
+  lr_ceil: 5.0e-05
+  lr_coef: 0.5
+  # P1 fix: 1.1 was paper-aligned for 16xH100x1week; we have 6xH20x6h with
+  # ~5e5 total steps. With decay=1.1 the lr hit floor 5e-6 around R1060
+  # leaving 440 rollouts of near-zero learning. decay=0.6 keeps lr near
+  # 5e-5 ceiling until R~200 then gentle slope; by R1500 lr ≈ 2.0e-5
+  # (still meaningful) instead of stuck at floor. Matches v29 pattern
+  # ("slower lr_decay 1.1->0.6 to unstick the plateau").
+  lr_decay: 0.6
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.2
+  minibatch_size: 2048
+  net:
+    action_key_dim: 32
+    cnn_channels: 64
+    cnn_layers: 2
+    depth: 4
+    dropout: 0.0
+    embed_dim: 128
+    ff_factor: 4
+    n_head: 4
+    pos_emb_std: 0.02
+    use_cat_vf: true
+  num_epochs_per_rollout: 1
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: false
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+random_opponent: false             # the structural change for true self-play
+resume: ''
+save_dir: exps/h20_ddp_winner_v33c_selfplay
+save_every: 25
+seed: 305
+torch_deterministic: false
+total_rollouts: 1500
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: v33c_real_selfplay

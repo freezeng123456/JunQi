@@ -1,0 +1,142 @@
+# v43_planB_belief_on — Plan B + BeliefNet training (post DDP NaN-sync fix).
+#
+# Builds on v42_planB_T_vs_random:
+#   * mixed_setup: own team canonical T, enemy team uniform-random
+#   * CombatMemory v5 layer-3 (OBS_CHANNELS=352)
+#   * v38 value recipe: reward_shaping=false, train_value_on_random_seats=true
+#
+# Changes vs v42:
+#   * disable_belief_train: false
+#   * belief.warmup_rollouts: 30  (move-policy warms up first)
+#   * total_rollouts: 500
+#
+# Expected: BeliefNet gives explicit enemy-type priors → fewer stall-collapse
+# spikes than v42's "move net only" setup.
+#
+# Run (2-rank H20):
+#   bash scripts/launch_h20_ddp.sh configs/v43_planB_belief_on.yaml 2
+#
+# Dense eval (90% gate):
+#   python scripts/eval_random_dense.py \\
+#     --ckpt exps/v43_planB_belief_on/ckpt_best.pt \\
+#     --config configs/v43_planB_belief_on.yaml --num-games 2048
+
+env:
+  num_envs: 192
+  steps_per_env: 512
+  max_num_moves: 4000
+  seed: 143
+  use_gpu_rollout: true
+
+net:
+  cnn_channels: 96
+  cnn_layers: 3
+  depth: 6
+  embed_dim: 192
+  n_head: 6
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 48
+  pos_emb_std: 0.02
+
+belief:
+  enabled: true
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  infer_chunk_size: 256
+  refresh_every: 5
+  warmup_rollouts: 30
+  net:
+    n_encoder_layer: 6
+    embed_dim: 512
+    n_head: 8
+    ff_factor: 4
+    dropout: 0.1
+  ppo: null
+
+arr:
+  enabled: true
+  n_arr: 1024
+  refresh_every: 1
+  storage_duration: 300
+  ema_decay: 0.999
+  reg_norm: 10.0
+  reg_temp_init: 0.1
+  reg_temp_floor: 0.0
+  reg_temp_decay: 0.3
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+
+ppo:
+  clip_range: 0.2
+  vf_coef: 1.0
+  policy_coef: 1.0
+  temperature_coef: 0.05
+  temperature_ceil: 0.1
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true
+  kl_coef: 0.1
+  gamma: 1.0
+  gae_lambda: 0.5
+  td_lambda: 0.8
+  adv_filt_thresh: 0.01
+  adv_filt_rate: 0.20
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_ceil: 1.0e-4
+  lr_floor: 5.0e-6
+  lr_schedule_unit: "rollout"
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+  ema_decay: 0.999
+  num_epochs_per_rollout: 4
+  minibatch_size: 1024
+  dtype: "bfloat16"
+  torch_compile: false
+
+save_dir: "exps/v43_planB_belief_on"
+total_rollouts: 500
+save_every: 50
+eval_every: 10
+log_every: 5
+
+early_stop_min_rollout: 2000
+early_stop_patience: 5
+early_stop_win_rate: 0.0
+
+use_wandb: false
+seed: 143
+device: "cuda"
+torch_deterministic: false
+resume: ""
+
+random_opponent: true
+train_value_on_random_seats: true
+reward_shaping: false
+
+mixed_setup: true
+mixed_own_team_styles: ["T"]
+
+disable_arr_train: true
+disable_belief_train: false

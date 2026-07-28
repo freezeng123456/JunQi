@@ -1,0 +1,137 @@
+# v40_dark_pid_features — first long run with CombatMemory v5 layer-3 (per-pid identity).
+#
+# What changed vs v38_value_rescue_100R:
+#
+# * OBS_CHANNELS: 306 → 352 (+46 channels for cm_kill_mine_count[12] +
+#   cm_kill_mine_slot[30] + cm_recency[4]).  Network learns "killer K
+#   ate observer's slot-i piece" instead of just "killer K ate ≥1 PAIZH".
+#   See docs/CURRENT_STATE_ANALYSIS_2026Q2.md §2 for the gap analysis.
+#
+# * num_envs: 256 → 192 (compensate for ~15% obs slab growth on H20)
+# * total_rollouts: 100 → 800 (long run, but break point ≤2-card budget)
+# * adv_filt_rate: 0.20 → 0.25 (slightly looser; the new channels should
+#   stabilise V's |adv| tails so we can train on more samples cheaply)
+# * Everything else inherits the v38 three-fix recipe:
+#     reward_shaping=false
+#     train_value_on_random_seats=true
+#     adv_filt_thresh=0.01
+#
+# DDP: targeted at 2-rank H20 (effective 384 envs).  See
+# scripts/launch_h20_ddp.sh.
+
+env:
+  num_envs: 192
+  steps_per_env: 512
+  max_num_moves: 4000
+  seed: 140
+  use_gpu_rollout: true
+
+net:
+  cnn_channels: 96
+  cnn_layers: 3
+  depth: 6
+  embed_dim: 192
+  n_head: 6
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 48
+  pos_emb_std: 0.02
+
+belief:
+  enabled: true
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  infer_chunk_size: 256
+  refresh_every: 5
+  warmup_rollouts: 20
+  net:
+    n_encoder_layer: 6
+    embed_dim: 512
+    n_head: 8
+    ff_factor: 4
+    dropout: 0.1
+  ppo: null
+
+arr:
+  enabled: true
+  n_arr: 1024
+  refresh_every: 1
+  storage_duration: 300
+  ema_decay: 0.999
+  reg_norm: 10.0
+  reg_temp_init: 0.1
+  reg_temp_floor: 0.0
+  reg_temp_decay: 0.3
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+
+ppo:
+  clip_range: 0.2
+  vf_coef: 1.0
+  policy_coef: 1.0
+  temperature_coef: 0.05
+  temperature_ceil: 0.1
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true
+  kl_coef: 0.1
+  gamma: 1.0
+  gae_lambda: 0.5
+  td_lambda: 0.8
+  adv_filt_thresh: 0.01
+  adv_filt_rate: 0.25            # v38 used 0.20 — relax slightly with
+                                  # better V from the new channels
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_ceil: 1.0e-4
+  lr_floor: 5.0e-6
+  lr_schedule_unit: "rollout"
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+  ema_decay: 0.999
+  num_epochs_per_rollout: 2      # v38 used 4 — Ataraxos uses 1; closer to
+                                  # paper helps when data quality is high
+  minibatch_size: 1024
+  dtype: "bfloat16"
+  torch_compile: false
+
+save_dir: "exps/v40_dark_pid_features"
+total_rollouts: 800
+save_every: 50
+eval_every: 10
+log_every: 5
+
+# Disable early-stop for diagnostic run; we want full curve.
+early_stop_min_rollout: 2000
+early_stop_patience: 5
+early_stop_win_rate: 0.0
+
+use_wandb: false
+seed: 140
+device: "cuda"
+torch_deterministic: false
+resume: ""
+
+random_opponent: true
+train_value_on_random_seats: true   # v38 = true
+reward_shaping: false                # v38 = false

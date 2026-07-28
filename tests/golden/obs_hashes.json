@@ -1,0 +1,362 @@
+[
+  {
+    "seed": 0,
+    "steps": 0,
+    "show_mode": "BRIGHT",
+    "observer": "SOUTH",
+    "sha256": "00ba318ce23a7fc43eb8b815ae215ae910d26f38737c9029238c23253e974443",
+    "spatial_sums": {
+      "piece_own": 25.0,
+      "prob_teammate": 25.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 25.0,
+      "piece_right_side_enemy": 25.0,
+      "belief_left_side": 25.0,
+      "belief_right_side": 25.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 0.0,
+      "board_static": 110.0,
+      "turn_history": 289.0,
+      "move_bucket": 100.0,
+      "active_eat_bucket": 100.0,
+      "passive_survive_bucket": 100.0,
+      "death_reason": 0.0,
+      "dead_at_zero": 0.0
+    },
+    "global_sums": {
+      "remaining_left_side": 25.0,
+      "remaining_right_side": 25.0,
+      "flag_revealed": 0.0
+    }
+  },
+  {
+    "seed": 0,
+    "steps": 0,
+    "show_mode": "HALF_DARK",
+    "observer": "SOUTH",
+    "sha256": "1d9a6f8a5451c84b9caddb1a4513e59d19dcfd4d498955d9ae4912300cb51bb8",
+    "spatial_sums": {
+      "piece_own": 25.0,
+      "prob_teammate": 25.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 25.0,
+      "piece_right_side_enemy": 25.0,
+      "belief_left_side": 25.0,
+      "belief_right_side": 25.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 0.0,
+      "board_static": 110.0,
+      "turn_history": 289.0,
+      "move_bucket": 50.0,
+      "active_eat_bucket": 50.0,
+      "passive_survive_bucket": 50.0,
+      "death_reason": 0.0,
+      "dead_at_zero": 0.0
+    },
+    "global_sums": {
+      "remaining_left_side": 25.0,
+      "remaining_right_side": 25.0,
+      "flag_revealed": 0.0
+    }
+  },
+  {
+    "seed": 0,
+    "steps": 100,
+    "show_mode": "BRIGHT",
+    "observer": "SOUTH",
+    "sha256": "c75e12dd3f4477e0e694bd11b321fee846edb2965456464526b1193a8544df05",
+    "spatial_sums": {
+      "piece_own": 18.0,
+      "prob_teammate": 21.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 19.0,
+      "piece_right_side_enemy": 19.0,
+      "belief_left_side": 19.0,
+      "belief_right_side": 19.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 289.0,
+      "board_static": 110.0,
+      "turn_history": 304.8949890136719,
+      "move_bucket": 77.0,
+      "active_eat_bucket": 79.0,
+      "passive_survive_bucket": 84.0,
+      "death_reason": 20.0,
+      "dead_at_zero": 23.0
+    },
+    "global_sums": {
+      "remaining_left_side": 19.0,
+      "remaining_right_side": 19.0,
+      "flag_revealed": 1.0
+    }
+  },
+  {
+    "seed": 0,
+    "steps": 100,
+    "show_mode": "HALF_DARK",
+    "observer": "SOUTH",
+    "sha256": "0977664fb83df320e74445011baa14fdfe0b9fe6af9c8d6dd657a32447ae420a",
+    "spatial_sums": {
+      "piece_own": 18.0,
+      "prob_teammate": 21.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 19.0,
+      "piece_right_side_enemy": 19.0,
+      "belief_left_side": 19.0,
+      "belief_right_side": 19.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 289.0,
+      "board_static": 110.0,
+      "turn_history": 304.8949890136719,
+      "move_bucket": 39.0,
+      "active_eat_bucket": 40.0,
+      "passive_survive_bucket": 43.0,
+      "death_reason": 20.0,
+      "dead_at_zero": 23.0
+    },
+    "global_sums": {
+      "remaining_left_side": 24.0,
+      "remaining_right_side": 25.0,
+      "flag_revealed": 1.0
+    }
+  },
+  {
+    "seed": 42,
+    "steps": 0,
+    "show_mode": "BRIGHT",
+    "observer": "SOUTH",
+    "sha256": "4c05cafb7d537470f4504c444f354b9cfd9414af66d717dc60b3b16e590e60b8",
+    "spatial_sums": {
+      "piece_own": 25.0,
+      "prob_teammate": 25.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 25.0,
+      "piece_right_side_enemy": 25.0,
+      "belief_left_side": 25.0,
+      "belief_right_side": 25.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 0.0,
+      "board_static": 110.0,
+      "turn_history": 289.0,
+      "move_bucket": 100.0,
+      "active_eat_bucket": 100.0,
+      "passive_survive_bucket": 100.0,
+      "death_reason": 0.0,
+      "dead_at_zero": 0.0
+    },
+    "global_sums": {
+      "remaining_left_side": 25.0,
+      "remaining_right_side": 25.0,
+      "flag_revealed": 0.0
+    }
+  },
+  {
+    "seed": 42,
+    "steps": 0,
+    "show_mode": "HALF_DARK",
+    "observer": "SOUTH",
+    "sha256": "cfcac5d918a3ac2a44fc13d0e705758321547e74f6e2d5e31290164d3bb2b82e",
+    "spatial_sums": {
+      "piece_own": 25.0,
+      "prob_teammate": 25.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 25.0,
+      "piece_right_side_enemy": 25.0,
+      "belief_left_side": 25.0,
+      "belief_right_side": 25.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 0.0,
+      "board_static": 110.0,
+      "turn_history": 289.0,
+      "move_bucket": 50.0,
+      "active_eat_bucket": 50.0,
+      "passive_survive_bucket": 50.0,
+      "death_reason": 0.0,
+      "dead_at_zero": 0.0
+    },
+    "global_sums": {
+      "remaining_left_side": 25.0,
+      "remaining_right_side": 25.0,
+      "flag_revealed": 0.0
+    }
+  },
+  {
+    "seed": 42,
+    "steps": 100,
+    "show_mode": "BRIGHT",
+    "observer": "SOUTH",
+    "sha256": "3adf271735c8cf858c1b54dbb376c5e8c4df1391a8c45a1e31af3edd703a08ee",
+    "spatial_sums": {
+      "piece_own": 18.0,
+      "prob_teammate": 20.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 19.0,
+      "piece_right_side_enemy": 20.0,
+      "belief_left_side": 19.0,
+      "belief_right_side": 20.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 578.0,
+      "board_static": 110.0,
+      "turn_history": 306.3399963378906,
+      "move_bucket": 77.0,
+      "active_eat_bucket": 82.0,
+      "passive_survive_bucket": 80.0,
+      "death_reason": 22.0,
+      "dead_at_zero": 23.0
+    },
+    "global_sums": {
+      "remaining_left_side": 19.0,
+      "remaining_right_side": 20.0,
+      "flag_revealed": 2.0
+    }
+  },
+  {
+    "seed": 42,
+    "steps": 100,
+    "show_mode": "HALF_DARK",
+    "observer": "SOUTH",
+    "sha256": "92188cf047695ea7a87b5d3c9f3368fcc78128c33ef1a2984a36e8db82230366",
+    "spatial_sums": {
+      "piece_own": 18.0,
+      "prob_teammate": 20.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 19.0,
+      "piece_right_side_enemy": 20.0,
+      "belief_left_side": 19.0,
+      "belief_right_side": 20.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 578.0,
+      "board_static": 110.0,
+      "turn_history": 306.3399963378906,
+      "move_bucket": 38.0,
+      "active_eat_bucket": 41.0,
+      "passive_survive_bucket": 40.0,
+      "death_reason": 22.0,
+      "dead_at_zero": 23.0
+    },
+    "global_sums": {
+      "remaining_left_side": 25.0,
+      "remaining_right_side": 24.0,
+      "flag_revealed": 2.0
+    }
+  },
+  {
+    "seed": 2026,
+    "steps": 0,
+    "show_mode": "BRIGHT",
+    "observer": "SOUTH",
+    "sha256": "866c3d250acbcbde25d017b7bb0d765bbbc7581adff59be6d37a5cb72dbcf9bc",
+    "spatial_sums": {
+      "piece_own": 25.0,
+      "prob_teammate": 25.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 25.0,
+      "piece_right_side_enemy": 25.0,
+      "belief_left_side": 25.0,
+      "belief_right_side": 25.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 0.0,
+      "board_static": 110.0,
+      "turn_history": 289.0,
+      "move_bucket": 100.0,
+      "active_eat_bucket": 100.0,
+      "passive_survive_bucket": 100.0,
+      "death_reason": 0.0,
+      "dead_at_zero": 0.0
+    },
+    "global_sums": {
+      "remaining_left_side": 25.0,
+      "remaining_right_side": 25.0,
+      "flag_revealed": 0.0
+    }
+  },
+  {
+    "seed": 2026,
+    "steps": 0,
+    "show_mode": "HALF_DARK",
+    "observer": "SOUTH",
+    "sha256": "291e8f06b3d7ee18acff6f9b4de1366d4cc13bd7f7f60c00658d1b3fb5fd4f5b",
+    "spatial_sums": {
+      "piece_own": 25.0,
+      "prob_teammate": 25.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 25.0,
+      "piece_right_side_enemy": 25.0,
+      "belief_left_side": 25.0,
+      "belief_right_side": 25.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 0.0,
+      "board_static": 110.0,
+      "turn_history": 289.0,
+      "move_bucket": 50.0,
+      "active_eat_bucket": 50.0,
+      "passive_survive_bucket": 50.0,
+      "death_reason": 0.0,
+      "dead_at_zero": 0.0
+    },
+    "global_sums": {
+      "remaining_left_side": 25.0,
+      "remaining_right_side": 25.0,
+      "flag_revealed": 0.0
+    }
+  },
+  {
+    "seed": 2026,
+    "steps": 100,
+    "show_mode": "BRIGHT",
+    "observer": "SOUTH",
+    "sha256": "57806707f5b15f5f2ac14224b1129739627caca5f1d49de92ab1e6de7a9894df",
+    "spatial_sums": {
+      "piece_own": 22.0,
+      "prob_teammate": 23.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 21.0,
+      "piece_right_side_enemy": 21.0,
+      "belief_left_side": 21.0,
+      "belief_right_side": 21.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 0.0,
+      "board_static": 110.0,
+      "turn_history": 322.2349853515625,
+      "move_bucket": 87.0,
+      "active_eat_bucket": 91.0,
+      "passive_survive_bucket": 92.0,
+      "death_reason": 10.0,
+      "dead_at_zero": 13.0
+    },
+    "global_sums": {
+      "remaining_left_side": 21.0,
+      "remaining_right_side": 21.0,
+      "flag_revealed": 0.0
+    }
+  },
+  {
+    "seed": 2026,
+    "steps": 100,
+    "show_mode": "HALF_DARK",
+    "observer": "SOUTH",
+    "sha256": "f0f962500d6d92cd57a3fca4df1b1c08cf99727f3f6b121ca0c5b208623e8d8f",
+    "spatial_sums": {
+      "piece_own": 22.0,
+      "prob_teammate": 23.0,
+      "dark_teammate": 0.0,
+      "piece_left_side_enemy": 21.0,
+      "piece_right_side_enemy": 21.0,
+      "belief_left_side": 21.0,
+      "belief_right_side": 21.0,
+      "dead_flags": 0.0,
+      "flag_revealed": 0.0,
+      "board_static": 110.0,
+      "turn_history": 322.2349853515625,
+      "move_bucket": 45.0,
+      "active_eat_bucket": 47.0,
+      "passive_survive_bucket": 49.0,
+      "death_reason": 10.0,
+      "dead_at_zero": 13.0
+    },
+    "global_sums": {
+      "remaining_left_side": 25.0,
+      "remaining_right_side": 25.0,
+      "flag_revealed": 0.0
+    }
+  }
+]

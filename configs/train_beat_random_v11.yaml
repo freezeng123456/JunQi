@@ -1,0 +1,61 @@
+# configs/train_beat_random_v11.yaml
+# Fix v10 oscillation / value-function lag:
+#   1. vf_coef=2.0  — force value head to catch up with policy faster
+#   2. gae_lambda=0.95  — longer-horizon return estimate, less bootstrap bias
+#   3. clip_range=0.1  — tighter PPO clip to prevent large policy swings
+#   4. temperature_coef=0.05  — higher entropy to prevent premature collapse
+env:
+  num_envs: 128
+  steps_per_env: 512
+  max_num_moves: 4000
+  seed: 42
+  use_gpu_rollout: true
+
+net:
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  embed_dim: 128
+  n_head: 4
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 32
+
+ppo:
+  clip_range: 0.1                  # Tighter clip — prevent large policy swings
+  vf_coef: 2.0                     # Stronger VF signal — catch up with policy faster
+  policy_coef: 1.0
+  temperature_coef: 0.05           # Higher entropy — prevent premature collapse
+  temperature_ceil: 0.10
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true
+  kl_coef: 0.0                     # No KL penalty vs random opponent
+  gamma: 1.0
+  gae_lambda: 0.95                 # Longer horizon — better return estimates
+  td_lambda: 0.95
+  adv_filt_thresh: 0.0
+  adv_filt_rate: 0.0
+  lr_coef: 0.5
+  lr_decay: 10.0
+  lr_ceil: 5.0e-4
+  lr_floor: 5.0e-5
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+  ema_decay: 0.995
+  num_epochs_per_rollout: 4
+  minibatch_size: 512
+  dtype: "float16"
+  torch_compile: false
+
+save_dir: "exps/beat_random_v11"
+total_rollouts: 2000
+save_every: 50
+eval_every: 10
+log_every: 5
+
+use_wandb: false
+seed: 42
+device: "cuda"
+torch_deterministic: false

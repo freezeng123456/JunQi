@@ -1,0 +1,118 @@
+[train] Runtime config saved to exps/h20_ddp_winner_v33c_selfplay/cfg.runtime.yaml
+[train] DDP world_size=6 backend=nccl
+[train] device=cuda:0  num_envs=512  steps_per_env=512
+[train] GPU: NVIDIA H20
+[train] JunqiNet parameters: 1,031,555
+[train] GpuRollout: 512 envs (all on-device)
+[train] RolloutBufferGPU (zero-CPU collect path, mode=self-play)
+[train] ArrangementNet parameters: 12,643,857
+[train] Arrangement training enabled: n_arr=1024, refresh_every=1, storage_duration=300
+[train] BeliefNet parameters: 3,894,028
+[train] Belief training enabled: buffer_capacity=50000, refresh_every=5, warmup_rollouts=100
+[train] Starting training loop: rollouts 0 → 1500
+[train] Per-rank env steps per rollout: 262,144 (global: 1,572,864 across 6 ranks)
+[     4] loss_p=+0.0832  loss_v=0.4434  ret=-0.1217  lr=5.00e-05  fps=6266  elapsed=210s
+[     9] loss_p=+0.0305  loss_v=0.2933  ret=-0.0090  lr=5.00e-05  fps=6221  elapsed=420s
+[train] Evaluating (rollout 10)…
+[eval]  win_rate=0.453  avg_len=1049
+[    14] loss_p=+0.0095  loss_v=0.3408  ret=-0.0044  lr=5.00e-05  fps=8281  elapsed=579s
+[    19] loss_p=+0.0044  loss_v=0.3564  ret=-0.0039  lr=5.00e-05  fps=14385  elapsed=670s
+[train] Evaluating (rollout 20)…
+[eval]  win_rate=0.461  avg_len=957
+[    24] loss_p=+0.0028  loss_v=0.3549  ret=+0.0004  lr=5.00e-05  fps=13293  elapsed=768s
+[train] Checkpoint saved: exps/h20_ddp_winner_v33c_selfplay/ckpt_000025.pt
+[    29] loss_p=+0.0921  loss_v=0.3534  ret=+0.0044  lr=5.00e-05  fps=5656  elapsed=1000s
+[train] Evaluating (rollout 30)…
+[eval]  win_rate=0.492  avg_len=991
+[    34] loss_p=+0.6416  loss_v=0.2774  ret=-0.0142  lr=5.00e-05  fps=3960  elapsed=1331s
+[    39] loss_p=+0.3795  loss_v=0.2288  ret=-0.0111  lr=5.00e-05  fps=9210  elapsed=1473s
+[train] Evaluating (rollout 40)…
+[eval]  win_rate=0.336  avg_len=1300
+[    44] loss_p=+0.3942  loss_v=0.3903  ret=+0.0092  lr=5.00e-05  fps=13572  elapsed=1570s
+[    49] loss_p=+0.3728  loss_v=0.4436  ret=+0.0320  lr=5.00e-05  fps=14632  elapsed=1660s
+[train] Checkpoint saved: exps/h20_ddp_winner_v33c_selfplay/ckpt_000050.pt
+[train] Evaluating (rollout 50)…
+[eval]  win_rate=0.250  avg_len=718
+[    54] loss_p=+0.4797  loss_v=0.4116  ret=+0.0360  lr=5.00e-05  fps=13934  elapsed=1754s
+[    59] loss_p=+0.5241  loss_v=0.3467  ret=+0.0177  lr=5.00e-05  fps=14528  elapsed=1844s
+[train] Evaluating (rollout 60)…
+[eval]  win_rate=0.297  avg_len=876
+[    64] loss_p=+0.4239  loss_v=0.3282  ret=+0.0040  lr=5.00e-05  fps=14007  elapsed=1937s
+[    69] loss_p=+0.3147  loss_v=0.1431  ret=-0.0119  lr=5.00e-05  fps=14865  elapsed=2026s
+[train] Evaluating (rollout 70)…
+[eval]  win_rate=0.852  avg_len=1630
+[    74] loss_p=+0.4344  loss_v=0.0492  ret=-0.0060  lr=5.00e-05  fps=12809  elapsed=2128s
+[train] Checkpoint saved: exps/h20_ddp_winner_v33c_selfplay/ckpt_000075.pt
+[    79] loss_p=+0.3593  loss_v=0.1376  ret=+0.0077  lr=5.00e-05  fps=14408  elapsed=2219s
+[train] Evaluating (rollout 80)…
+[eval]  win_rate=0.648  avg_len=830
+[    84] loss_p=+0.3267  loss_v=0.4978  ret=+0.0121  lr=5.00e-05  fps=13436  elapsed=2316s
+[    89] loss_p=+0.2958  loss_v=0.2414  ret=+0.0094  lr=5.00e-05  fps=13947  elapsed=2410s
+[train] Evaluating (rollout 90)…
+[eval]  win_rate=0.352  avg_len=480
+[    94] loss_p=+0.3310  loss_v=0.2194  ret=+0.0061  lr=5.00e-05  fps=13589  elapsed=2507s
+[    99] loss_p=+0.1244  loss_v=0.0607  ret=+0.0077  lr=5.00e-05  fps=21563  elapsed=2568s
+[train] Checkpoint saved: exps/h20_ddp_winner_v33c_selfplay/ckpt_000100.pt
+[train] Evaluating (rollout 100)…
+[eval]  win_rate=0.000  avg_len=512064
+[   104] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=23817  elapsed=2623s
+[   109] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=40541  elapsed=2655s
+[train] Evaluating (rollout 110)…
+[eval]  win_rate=0.000  avg_len=512064
+[   114] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=24175  elapsed=2709s
+[   119] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=40145  elapsed=2742s
+[train] Evaluating (rollout 120)…
+[eval]  win_rate=0.000  avg_len=512064
+[   124] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=24038  elapsed=2796s
+[train] Checkpoint saved: exps/h20_ddp_winner_v33c_selfplay/ckpt_000125.pt
+[   129] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=40667  elapsed=2829s
+[train] Evaluating (rollout 130)…
+[eval]  win_rate=0.000  avg_len=512064
+[   134] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=24743  elapsed=2882s
+[   139] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=40959  elapsed=2914s
+[train] Evaluating (rollout 140)…
+[eval]  win_rate=0.000  avg_len=512064
+[   144] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=25332  elapsed=2965s
+[   149] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=41369  elapsed=2997s
+[train] Checkpoint saved: exps/h20_ddp_winner_v33c_selfplay/ckpt_000150.pt
+[train] Evaluating (rollout 150)…
+[eval]  win_rate=0.000  avg_len=512064
+[   154] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=25045  elapsed=3049s
+[   159] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=39820  elapsed=3082s
+[train] Evaluating (rollout 160)…
+[eval]  win_rate=0.000  avg_len=512064
+[   164] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=23730  elapsed=3138s
+[   169] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=41099  elapsed=3169s
+[train] Evaluating (rollout 170)…
+[eval]  win_rate=0.000  avg_len=512064
+[   174] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=24330  elapsed=3223s
+[train] Checkpoint saved: exps/h20_ddp_winner_v33c_selfplay/ckpt_000175.pt
+[   179] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=40804  elapsed=3255s
+[train] Evaluating (rollout 180)…
+[eval]  win_rate=0.000  avg_len=512064
+[   184] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=24572  elapsed=3309s
+[   189] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=40183  elapsed=3341s
+[train] Evaluating (rollout 190)…
+[eval]  win_rate=0.000  avg_len=512064
+[   194] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=24013  elapsed=3396s
+[   199] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=40172  elapsed=3429s
+[train] Checkpoint saved: exps/h20_ddp_winner_v33c_selfplay/ckpt_000200.pt
+[train] Evaluating (rollout 200)…
+[eval]  win_rate=0.000  avg_len=512064
+[train] early-stop streak: 1/5 (win_rate=0.000 < 0.450)
+[   204] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=6140  elapsed=3642s
+[   209] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=9884  elapsed=3775s
+[train] Evaluating (rollout 210)…
+[eval]  win_rate=0.000  avg_len=512064
+[train] early-stop streak: 2/5 (win_rate=0.000 < 0.450)
+[   214] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=5587  elapsed=4009s
+[   219] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=21481  elapsed=4070s
+[train] Evaluating (rollout 220)…
+[eval]  win_rate=0.000  avg_len=512064
+[train] early-stop streak: 3/5 (win_rate=0.000 < 0.450)
+[   224] loss_p=+nan  loss_v=nan  ret=+nan  lr=nan  fps=25025  elapsed=4123s
+[train] Checkpoint saved: exps/h20_ddp_winner_v33c_selfplay/ckpt_000225.pt
+
+[train] Signal 2 received — will stop after current rollout.
+[train] Graceful stop: saving final checkpoint.
+[train] Done. Total elapsed: 4129.5s

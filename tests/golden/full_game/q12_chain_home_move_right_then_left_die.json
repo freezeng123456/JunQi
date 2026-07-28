@@ -1,0 +1,55 @@
+
+{
+  "schema_version": "1.0",
+  "rules_version": "1.1.0",
+  "category": "full_game",
+  "id": "q12_chain_home_move_right_then_left_die",
+  "description": "Q12 across two separate steps. HOME moves -> turn goes to RIGHT which has only immobile pieces (flag + 2 mines) -> RIGHT dies via Q12; turn advances to OPPS (mobile). Next step, OPPS moves -> turn goes to LEFT which ALSO has only immobile pieces -> LEFT dies via Q12. Both blue seats dead -> red team wins.",
+  "tags": ["Q12", "chain", "team-kill", "full-game", "no-moves"],
+  "legacy_divergence": "Legacy uses cntJump (jump counter) for this; junqi_core replaces with instant-death per ADR-015.",
+  "debug_include_private": false,
+  "pre_state": {
+    "turn": 0,
+    "move_counter": 42,
+    "moves_since_last_combat": 12,
+    "pieces": [
+      { "seat": 0, "index": 2, "type": "PAIZH", "pos": [8, 11], "dead": false },
+      { "seat": 1, "index": 26, "type": "JUNQI", "pos": [0, 9],  "dead": false },
+      { "seat": 1, "index": 28, "type": "DILEI", "pos": [0, 7],  "dead": false },
+      { "seat": 1, "index": 20, "type": "DILEI", "pos": [1, 10], "dead": false },
+      { "seat": 2, "index": 2, "type": "PAIZH", "pos": [8, 5],  "dead": false },
+      { "seat": 3, "index": 26, "type": "JUNQI", "pos": [16, 7], "dead": false },
+      { "seat": 3, "index": 28, "type": "DILEI", "pos": [16, 9], "dead": false },
+      { "seat": 3, "index": 22, "type": "DILEI", "pos": [15, 8], "dead": false }
+    ],
+    "info": [
+      { "seat": 0, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 1, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 2, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 3, "dead": false, "flag_revealed": false, "jump_count": 0 }
+    ]
+  },
+  "actions": [
+    { "seat": 0, "src": [8, 11], "dst": [8, 10] },
+    { "seat": 2, "src": [8, 5],  "dst": [8, 6] }
+  ],
+  "expected": {
+    "results": [
+      {
+        "src": [8, 11], "dst": [8, 10],
+        "event": "MOVE",
+        "flag_reveal_src": false, "flag_reveal_dst": false, "flag_captured": false,
+        "seats_died_this_step": [1]
+      },
+      {
+        "src": [8, 5], "dst": [8, 6],
+        "event": "MOVE",
+        "flag_reveal_src": false, "flag_reveal_dst": false, "flag_captured": false,
+        "seats_died_this_step": [3]
+      }
+    ],
+    "terminated": true,
+    "winner_team": 0,
+    "draw": false
+  }
+}

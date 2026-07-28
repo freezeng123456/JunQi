@@ -1,0 +1,180 @@
+# v33 — 6-card DDP self-play, the "break the 0.80 ceiling" run.
+#
+# Decision record (see docs/DDP_DEPLOYMENT.md for full rationale):
+#
+#   * v32 with 1500R vs random opponent peaked at ~0.80 win_rate, end 0.711.
+#     v25-v32 all show the same algorithmic ceiling regardless of compute.
+#   * v30/v31 with bigger nets exhibit "defensive stall trap": policy avoids
+#     combat because vs-random opponent never punishes stalling. Self-play
+#     breaks the trap: if I stall, my opponent (also me) stalls too -> draw
+#     -> 0 reward, no free lunch from avoidance. This is the actual paper
+#     training regime (Ataraxos used vs-random ONLY for evaluation).
+#   * 6-card DDP gives 6x more env transitions per rollout (1.57M vs v32's
+#     65k); 1500 DDP rollouts ~= 2.4 billion total env-steps, ~24x the v32
+#     run inside one experiment.
+#
+# Hypothesis: self-play + paper-aligned PPO knobs + 24x more data should
+# move final-50R-avg win_rate from v32's 0.71 to >= 0.85 (vs random opponent
+# eval, which is the unchanged metric so v32 numbers are directly comparable).
+#
+# Stop conditions (encoded below + watched manually):
+#   * early_stop_win_rate=0.45, patience=5 evals, min_rollout=200
+#     -> aborts if R200+ shows persistent collapse
+#   * If R500 win_rate < 0.55 (visible in eval log), kill manually and
+#     pivot to the kl_coef=0.4 anti-stall config (exp4-derived).
+#
+# Estimated wall-clock: ~25 s/rollout x 1500R = ~10.5 hours on this 6xH20
+# box. Save every 25R -> 60 ckpts; ~30 MB/ckpt = ~1.8 GB disk.
+arr:
+  ema_decay: 0.999
+  enabled: true
+  n_arr: 1024
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    # NOTE: bf16 autocast on ArrangementNet under DDP triggers a CUDA
+    # SIGFPE on torch 2.1 (likely an interaction with the multi-head
+    # attention path's grad reduction). fp32 autocast works on every
+    # world_size we tested (1 / 2 / 6). The arr trainer is a small fraction
+    # of total compute (~10% — mostly the once-per-rollout pool refresh),
+    # so the fp32 cost is negligible. Re-evaluate if/when we upgrade torch.
+    autocast_dtype: float32
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    # Ataraxos paper Appendix D.3 uses 0.1 (we matched in h20 cfg slate).
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+  refresh_every: 1
+  reg_norm: 10.0
+  # Paper schedule: alpha(t) = 0.1 / (t+1)^0.3
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_temp_init: 0.1
+  storage_duration: 300
+belief:
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  enabled: true
+  # H20 has plenty of memory; chunk 256 keeps belief refresh comfortable.
+  infer_chunk_size: 256
+  net: null  # use BeliefNetConfig defaults (~3.89M params, stateless)
+  ppo: null
+  # Refresh device-resident belief tensor from EMA every 5 rollouts. Each
+  # rank refreshes its own envs locally, no DDP collective involved here.
+  refresh_every: 5
+  # 100 rollouts of warmup before neural belief takes over from the
+  # hand-coded prior. With 6 ranks each filling its own buffer (~10
+  # reveals/env-rollout x 512 envs = ~5k samples/rollout/rank), buffers
+  # reach 50k cap in ~10 rollouts -> belief net sees ample data well
+  # before warmup ends.
+  warmup_rollouts: 100
+device: cuda
+# Early-stop heuristic to kill obvious collapses without wasting GPU hours:
+# if eval/win_rate stays below 0.45 for 5 consecutive evals after rollout
+# 200, save final ckpt and exit. v30's "defensive stall trap" caught this
+# threshold; v32 normal early peaks land 0.65+, so 0.45 is a clear failure
+# signal not a noisy false positive.
+early_stop_min_rollout: 200
+early_stop_patience: 5
+early_stop_win_rate: 0.45
+env:
+  max_num_moves: 4000
+  # Per-rank num_envs. Effective cluster envs = 6 ranks x 512 = 3072.
+  # We keep this at 512 (same as h20_exp5) rather than scaling down
+  # because PPO's clip + EMA already absorb large effective batches; this
+  # is also what Ataraxos does (1536 envs/rank x 16 ranks = 24576).
+  num_envs: 512
+  seed: 105  # offset per rank by global_rank * 10_000 inside scripts/train.py
+  steps_per_env: 512
+  use_gpu_rollout: true
+# Eval frequency: 10R is fine because eval runs only on rank 0 (~10s for
+# 128 games on H20 single-card) and others wait at a barrier.
+eval_every: 10
+log_every: 5
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.2
+  # bfloat16 = no GradScaler needed, no fp16 overflow drama. H20 native bf16.
+  dtype: bfloat16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.1
+  lr_ceil: 0.0001
+  lr_coef: 0.5
+  # Ataraxos paper schedule: lr(t) = clip(0.5/(t+1)^1.1, 5e-6, 1e-4)
+  lr_decay: 1.1
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.267
+  # 2048 minibatch per gradient step. With cluster batch ~1.5M post-filter
+  # (~75% adv-filter retention -> ~390k effective transitions per rollout),
+  # 1 epoch x 190 minibatches per rank = nice gradient diversity.
+  minibatch_size: 2048
+  net:
+    action_key_dim: 32
+    cnn_channels: 64
+    cnn_layers: 2
+    depth: 4
+    dropout: 0.0
+    embed_dim: 128
+    ff_factor: 4
+    n_head: 4
+    pos_emb_std: 0.02
+    use_cat_vf: true
+  # Paper does 1 epoch/rollout; v17+ already aligned to this (vs v16's 4).
+  num_epochs_per_rollout: 1
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  # Magnet-KL alpha schedule: 0.05/(t+1)^0.3 (Ataraxos paper Appendix D.4).
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  # IMPORTANT: torch_compile=false on this torch 2.1 + DDP setup. The
+  # gpu_collector previously force-compiled policy.act regardless of this
+  # flag; we fixed that. Compile + bf16 + BatchNorm + DDP is a known torch
+  # 2.1 dynamo trip (see PROGRESS.md). Re-enable only after upgrading
+  # torch >= 2.4 or after rewriting CNN stem to drop BatchNorm.
+  torch_compile: false
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+# THE key knob: True -> v32 (vs random); False -> self-play. Self-play is
+# what we're betting on for breaking the 0.80 ceiling.
+random_opponent: false
+resume: ''
+save_dir: exps/h20_ddp_winner_v33_selfplay
+# Granular ckpt history (60 saves over 1500R) so we can rewind if a late
+# collapse happens. Disk: ~30MB x 60 = 1.8GB, negligible vs our 9TB free.
+save_every: 25
+seed: 105
+torch_deterministic: false
+total_rollouts: 1500
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: v33_ddp_selfplay

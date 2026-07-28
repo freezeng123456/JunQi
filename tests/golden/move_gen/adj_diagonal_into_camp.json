@@ -1,0 +1,131 @@
+{
+  "schema_version": "1.0",
+  "rules_version": "1.1.0",
+  "category": "move_gen",
+  "id": "adj_diagonal_into_camp",
+  "description": "SOUTH LIANZH at (10,13) moves diagonally into camp (9,12). Legal per §2.3.1.",
+  "tags": [
+    "adj",
+    "camp",
+    "diagonal"
+  ],
+  "legacy_divergence": null,
+  "debug_include_private": false,
+  "pre_state": {
+    "turn": 0,
+    "move_counter": 0,
+    "moves_since_last_combat": 0,
+    "pieces": [
+      {
+        "seat": 0,
+        "index": 10,
+        "type": "LIANZH",
+        "pos": [
+          10,
+          13
+        ],
+        "dead": false
+      },
+      {
+        "seat": 0,
+        "index": 0,
+        "type": "PAIZH",
+        "pos": [
+          10,
+          11
+        ],
+        "dead": false
+      },
+      {
+        "seat": 2,
+        "index": 0,
+        "type": "PAIZH",
+        "pos": [
+          6,
+          5
+        ],
+        "dead": false
+      },
+      {
+        "seat": 1,
+        "index": 5,
+        "type": "PAIZH",
+        "pos": [
+          4,
+          10
+        ],
+        "dead": false
+      },
+      {
+        "seat": 3,
+        "index": 0,
+        "type": "PAIZH",
+        "pos": [
+          11,
+          6
+        ],
+        "dead": false
+      }
+    ],
+    "info": [
+      {
+        "seat": 0,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      },
+      {
+        "seat": 1,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      },
+      {
+        "seat": 2,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      },
+      {
+        "seat": 3,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      }
+    ]
+  },
+  "actions": [
+    {
+      "seat": 0,
+      "src": [
+        10,
+        13
+      ],
+      "dst": [
+        9,
+        12
+      ]
+    }
+  ],
+  "expected": {
+    "results": [
+      {
+        "src": [
+          10,
+          13
+        ],
+        "dst": [
+          9,
+          12
+        ],
+        "event": "MOVE",
+        "flag_reveal_src": false,
+        "flag_reveal_dst": false,
+        "flag_captured": false
+      }
+    ],
+    "terminated": false,
+    "winner_team": null,
+    "draw": false
+  }
+}

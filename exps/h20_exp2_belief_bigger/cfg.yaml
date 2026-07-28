@@ -1,0 +1,130 @@
+# H20 Experiment 2 — BIGGER BELIEF NET.
+# Hypothesis: the current 3.89M BeliefNet barely beats uniform (acc ~27%,
+# max_prob 0.19). A larger belief net should produce richer conditional
+# priors for enemy pieces, which the deductive rule engine then refines.
+# If this breaks the 0.80 ceiling, we know signal quality was the
+# bottleneck, not policy capacity.
+#
+# Diff from exp1:
+#   - belief.net: 4-layer, 256-dim -> 6-layer, 512-dim, 8 heads
+#   - belief param count: 3.89M -> ~20M (5x)
+#   - infer_chunk_size raised to 512 since bigger forward eats more mem
+#   - rest of config identical to exp1
+arr:
+  ema_decay: 0.999
+  enabled: true
+  n_arr: 1024
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+  refresh_every: 1
+  reg_norm: 10.0
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_temp_init: 0.1
+  storage_duration: 300
+belief:
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  enabled: true
+  infer_chunk_size: 256
+  net:
+    cnn_channels: 128
+    cnn_layers: 3
+    dropout: 0.1
+    embed_dim: 512
+    ff_factor: 4
+    n_encoder_layer: 6
+    n_head: 8
+    pos_emb_std: 0.1
+    use_seat_embedding: true
+  ppo: null
+  refresh_every: 5
+  warmup_rollouts: 100
+device: cuda
+early_stop_min_rollout: 200
+early_stop_patience: 5
+early_stop_win_rate: 0.3
+env:
+  max_num_moves: 4000
+  num_envs: 512
+  seed: 102
+  steps_per_env: 512
+  use_gpu_rollout: true
+eval_every: 10
+log_every: 5
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.2
+  dtype: bfloat16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.1
+  lr_ceil: 0.0001
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.267
+  minibatch_size: 2048
+  net:
+    action_key_dim: 32
+    cnn_channels: 64
+    cnn_layers: 2
+    depth: 4
+    dropout: 0.0
+    embed_dim: 128
+    ff_factor: 4
+    n_head: 4
+    pos_emb_std: 0.02
+    use_cat_vf: true
+  num_epochs_per_rollout: 1
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: true
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+resume: ''
+save_dir: exps/h20_exp2_belief_bigger
+save_every: 100
+seed: 102
+torch_deterministic: false
+total_rollouts: 500
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: h20_exp2_belief_bigger

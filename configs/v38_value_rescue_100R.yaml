@@ -1,0 +1,164 @@
+# v38_value_rescue_100R — kill the value-head collapse pathway.
+#
+# v37 diagnosis (scripts/diagnose_v37_collapse.py + diagnose_value_quality.py):
+#   * R25  : V.std=0.017,  corr(V, final_outcome) = +0.20  ← value learning
+#   * R100 : V.std=0.0002, corr(V, final_outcome) = +0.14
+#   * R200 : V.std=0.0007, corr(V, final_outcome) = -0.003 ← already dead
+#   * R700 : V.std=0.0003, corr(V, final_outcome) = -0.06  ← inverted
+#
+# Once V(s) collapses to a near-constant, advantage = return - V ≈ shaping
+# noise → policy gradient is computed on noise → win_rate decays from 0.77
+# (R200 peak) to ~0.55 with R625 dipping to 0.375 + 50/128 unfinished games.
+#
+# Three changes, applied together, target the value-collapse pathway:
+#
+#   P0  reward_shaping = false
+#       Removes the per-step ±0.02/±0.05 shaping penalty that was 1-2 orders
+#       of magnitude bigger (in aggregate) than the sparse ±1 terminal
+#       reward. With it gone, the only signal V has to predict is the actual
+#       game outcome.
+#
+#   P1  train_value_on_random_seats = true
+#       Stops zeroing returns on seats 1/3 in vs-random mode. Doubles the
+#       supervision available to V(s) (now learns at all 4 seats, not just
+#       2). Diagnose-time finding: enemy-seat terminal rows DO carry +1
+#       reward (random opponent's winning move), and overwriting them with
+#       value (legacy default) wipes out half the loss signal each game.
+#
+#   P2  adv_filt_rate = 0.20  (was 0.75)
+#       Only train the policy on the top-20% |advantage| samples (was top-
+#       75%). With V(s) actually predicting outcomes again, |adv| should
+#       have meaningful tails — we want to update on those, not on the
+#       median (≈ 0.05) noise. Matches the Ataraxos paper's recipe more
+#       closely.
+#
+# Other settings inherited from v37:
+#   * Single H20, num_envs=256, steps_per_env=512
+#   * 100R diagnostic horizon, eval_every=5 (20 eval points)
+#   * Same net dims, same belief/arr setup, same lr schedule
+#   * seed=138 (distinct from v36=136, v37=137)
+#
+# Expected outcomes (in priority order):
+#   ① V.std grows over rollouts (V no longer constant)
+#   ② |adv|.mean grows ≈ 5-10× (now that V predicts something)
+#   ③ win_rate climbs past 0.77 and stays there (less crash than v36/v37)
+#   ④ avg_len stays under 2000 (no stall-based reward gaming)
+#
+# If win_rate again caps at ~0.85 and saturates, we've hit the vs-random
+# ceiling (random opponent provides no challenge) and the next step is
+# self-play.
+
+env:
+  num_envs: 256
+  steps_per_env: 512
+  max_num_moves: 4000
+  seed: 138
+  use_gpu_rollout: true
+
+net:
+  cnn_channels: 96
+  cnn_layers: 3
+  depth: 6
+  embed_dim: 192
+  n_head: 6
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 48
+  pos_emb_std: 0.02
+
+belief:
+  enabled: true
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  infer_chunk_size: 256
+  refresh_every: 5
+  warmup_rollouts: 20
+  net:
+    n_encoder_layer: 6
+    embed_dim: 512
+    n_head: 8
+    ff_factor: 4
+    dropout: 0.1
+  ppo: null
+
+arr:
+  enabled: true
+  n_arr: 1024
+  refresh_every: 1
+  storage_duration: 300
+  ema_decay: 0.999
+  reg_norm: 10.0
+  reg_temp_init: 0.1
+  reg_temp_floor: 0.0
+  reg_temp_decay: 0.3
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+
+ppo:
+  clip_range: 0.2
+  vf_coef: 1.0
+  policy_coef: 1.0
+  temperature_coef: 0.05
+  temperature_ceil: 0.1
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true
+  kl_coef: 0.1
+  gamma: 1.0
+  gae_lambda: 0.5
+  td_lambda: 0.8
+  adv_filt_thresh: 0.01
+  adv_filt_rate: 0.20             # P2 (was 0.75)
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_ceil: 1.0e-4
+  lr_floor: 5.0e-6
+  lr_schedule_unit: "rollout"
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+  ema_decay: 0.999
+  num_epochs_per_rollout: 4
+  minibatch_size: 1024
+  dtype: "bfloat16"
+  torch_compile: false
+
+save_dir: "exps/v38_value_rescue_100R"
+total_rollouts: 100
+save_every: 25
+eval_every: 5
+log_every: 2
+
+# Disable early-stop for diagnostic run.
+early_stop_min_rollout: 2000
+early_stop_patience: 5
+early_stop_win_rate: 0.0
+
+use_wandb: false
+seed: 138
+device: "cuda"
+torch_deterministic: false
+resume: ""
+
+random_opponent: true
+train_value_on_random_seats: true   # P1 (was false)
+reward_shaping: false                # P0 (was true)

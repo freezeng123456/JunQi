@@ -1,0 +1,132 @@
+# v34 — single-H20 bigger MoveNet + bigger BeliefNet.
+# Goal: test whether the current ~0.75-0.82 vs-random ceiling is mainly
+# network capacity/belief quality rather than missing high-level observation
+# features. This is intentionally a fresh run: MoveNet shape changes, so old
+# v33 checkpoints cannot be loaded directly.
+
+arr:
+  ema_decay: 0.999
+  enabled: true
+  n_arr: 1024
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: float32
+    batch_size: 256
+    clip_range: 0.15
+    ent_pred_coef: 0.5
+    kl_coef: 0.2
+    lr: 0.0003
+    max_grad_norm: 0.4
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+  refresh_every: 1
+  reg_norm: 10.0
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_temp_init: 0.1
+  storage_duration: 300
+
+belief:
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  enabled: true
+  infer_chunk_size: 128
+  net:
+    n_encoder_layer: 6
+    n_head: 8
+    embed_dim: 512
+    ff_factor: 4
+    dropout: 0.1
+    pos_emb_std: 0.1
+    cnn_channels: 128
+    cnn_layers: 3
+    use_seat_embedding: true
+  ppo: null
+  refresh_every: 5
+  warmup_rollouts: 100
+
+device: cuda:0
+early_stop_min_rollout: 300
+early_stop_patience: 5
+early_stop_win_rate: 0.35
+
+env:
+  max_num_moves: 4000
+  num_envs: 512
+  seed: 505
+  steps_per_env: 512
+  use_gpu_rollout: true
+
+eval_every: 10
+log_every: 5
+
+net:
+  action_key_dim: 32
+  cnn_channels: 128
+  cnn_layers: 3
+  depth: 6
+  dropout: 0.0
+  embed_dim: 256
+  ff_factor: 4
+  n_head: 8
+  pos_emb_std: 0.02
+  use_cat_vf: true
+
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.15
+  dtype: bfloat16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.2
+  lr_ceil: 5.0e-05
+  lr_coef: 0.5
+  lr_decay: 0.6
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.2
+  minibatch_size: 1024
+  net:
+    action_key_dim: 32
+    cnn_channels: 128
+    cnn_layers: 3
+    depth: 6
+    dropout: 0.0
+    embed_dim: 256
+    ff_factor: 4
+    n_head: 8
+    pos_emb_std: 0.02
+    use_cat_vf: true
+  num_epochs_per_rollout: 1
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: false
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+
+random_opponent: false
+resume: ''
+save_dir: exps/h20_single_v34_big_move_belief
+save_every: 25
+seed: 505
+torch_deterministic: false
+total_rollouts: 2500
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: v34_big_move_belief

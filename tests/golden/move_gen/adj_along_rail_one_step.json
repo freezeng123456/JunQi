@@ -1,0 +1,120 @@
+{
+  "schema_version": "1.0",
+  "rules_version": "1.1.0",
+  "category": "move_gen",
+  "id": "adj_along_rail_one_step",
+  "description": "SOUTH LIANZH at rail cell (10,11) moves 1 step to rail (10,12). Basic adj move.",
+  "tags": [
+    "adj",
+    "rail"
+  ],
+  "legacy_divergence": null,
+  "debug_include_private": false,
+  "pre_state": {
+    "turn": 0,
+    "move_counter": 0,
+    "moves_since_last_combat": 0,
+    "pieces": [
+      {
+        "seat": 0,
+        "index": 0,
+        "type": "LIANZH",
+        "pos": [
+          10,
+          11
+        ],
+        "dead": false
+      },
+      {
+        "seat": 2,
+        "index": 0,
+        "type": "PAIZH",
+        "pos": [
+          6,
+          5
+        ],
+        "dead": false
+      },
+      {
+        "seat": 1,
+        "index": 5,
+        "type": "PAIZH",
+        "pos": [
+          4,
+          10
+        ],
+        "dead": false
+      },
+      {
+        "seat": 3,
+        "index": 0,
+        "type": "PAIZH",
+        "pos": [
+          11,
+          6
+        ],
+        "dead": false
+      }
+    ],
+    "info": [
+      {
+        "seat": 0,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      },
+      {
+        "seat": 1,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      },
+      {
+        "seat": 2,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      },
+      {
+        "seat": 3,
+        "dead": false,
+        "flag_revealed": false,
+        "jump_count": 0
+      }
+    ]
+  },
+  "actions": [
+    {
+      "seat": 0,
+      "src": [
+        10,
+        11
+      ],
+      "dst": [
+        10,
+        12
+      ]
+    }
+  ],
+  "expected": {
+    "results": [
+      {
+        "src": [
+          10,
+          11
+        ],
+        "dst": [
+          10,
+          12
+        ],
+        "event": "MOVE",
+        "flag_reveal_src": false,
+        "flag_reveal_dst": false,
+        "flag_captured": false
+      }
+    ],
+    "terminated": false,
+    "winner_team": null,
+    "draw": false
+  }
+}

@@ -1,0 +1,129 @@
+# H20 Experiment 8 — COMBINED SCALE-UP (belief bigger + move bigger + longer).
+# The "everything at once" attempt. If individual axes (exp2, exp3, exp7)
+# each give marginal improvements, combining all three might compound.
+# Worst case: we learn that compounding doesn't help and single-axis
+# exps are the way.
+#
+# Diff from exp1:
+#   - belief.net: depth=6, embed=512 (from exp2)
+#   - net: depth=6, embed=192, n_head=8, cnn_ch=96 (from exp3)
+#   - total_rollouts: 500 -> 2000 (2/3 of exp7's 3000)
+#   - lr_decay: 1.1 -> 0.9 (middle of exp1's 1.1 and exp7's 0.8)
+arr:
+  ema_decay: 0.999
+  enabled: true
+  n_arr: 1024
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+  refresh_every: 1
+  reg_norm: 10.0
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_temp_init: 0.1
+  storage_duration: 300
+belief:
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  enabled: true
+  infer_chunk_size: 256
+  net:
+    cnn_channels: 128
+    cnn_layers: 3
+    dropout: 0.1
+    embed_dim: 512
+    ff_factor: 4
+    n_encoder_layer: 6
+    n_head: 8
+    pos_emb_std: 0.1
+    use_seat_embedding: true
+  ppo: null
+  refresh_every: 5
+  warmup_rollouts: 100
+device: cuda
+early_stop_min_rollout: 200
+early_stop_patience: 5
+early_stop_win_rate: 0.3
+env:
+  max_num_moves: 4000
+  num_envs: 512
+  seed: 108
+  steps_per_env: 512
+  use_gpu_rollout: true
+eval_every: 10
+log_every: 5
+net:
+  action_key_dim: 32
+  cnn_channels: 96
+  cnn_layers: 2
+  depth: 6
+  dropout: 0.0
+  embed_dim: 192
+  ff_factor: 4
+  n_head: 8
+  pos_emb_std: 0.02
+  use_cat_vf: true
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.2
+  dtype: bfloat16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.1
+  lr_ceil: 0.0001
+  lr_coef: 0.5
+  lr_decay: 0.9
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.267
+  minibatch_size: 2048
+  net:
+    action_key_dim: 32
+    cnn_channels: 96
+    cnn_layers: 2
+    depth: 6
+    dropout: 0.0
+    embed_dim: 192
+    ff_factor: 4
+    n_head: 8
+    pos_emb_std: 0.02
+    use_cat_vf: true
+  num_epochs_per_rollout: 1
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: true
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+resume: ''
+save_dir: exps/h20_exp8_bigger_both
+save_every: 100
+seed: 108
+torch_deterministic: false
+total_rollouts: 2000
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: h20_exp8_bigger_both

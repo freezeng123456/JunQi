@@ -1,0 +1,121 @@
+# configs/train_beat_random_v13.yaml
+#
+# Align with Ataraxos hyperparameter regime.
+# Switch to DARK mode (四暗): teammate types unknown, belief-based.
+#
+# Observation changes from v12:
+#   - DARK mode: teammate channels 12-23 are belief distributions (not one-hot)
+#   - Bucket channels (69-92): D-3 filter removed; all enemy move/eat/surv visible
+#   - death_reason: split theirs into left_enemy/right_enemy (+3 ch → 104 total)
+#
+# Key changes from v12:
+#
+#   1. power_schedule formula fixed: now uses coef/(1+t)^decay (Ataraxos)
+#      instead of coef/(1+t)^(1/decay) (old JunQi).
+#
+#   2. lr_ceil: 5e-4 → 1e-4  (Ataraxos default; 5× lower)
+#      lr_floor: 5e-5 → 5e-6  (Ataraxos default; 10× lower)
+#      lr_decay: 10.0 → 0.6   (compensates for JunQi's per-gradient-step
+#                               counter vs Ataraxos' per-rollout counter)
+#      Ataraxos uses lr_decay=1.1 but only has ~2K rollout-level steps;
+#      JunQi has ~1M gradient-level steps, so 0.6 produces equivalent lr decay.
+#
+#   3. kl_coef: 0.0 → 0.1  (Ataraxos default; stabilises policy updates)
+#
+#   4. adv_filt_rate: 0.0 → 0.75  (Ataraxos default; top-75% |advantage|)
+#      adv_filt_thresh: 0.0 → 0.01 (Ataraxos default; drop near-zero signal)
+#      This is the "secret weapon" — filters out ~25% of noisy low-signal
+#      transitions that dilute gradients in long-horizon games.
+#
+#   5. gae_lambda: 0.80 → 0.50  (Ataraxos default; lower variance)
+#
+#   6. ema_decay: 0.995 → 0.999  (Ataraxos default; smoother EMA)
+#
+#   7. max_grad_norm: 0.5 → 0.267  (Ataraxos default; tighter clip)
+#
+#   8. clip_range: 0.15 → 0.2  (Ataraxos default)
+#
+#   9. vf_coef: 1.5 → 1.0  (Ataraxos default)
+#
+#  10. temperature_coef: 0.02 → 0.05  (Ataraxos default; more exploration)
+#      temperature_ceil: 0.05 → 0.1
+#      temperature_floor: 0.0005 → 0.001
+#
+#  Net effect: the training dynamics should match Ataraxos closely,
+#  compensating for JunQi's longer episodes (~1600 steps vs Stratego's ~200)
+#  via advantage filtering and proper lr decay.
+
+env:
+  num_envs: 128
+  steps_per_env: 512
+  max_num_moves: 4000
+  seed: 42
+  use_gpu_rollout: true
+
+net:
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  embed_dim: 128
+  n_head: 4
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 32
+
+ppo:
+  # --- PPO core (Ataraxos defaults) ---
+  clip_range: 0.2
+  vf_coef: 1.0
+  policy_coef: 1.0
+
+  # --- Entropy / temperature (Ataraxos defaults) ---
+  temperature_coef: 0.05
+  temperature_ceil: 0.1
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true
+
+  # --- KL regularisation (Ataraxos default) ---
+  kl_coef: 0.1
+
+  # --- GAE (Ataraxos default) ---
+  gamma: 1.0
+  gae_lambda: 0.50
+  td_lambda: 0.80
+
+  # --- Advantage filtering (Ataraxos default) ---
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+
+  # --- Optimiser (Ataraxos-aligned with step-count correction) ---
+  #   Ataraxos increments num_train_step per *rollout* (~2000 total);
+  #   JunQi increments per *gradient step* (~512 per rollout → ~1M total).
+  #   lr_decay=0.6 produces the same lr trajectory as Ataraxos lr_decay=1.1
+  #   over equivalent training volume.
+  lr_coef: 0.5
+  lr_decay: 0.6
+  lr_ceil: 1.0e-4
+  lr_floor: 5.0e-6
+  weight_decay: 0.0
+  max_grad_norm: 0.267
+
+  # --- EMA (Ataraxos default) ---
+  ema_decay: 0.999
+
+  # --- Training schedule ---
+  num_epochs_per_rollout: 4
+  minibatch_size: 512
+  dtype: "float16"          # T4 does not support bfloat16
+  torch_compile: false
+
+save_dir: "exps/beat_random_v13"
+total_rollouts: 2000
+save_every: 50
+eval_every: 10
+log_every: 5
+
+use_wandb: false
+seed: 42
+device: "cuda"
+torch_deterministic: false

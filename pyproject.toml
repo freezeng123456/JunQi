@@ -1,0 +1,141 @@
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "junqi"
+version = "0.1.0.dev0"
+description = "Four-player 四国军棋 (Junqi) reinforcement learning framework"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "freezeng", email = "freezeng@tencent.com" },
+]
+license = { text = "Proprietary" }
+keywords = ["junqi", "military-chess", "reinforcement-learning", "imperfect-information"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: Other/Proprietary License",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  # Core numerics (no torch needed for junqi_core itself).
+  "numpy>=1.26,<3",
+  "pydantic>=2.5,<3",
+]
+
+[project.optional-dependencies]
+rl = [
+  # Phase 1+: reinforcement learning stack.
+  "torch>=2.1",
+  "gymnasium>=0.29",
+  "tqdm>=4.66",
+  "pyyaml>=6.0",
+  "tensorboard>=2.15",
+  "wandb>=0.16",
+]
+viz = [
+  # Phase 4+: web visualization.
+  "fastapi>=0.109",
+  "uvicorn[standard]>=0.27",
+  "websockets>=12.0",
+]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=4.1",
+  "hypothesis>=6.92",
+  "ruff>=0.3",
+  "mypy>=1.8",
+  "pre-commit>=3.6",
+]
+
+[project.urls]
+Homepage = "https://git.woa.com/freezeng/JunQi"
+Repository = "https://git.woa.com/freezeng/JunQi"
+
+[tool.setuptools]
+packages = ["junqi_core", "junqi_rl", "junqi_viz"]
+
+[tool.setuptools.package-data]
+junqi_core = ["*.json", "*.md"]
+
+# ---------------------------------------------------------------------------
+# Ruff (lint + format, replaces black/isort/flake8)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["legacy_engine", "legacy_gui"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "I",    # isort
+  "W",    # pycodestyle warnings
+  "B",    # flake8-bugbear
+  "UP",   # pyupgrade
+  "SIM",  # flake8-simplify
+  "RUF",  # ruff-specific
+]
+ignore = [
+  "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ---------------------------------------------------------------------------
+# Mypy (strict type checking on junqi_core)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+exclude = ["legacy_engine", "legacy_gui", "tests"]
+
+[[tool.mypy.overrides]]
+module = "junqi_rl.*"
+strict = false  # relax until Phase 1 stabilizes
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--tb=short",
+]
+markers = [
+  "slow: slow tests (> 1s); skip in default runs",
+  "parity: tests that require a running legacy_engine process",
+  "golden: tests driven by tests/golden/ JSON cases",
+]
+
+[tool.coverage.run]
+source = ["junqi_core"]
+branch = true
+omit = ["*/__init__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+]
+fail_under = 85

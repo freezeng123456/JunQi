@@ -1,0 +1,51 @@
+device: cuda
+env:
+  max_num_moves: 4000
+  num_envs: 128
+  seed: 42
+  steps_per_env: 512
+  use_gpu_rollout: true
+eval_every: 10
+log_every: 5
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  use_cat_vf: false
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.2
+  dtype: float16
+  ema_decay: 0.995
+  gae_lambda: 0.95
+  gamma: 0.999
+  kl_coef: 0.1
+  lr_ceil: 0.0005
+  lr_coef: 0.5
+  lr_decay: 10.0
+  lr_floor: 5.0e-05
+  max_grad_norm: 0.5
+  minibatch_size: 512
+  num_epochs_per_rollout: 4
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: false
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+save_dir: exps/beat_random_v8
+save_every: 50
+seed: 42
+torch_deterministic: false
+total_rollouts: 2000
+use_wandb: false

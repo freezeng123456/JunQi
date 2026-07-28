@@ -1,0 +1,251 @@
+[train] Runtime config saved to exps/v35_ddp_combat_memory/cfg.runtime.yaml
+[train] DDP world_size=2 backend=nccl
+[train] device=cuda:0  num_envs=768  steps_per_env=512
+[train] GPU: NVIDIA H20
+[train] JunqiNet parameters: 3,197,955
+[train] GpuRollout: 768 envs (all on-device)
+[train] RolloutBufferGPU (zero-CPU collect path, mode=vs-random)
+[train] ArrangementNet parameters: 12,643,857
+[train] Arrangement training enabled: n_arr=1024, refresh_every=1, storage_duration=300
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/root/JunQi/scripts/train.py", line 1523, in <module>
+[rank0]:     main()
+[rank0]:   File "/root/JunQi/scripts/train.py", line 1519, in main
+[rank0]:     train(cfg)
+[rank0]:   File "/root/JunQi/scripts/train.py", line 983, in train
+[rank0]:     BeliefNetConfig(**cfg.belief.net)
+[rank0]: TypeError: BeliefNetConfig.__init__() got an unexpected keyword argument 'depth'
+[train] Runtime config saved to exps/v35_ddp_combat_memory/cfg.runtime.yaml
+[train] DDP world_size=2 backend=nccl
+[train] device=cuda:0  num_envs=768  steps_per_env=512
+[train] GPU: NVIDIA H20
+[train] JunqiNet parameters: 3,197,955
+[train] GpuRollout: 768 envs (all on-device)
+[train] RolloutBufferGPU (zero-CPU collect path, mode=vs-random)
+[train] ArrangementNet parameters: 12,643,857
+[train] Arrangement training enabled: n_arr=1024, refresh_every=1, storage_duration=300
+[train] BeliefNet parameters: 19,824,908
+[train] Belief training enabled: buffer_capacity=50000, refresh_every=5, warmup_rollouts=100
+[train] Starting training loop: rollouts 0 → 1500
+[train] Per-rank env steps per rollout: 393,216 (global: 786,432 across 2 ranks)
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/root/JunQi/scripts/train.py", line 1523, in <module>
+[rank0]:     main()
+[rank0]:   File "/root/JunQi/scripts/train.py", line 1519, in main
+[rank0]:     train(cfg)
+[rank0]:   File "/root/JunQi/scripts/train.py", line 1214, in train
+[rank0]:     metrics = trainer.train_epoch(rollout, rng=rng)
+[rank0]:   File "/root/JunQi/junqi_rl/training/ppo.py", line 750, in train_epoch
+[rank0]:     batches = list(rollout.minibatches(
+[rank0]:   File "/root/JunQi/junqi_rl/training/rollout_gpu.py", line 500, in minibatches
+[rank0]:     obs_spatial=obs_sp.index_select(0, idx),
+[rank0]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 90.00 MiB. GPU 0 has a total capacity of 95.00 GiB of which 17.94 MiB is free. Process 1983964 has 94.98 GiB memory in use. Of the allocated memory 92.04 GiB is allocated by PyTorch, and 414.72 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[train] Runtime config saved to exps/v35_ddp_combat_memory/cfg.runtime.yaml
+[train] DDP world_size=2 backend=nccl
+[train] device=cuda:0  num_envs=384  steps_per_env=512
+[train] GPU: NVIDIA H20
+[train] JunqiNet parameters: 3,197,955
+[train] GpuRollout: 384 envs (all on-device)
+[train] RolloutBufferGPU (zero-CPU collect path, mode=vs-random)
+[train] ArrangementNet parameters: 12,643,857
+[train] Arrangement training enabled: n_arr=1024, refresh_every=1, storage_duration=300
+[train] BeliefNet parameters: 19,824,908
+[train] Belief training enabled: buffer_capacity=50000, refresh_every=5, warmup_rollouts=100
+[train] Starting training loop: rollouts 0 → 1500
+[train] Per-rank env steps per rollout: 196,608 (global: 393,216 across 2 ranks)
+[     4] loss_p=+0.3542  loss_v=0.1547  ret=+0.0108  lr=1.00e-04  fps=5124  elapsed=192s  arr_loss=4.3484  arr_ready=0  arr_batches=4  arr_gn=62.152
+[     9] loss_p=+0.1442  loss_v=0.1371  ret=+0.0072  lr=9.49e-05  fps=5316  elapsed=377s  arr_loss=-0.7054  arr_ready=0  arr_batches=6  arr_gn=5.328
+[train] Evaluating (rollout 10)…
+[eval]  win=0.727  loss=0.117  draw=0.156  ongoing=0.000  avg_len=1364  done=128/128
+[train] New best eval win=0.727; saved exps/v35_ddp_combat_memory/ckpt_best.pt
+[    14] loss_p=+0.1004  loss_v=0.0949  ret=+0.0019  lr=6.12e-05  fps=4936  elapsed=576s  arr_loss=-0.7446  arr_ready=0  arr_batches=6  arr_gn=3.048
+[    19] loss_p=+0.0841  loss_v=0.0569  ret=+0.0013  lr=4.17e-05  fps=5021  elapsed=772s  arr_loss=-0.3885  arr_ready=0  arr_batches=5  arr_gn=1.959
+[train] Evaluating (rollout 20)…
+[eval]  win=0.656  loss=0.312  draw=0.031  ongoing=0.000  avg_len=848  done=128/128
+[    24] loss_p=+0.0675  loss_v=0.0594  ret=+0.0022  lr=3.15e-05  fps=4973  elapsed=970s  arr_loss=-0.2097  arr_ready=0  arr_batches=4  arr_gn=1.014
+[    29] loss_p=+0.0741  loss_v=0.0546  ret=+0.0020  lr=2.52e-05  fps=5062  elapsed=1164s  arr_loss=-0.0870  arr_ready=0  arr_batches=4  arr_gn=2.429
+[train] Evaluating (rollout 30)…
+[eval]  win=0.797  loss=0.102  draw=0.102  ongoing=0.000  avg_len=1607  done=128/128
+[train] New best eval win=0.797; saved exps/v35_ddp_combat_memory/ckpt_best.pt
+[    34] loss_p=+0.0785  loss_v=0.0619  ret=+0.0019  lr=2.09e-05  fps=4947  elapsed=1363s  arr_loss=0.1333  arr_ready=0  arr_batches=6  arr_gn=3.361
+[    39] loss_p=+0.0733  loss_v=0.0452  ret=+0.0014  lr=1.80e-05  fps=5292  elapsed=1548s  arr_loss=0.2681  arr_ready=0  arr_batches=4  arr_gn=1.698
+[train] Evaluating (rollout 40)…
+[eval]  win=0.812  loss=0.055  draw=0.133  ongoing=0.000  avg_len=1671  done=128/128
+[train] New best eval win=0.812; saved exps/v35_ddp_combat_memory/ckpt_best.pt
+[    44] loss_p=+0.0765  loss_v=0.0502  ret=+0.0016  lr=1.57e-05  fps=5071  elapsed=1742s  arr_loss=0.3120  arr_ready=0  arr_batches=5  arr_gn=1.313
+[    49] loss_p=+0.1182  loss_v=0.0857  ret=+0.0004  lr=1.42e-05  fps=6767  elapsed=1887s  arr_loss=0.4714  arr_ready=0  arr_batches=7  arr_gn=1.453
+[train] Checkpoint saved: exps/v35_ddp_combat_memory/ckpt_000050.pt
+/jizhicfs/denryli/venv/lib/python3.10/site-packages/torch/distributed/distributed_c10d.py:4876: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  warnings.warn(  # warn only once
+[train] Evaluating (rollout 50)…
+[eval]  win=0.586  loss=0.305  draw=0.109  ongoing=0.000  avg_len=998  done=128/128
+[    54] loss_p=+0.0798  loss_v=0.0554  ret=+0.0009  lr=1.30e-05  fps=5381  elapsed=2070s  arr_loss=0.5851  arr_ready=0  arr_batches=4  arr_gn=1.072
+[    59] loss_p=+0.0661  loss_v=0.0426  ret=+0.0018  lr=1.17e-05  fps=5248  elapsed=2257s  arr_loss=0.4728  arr_ready=0  arr_batches=4  arr_gn=2.450
+[train] Evaluating (rollout 60)…
+[eval]  win=0.430  loss=0.570  draw=0.000  ongoing=0.000  avg_len=956  done=128/128
+[    64] loss_p=+0.0848  loss_v=0.0619  ret=+0.0009  lr=1.07e-05  fps=5446  elapsed=2438s  arr_loss=0.4997  arr_ready=0  arr_batches=5  arr_gn=1.453
+[    69] loss_p=+0.0680  loss_v=0.0347  ret=+0.0027  lr=9.86e-06  fps=5189  elapsed=2627s  arr_loss=0.6080  arr_ready=0  arr_batches=4  arr_gn=0.969
+[train] Evaluating (rollout 70)…
+[eval]  win=0.805  loss=0.117  draw=0.078  ongoing=0.000  avg_len=1406  done=128/128
+[    74] loss_p=+0.0802  loss_v=0.0562  ret=+0.0022  lr=9.07e-06  fps=4880  elapsed=2829s  arr_loss=0.5095  arr_ready=0  arr_batches=5  arr_gn=1.087
+[    79] loss_p=+0.1063  loss_v=0.0637  ret=-0.0009  lr=8.41e-06  fps=5287  elapsed=3015s  arr_loss=0.4995  arr_ready=0  arr_batches=6  arr_gn=1.030
+[train] Evaluating (rollout 80)…
+[eval]  win=0.672  loss=0.258  draw=0.070  ongoing=0.000  avg_len=1562  done=128/128
+[    84] loss_p=+0.0867  loss_v=0.0552  ret=+0.0010  lr=7.83e-06  fps=4939  elapsed=3214s  arr_loss=0.4907  arr_ready=0  arr_batches=6  arr_gn=1.206
+[    89] loss_p=+0.0678  loss_v=0.0440  ret=+0.0012  lr=7.33e-06  fps=5245  elapsed=3401s  arr_loss=0.5027  arr_ready=0  arr_batches=5  arr_gn=1.645
+[train] Evaluating (rollout 90)…
+[eval]  win=0.711  loss=0.281  draw=0.008  ongoing=0.000  avg_len=1122  done=128/128
+[    94] loss_p=+0.0979  loss_v=0.0526  ret=+0.0018  lr=6.88e-06  fps=4838  elapsed=3604s  arr_loss=0.4758  arr_ready=0  arr_batches=4  arr_gn=1.677
+[    99] loss_p=+0.0820  loss_v=0.0587  ret=+0.0016  lr=6.48e-06  fps=5458  elapsed=3785s  arr_loss=0.4580  arr_ready=0  arr_batches=5  arr_gn=1.630
+[train] Checkpoint saved: exps/v35_ddp_combat_memory/ckpt_000100.pt
+[train] Evaluating (rollout 100)…
+[eval]  win=0.352  loss=0.633  draw=0.016  ongoing=0.000  avg_len=618  done=128/128
+[   104] loss_p=+0.1084  loss_v=0.0778  ret=-0.0021  lr=6.15e-06  fps=5207  elapsed=3973s  arr_loss=0.4291  arr_ready=0  arr_batches=8  arr_gn=2.081
+[   109] loss_p=+0.0800  loss_v=0.0647  ret=-0.0008  lr=5.85e-06  fps=5598  elapsed=4149s  arr_loss=0.4399  arr_ready=0  arr_batches=5  arr_gn=1.957
+[train] Evaluating (rollout 110)…
+[eval]  win=0.602  loss=0.375  draw=0.023  ongoing=0.000  avg_len=1122  done=128/128
+[   114] loss_p=+0.0903  loss_v=0.0528  ret=+0.0012  lr=5.57e-06  fps=5039  elapsed=4344s  arr_loss=0.5442  arr_ready=0  arr_batches=4  arr_gn=1.893
+[   119] loss_p=+0.0792  loss_v=0.0683  ret=+0.0003  lr=5.31e-06  fps=5259  elapsed=4531s  arr_loss=0.5104  arr_ready=0  arr_batches=6  arr_gn=1.637
+[train] Evaluating (rollout 120)…
+[eval]  win=0.758  loss=0.188  draw=0.055  ongoing=0.000  avg_len=1424  done=128/128
+[   124] loss_p=+0.1165  loss_v=0.0490  ret=+0.0007  lr=5.07e-06  fps=4860  elapsed=4733s  arr_loss=0.5171  arr_ready=0  arr_batches=4  arr_gn=1.626
+[   129] loss_p=+0.0953  loss_v=0.0732  ret=-0.0005  lr=5.00e-06  fps=5228  elapsed=4921s  arr_loss=0.4306  arr_ready=0  arr_batches=8  arr_gn=1.180
+[train] Evaluating (rollout 130)…
+[eval]  win=0.250  loss=0.750  draw=0.000  ongoing=0.000  avg_len=684  done=128/128
+[   134] loss_p=+0.1175  loss_v=0.0673  ret=-0.0022  lr=5.00e-06  fps=5111  elapsed=5114s  arr_loss=0.3868  arr_ready=0  arr_batches=8  arr_gn=3.015
+[   139] loss_p=+0.1088  loss_v=0.0659  ret=-0.0022  lr=5.00e-06  fps=5182  elapsed=5303s  arr_loss=0.3448  arr_ready=0  arr_batches=8  arr_gn=1.643
+[train] Evaluating (rollout 140)…
+[eval]  win=0.273  loss=0.727  draw=0.000  ongoing=0.000  avg_len=822  done=128/128
+[   144] loss_p=+0.1047  loss_v=0.0640  ret=-0.0019  lr=5.00e-06  fps=5087  elapsed=5496s  arr_loss=0.3244  arr_ready=0  arr_batches=6  arr_gn=1.544
+[   149] loss_p=+0.1039  loss_v=0.0641  ret=-0.0009  lr=5.00e-06  fps=6256  elapsed=5654s  arr_loss=0.3408  arr_ready=0  arr_batches=4  arr_gn=1.675
+[train] Checkpoint saved: exps/v35_ddp_combat_memory/ckpt_000150.pt
+[train] Evaluating (rollout 150)…
+[eval]  win=0.508  loss=0.477  draw=0.016  ongoing=0.000  avg_len=1060  done=128/128
+[   154] loss_p=+0.0698  loss_v=0.0455  ret=+0.0005  lr=5.00e-06  fps=5103  elapsed=5846s  arr_loss=0.4024  arr_ready=0  arr_batches=4  arr_gn=1.229
+[   159] loss_p=+0.0657  loss_v=0.0370  ret=+0.0019  lr=5.00e-06  fps=5132  elapsed=6038s  arr_loss=0.4495  arr_ready=0  arr_batches=4  arr_gn=0.747
+[train] Evaluating (rollout 160)…
+[eval]  win=0.758  loss=0.195  draw=0.047  ongoing=0.000  avg_len=1253  done=128/128
+[   164] loss_p=+0.0780  loss_v=0.0434  ret=+0.0026  lr=5.00e-06  fps=4643  elapsed=6250s  arr_loss=0.3487  arr_ready=0  arr_batches=4  arr_gn=1.285
+[   169] loss_p=+0.0925  loss_v=0.0448  ret=+0.0024  lr=5.00e-06  fps=5094  elapsed=6443s  arr_loss=0.3575  arr_ready=0  arr_batches=4  arr_gn=0.560
+[train] Evaluating (rollout 170)…
+[eval]  win=0.531  loss=0.469  draw=0.000  ongoing=0.000  avg_len=1096  done=128/128
+[   174] loss_p=+0.0930  loss_v=0.0552  ret=+0.0011  lr=5.00e-06  fps=5367  elapsed=6626s  arr_loss=0.3247  arr_ready=0  arr_batches=4  arr_gn=0.506
+[   179] loss_p=+0.0664  loss_v=0.0368  ret=+0.0023  lr=5.00e-06  fps=5144  elapsed=6817s  arr_loss=0.3652  arr_ready=0  arr_batches=4  arr_gn=0.307
+[train] Evaluating (rollout 180)…
+[eval]  win=0.688  loss=0.273  draw=0.039  ongoing=0.000  avg_len=1304  done=128/128
+[   184] loss_p=+0.0846  loss_v=0.0409  ret=+0.0028  lr=5.00e-06  fps=4872  elapsed=7019s  arr_loss=0.3383  arr_ready=0  arr_batches=4  arr_gn=0.687
+[   189] loss_p=+0.0869  loss_v=0.0438  ret=+0.0033  lr=5.00e-06  fps=5080  elapsed=7212s  arr_loss=0.3050  arr_ready=0  arr_batches=4  arr_gn=0.577
+[train] Evaluating (rollout 190)…
+[eval]  win=0.742  loss=0.203  draw=0.055  ongoing=0.000  avg_len=1260  done=128/128
+[   194] loss_p=+0.0916  loss_v=0.0476  ret=+0.0028  lr=5.00e-06  fps=4896  elapsed=7413s  arr_loss=0.3631  arr_ready=0  arr_batches=4  arr_gn=0.487
+[   199] loss_p=+0.0764  loss_v=0.0417  ret=+0.0030  lr=5.00e-06  fps=5000  elapsed=7610s  arr_loss=0.3954  arr_ready=0  arr_batches=4  arr_gn=0.593
+[train] Checkpoint saved: exps/v35_ddp_combat_memory/ckpt_000200.pt
+[train] Evaluating (rollout 200)…
+[eval]  win=0.703  loss=0.219  draw=0.078  ongoing=0.000  avg_len=1288  done=128/128
+[   204] loss_p=+0.1036  loss_v=0.0589  ret=+0.0060  lr=5.00e-06  fps=4796  elapsed=7814s  arr_loss=0.3028  arr_ready=0  arr_batches=4  arr_gn=0.411
+[   209] loss_p=+0.1150  loss_v=0.0749  ret=+0.0084  lr=5.00e-06  fps=5048  elapsed=8009s  arr_loss=0.2820  arr_ready=0  arr_batches=4  arr_gn=0.461
+[train] Evaluating (rollout 210)…
+[eval]  win=0.805  loss=0.172  draw=0.023  ongoing=0.000  avg_len=1292  done=128/128
+[   214] loss_p=+0.1062  loss_v=0.0676  ret=+0.0066  lr=5.00e-06  fps=4909  elapsed=8209s  arr_loss=0.2653  arr_ready=0  arr_batches=4  arr_gn=0.413
+[   219] loss_p=+0.0845  loss_v=0.0585  ret=+0.0044  lr=5.00e-06  fps=5038  elapsed=8405s  arr_loss=0.2911  arr_ready=0  arr_batches=4  arr_gn=0.280
+[train] Evaluating (rollout 220)…
+[eval]  win=0.695  loss=0.297  draw=0.008  ongoing=0.000  avg_len=1158  done=128/128
+[   224] loss_p=+0.0890  loss_v=0.0513  ret=+0.0033  lr=5.00e-06  fps=4891  elapsed=8606s  arr_loss=0.2741  arr_ready=0  arr_batches=4  arr_gn=0.484
+[   229] loss_p=+0.0881  loss_v=0.0504  ret=+0.0033  lr=5.00e-06  fps=5201  elapsed=8795s  arr_loss=0.2751  arr_ready=0  arr_batches=4  arr_gn=0.464
+[train] Evaluating (rollout 230)…
+[eval]  win=0.750  loss=0.203  draw=0.047  ongoing=0.000  avg_len=1220  done=128/128
+[   234] loss_p=+0.0952  loss_v=0.0468  ret=+0.0034  lr=5.00e-06  fps=4909  elapsed=8995s  arr_loss=0.2855  arr_ready=0  arr_batches=4  arr_gn=0.383
+[   239] loss_p=+0.0779  loss_v=0.0436  ret=+0.0030  lr=5.00e-06  fps=5116  elapsed=9187s  arr_loss=0.2808  arr_ready=0  arr_batches=4  arr_gn=0.462
+[train] Evaluating (rollout 240)…
+[eval]  win=0.711  loss=0.203  draw=0.086  ongoing=0.000  avg_len=1382  done=128/128
+[   244] loss_p=+0.0656  loss_v=0.0373  ret=+0.0025  lr=5.00e-06  fps=4897  elapsed=9388s  arr_loss=0.3175  arr_ready=0  arr_batches=4  arr_gn=0.662
+[   249] loss_p=+0.0619  loss_v=0.0393  ret=+0.0025  lr=5.00e-06  fps=5133  elapsed=9579s  arr_loss=0.3472  arr_ready=0  arr_batches=4  arr_gn=0.411
+[train] Checkpoint saved: exps/v35_ddp_combat_memory/ckpt_000250.pt
+[train] Evaluating (rollout 250)…
+[eval]  win=0.758  loss=0.188  draw=0.055  ongoing=0.000  avg_len=1338  done=128/128
+[   254] loss_p=+0.0510  loss_v=0.0414  ret=+0.0026  lr=5.00e-06  fps=4868  elapsed=9781s  arr_loss=0.3354  arr_ready=0  arr_batches=4  arr_gn=0.625
+[   259] loss_p=+0.0572  loss_v=0.0431  ret=+0.0029  lr=5.00e-06  fps=5133  elapsed=9973s  arr_loss=0.3189  arr_ready=0  arr_batches=4  arr_gn=0.556
+[train] Evaluating (rollout 260)…
+[eval]  win=0.719  loss=0.266  draw=0.016  ongoing=0.000  avg_len=1179  done=128/128
+[   264] loss_p=+0.0954  loss_v=0.0450  ret=+0.0021  lr=5.00e-06  fps=4890  elapsed=10174s  arr_loss=0.3501  arr_ready=0  arr_batches=4  arr_gn=0.337
+[   269] loss_p=+0.2299  loss_v=0.0722  ret=-0.0009  lr=5.00e-06  fps=5376  elapsed=10357s  arr_loss=0.3979  arr_ready=0  arr_batches=7  arr_gn=0.758
+[train] Evaluating (rollout 270)…
+[eval]  win=0.359  loss=0.641  draw=0.000  ongoing=0.000  avg_len=502  done=128/128
+[train] early-stop streak: 1/5 (win_rate=0.359 < 0.450)
+[   274] loss_p=+0.1954  loss_v=0.0922  ret=-0.0032  lr=5.00e-06  fps=5141  elapsed=10548s  arr_loss=0.3165  arr_ready=0  arr_batches=8  arr_gn=1.419
+[   279] loss_p=+0.1738  loss_v=0.0971  ret=-0.0048  lr=5.00e-06  fps=5170  elapsed=10738s  arr_loss=0.3260  arr_ready=0  arr_batches=8  arr_gn=1.005
+[train] Evaluating (rollout 280)…
+[eval]  win=0.289  loss=0.711  draw=0.000  ongoing=0.000  avg_len=442  done=128/128
+[train] early-stop streak: 2/5 (win_rate=0.289 < 0.450)
+[   284] loss_p=+0.1448  loss_v=0.0996  ret=-0.0055  lr=5.00e-06  fps=5107  elapsed=10930s  arr_loss=0.2967  arr_ready=0  arr_batches=8  arr_gn=0.517
+[   289] loss_p=+0.1366  loss_v=0.0987  ret=-0.0047  lr=5.00e-06  fps=5080  elapsed=11124s  arr_loss=0.2946  arr_ready=0  arr_batches=8  arr_gn=0.826
+[train] Evaluating (rollout 290)…
+[eval]  win=0.547  loss=0.438  draw=0.016  ongoing=0.000  avg_len=958  done=128/128
+[   294] loss_p=+0.0785  loss_v=0.0479  ret=-0.0003  lr=5.00e-06  fps=4961  elapsed=11322s  arr_loss=0.4251  arr_ready=0  arr_batches=4  arr_gn=0.849
+[   299] loss_p=+0.0774  loss_v=0.0423  ret=+0.0012  lr=5.00e-06  fps=5230  elapsed=11510s  arr_loss=0.3873  arr_ready=0  arr_batches=4  arr_gn=0.563
+[train] Checkpoint saved: exps/v35_ddp_combat_memory/ckpt_000300.pt
+[train] Evaluating (rollout 300)…
+[eval]  win=0.781  loss=0.125  draw=0.094  ongoing=0.000  avg_len=1406  done=128/128
+[   304] loss_p=+0.1140  loss_v=0.0461  ret=+0.0020  lr=5.00e-06  fps=4894  elapsed=11711s  arr_loss=0.4139  arr_ready=0  arr_batches=5  arr_gn=0.550
+[   309] loss_p=+0.1133  loss_v=0.0846  ret=-0.0014  lr=5.00e-06  fps=5163  elapsed=11901s  arr_loss=0.3615  arr_ready=0  arr_batches=8  arr_gn=0.942
+[train] Evaluating (rollout 310)…
+[eval]  win=0.594  loss=0.406  draw=0.000  ongoing=0.000  avg_len=775  done=128/128
+[   314] loss_p=+0.1036  loss_v=0.0715  ret=-0.0001  lr=5.00e-06  fps=5674  elapsed=12075s  arr_loss=0.2762  arr_ready=0  arr_batches=5  arr_gn=0.682
+[   319] loss_p=+0.0685  loss_v=0.0372  ret=+0.0022  lr=5.00e-06  fps=5147  elapsed=12266s  arr_loss=0.3672  arr_ready=0  arr_batches=4  arr_gn=0.447
+[train] Evaluating (rollout 320)…
+[eval]  win=0.805  loss=0.156  draw=0.039  ongoing=0.000  avg_len=1050  done=128/128
+[   324] loss_p=+0.2040  loss_v=0.0691  ret=+0.0014  lr=5.00e-06  fps=5094  elapsed=12459s  arr_loss=0.2751  arr_ready=0  arr_batches=6  arr_gn=0.786
+[   329] loss_p=+0.1457  loss_v=0.0879  ret=+0.0001  lr=5.00e-06  fps=6172  elapsed=12618s  arr_loss=0.2588  arr_ready=0  arr_batches=8  arr_gn=0.909
+[train] Evaluating (rollout 330)…
+[eval]  win=0.672  loss=0.320  draw=0.008  ongoing=0.000  avg_len=687  done=128/128
+[   334] loss_p=+0.1402  loss_v=0.0769  ret=-0.0014  lr=5.00e-06  fps=5426  elapsed=12799s  arr_loss=0.2993  arr_ready=0  arr_batches=8  arr_gn=0.516
+[   339] loss_p=+0.1300  loss_v=0.0865  ret=-0.0037  lr=5.00e-06  fps=5231  elapsed=12987s  arr_loss=0.2346  arr_ready=0  arr_batches=8  arr_gn=0.594
+[train] Evaluating (rollout 340)…
+[eval]  win=0.430  loss=0.570  draw=0.000  ongoing=0.000  avg_len=612  done=128/128
+[train] early-stop streak: 1/5 (win_rate=0.430 < 0.450)
+[   344] loss_p=+0.1126  loss_v=0.0802  ret=-0.0028  lr=5.00e-06  fps=5110  elapsed=13179s  arr_loss=0.2551  arr_ready=0  arr_batches=8  arr_gn=1.021
+[   349] loss_p=+0.0987  loss_v=0.0751  ret=-0.0016  lr=5.00e-06  fps=5198  elapsed=13368s  arr_loss=0.2475  arr_ready=0  arr_batches=8  arr_gn=0.834
+[train] Checkpoint saved: exps/v35_ddp_combat_memory/ckpt_000350.pt
+[train] Evaluating (rollout 350)…
+[eval]  win=0.578  loss=0.422  draw=0.000  ongoing=0.000  avg_len=738  done=128/128
+[   354] loss_p=+0.1172  loss_v=0.0948  ret=-0.0007  lr=5.00e-06  fps=6216  elapsed=13527s  arr_loss=0.2679  arr_ready=0  arr_batches=8  arr_gn=1.433
+[   359] loss_p=+0.1030  loss_v=0.0832  ret=-0.0007  lr=5.00e-06  fps=5899  elapsed=13693s  arr_loss=0.3125  arr_ready=0  arr_batches=8  arr_gn=1.779
+[train] Evaluating (rollout 360)…
+[eval]  win=0.594  loss=0.391  draw=0.016  ongoing=0.000  avg_len=722  done=128/128
+[   364] loss_p=+0.1026  loss_v=0.0771  ret=-0.0017  lr=5.00e-06  fps=5112  elapsed=13885s  arr_loss=0.3082  arr_ready=0  arr_batches=8  arr_gn=1.323
+[   369] loss_p=+0.1111  loss_v=0.0802  ret=-0.0024  lr=5.00e-06  fps=5270  elapsed=14072s  arr_loss=0.2588  arr_ready=0  arr_batches=8  arr_gn=0.774
+[train] Evaluating (rollout 370)…
+[eval]  win=0.445  loss=0.555  draw=0.000  ongoing=0.000  avg_len=708  done=128/128
+[train] early-stop streak: 1/5 (win_rate=0.445 < 0.450)
+[   374] loss_p=+0.1071  loss_v=0.0775  ret=-0.0021  lr=5.00e-06  fps=5074  elapsed=14266s  arr_loss=0.2637  arr_ready=0  arr_batches=8  arr_gn=0.991
+[   379] loss_p=+0.0989  loss_v=0.0757  ret=-0.0016  lr=5.00e-06  fps=5285  elapsed=14452s  arr_loss=0.2764  arr_ready=0  arr_batches=8  arr_gn=0.875
+[train] Evaluating (rollout 380)…
+[eval]  win=0.477  loss=0.500  draw=0.023  ongoing=0.000  avg_len=756  done=128/128
+[   384] loss_p=+0.1077  loss_v=0.0764  ret=-0.0018  lr=5.00e-06  fps=5059  elapsed=14646s  arr_loss=0.2860  arr_ready=0  arr_batches=8  arr_gn=0.935
+[   389] loss_p=+0.1123  loss_v=0.0797  ret=-0.0024  lr=5.00e-06  fps=5303  elapsed=14831s  arr_loss=0.2611  arr_ready=0  arr_batches=8  arr_gn=0.776
+[train] Evaluating (rollout 390)…
+[eval]  win=0.555  loss=0.445  draw=0.000  ongoing=0.000  avg_len=726  done=128/128
+[   394] loss_p=+0.1235  loss_v=0.0799  ret=-0.0023  lr=5.00e-06  fps=5176  elapsed=15021s  arr_loss=0.2756  arr_ready=0  arr_batches=8  arr_gn=0.681
+[   399] loss_p=+0.1689  loss_v=0.0840  ret=-0.0031  lr=5.00e-06  fps=5426  elapsed=15203s  arr_loss=0.2273  arr_ready=0  arr_batches=8  arr_gn=0.862
+[train] Checkpoint saved: exps/v35_ddp_combat_memory/ckpt_000400.pt
+[train] Evaluating (rollout 400)…
+[eval]  win=0.422  loss=0.578  draw=0.000  ongoing=0.000  avg_len=608  done=128/128
+[train] early-stop streak: 1/5 (win_rate=0.422 < 0.450)
+[   404] loss_p=+0.1218  loss_v=0.0826  ret=-0.0030  lr=5.00e-06  fps=5259  elapsed=15389s  arr_loss=0.2719  arr_ready=0  arr_batches=8  arr_gn=0.809
+[   409] loss_p=+0.1198  loss_v=0.0808  ret=-0.0027  lr=5.00e-06  fps=5396  elapsed=15572s  arr_loss=0.2815  arr_ready=0  arr_batches=8  arr_gn=0.685
+[train] Evaluating (rollout 410)…
+[eval]  win=0.453  loss=0.539  draw=0.008  ongoing=0.000  avg_len=692  done=128/128
+[   414] loss_p=+0.1330  loss_v=0.0798  ret=-0.0025  lr=5.00e-06  fps=5222  elapsed=15760s  arr_loss=0.2809  arr_ready=0  arr_batches=8  arr_gn=0.744
+[   419] loss_p=+0.1269  loss_v=0.0817  ret=-0.0031  lr=5.00e-06  fps=5298  elapsed=15945s  arr_loss=0.2441  arr_ready=0  arr_batches=8  arr_gn=0.599
+[train] Evaluating (rollout 420)…
+[eval]  win=0.414  loss=0.586  draw=0.000  ongoing=0.000  avg_len=810  done=128/128
+[train] early-stop streak: 1/5 (win_rate=0.414 < 0.450)
+[   424] loss_p=+0.1023  loss_v=0.0742  ret=-0.0026  lr=5.00e-06  fps=4999  elapsed=16142s  arr_loss=0.2511  arr_ready=0  arr_batches=8  arr_gn=0.635
+[   429] loss_p=+0.0910  loss_v=0.0710  ret=-0.0024  lr=5.00e-06  fps=5159  elapsed=16333s  arr_loss=0.2454  arr_ready=0  arr_batches=7  arr_gn=0.683
+[train] Evaluating (rollout 430)…
+[eval]  win=0.562  loss=0.406  draw=0.031  ongoing=0.000  avg_len=1037  done=128/128
+[   434] loss_p=+0.0941  loss_v=0.0685  ret=-0.0013  lr=5.00e-06  fps=5403  elapsed=16515s  arr_loss=0.2767  arr_ready=0  arr_batches=4  arr_gn=0.353
+
+[train] Signal 15 received — will stop after current rollout.
+[train] Graceful stop: saving final checkpoint.
+[train] Done. Total elapsed: 16630.2s

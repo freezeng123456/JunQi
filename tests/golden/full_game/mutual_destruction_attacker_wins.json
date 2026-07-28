@@ -1,0 +1,45 @@
+
+{
+  "schema_version": "1.0",
+  "rules_version": "1.1.0",
+  "category": "full_game",
+  "id": "mutual_destruction_attacker_wins",
+  "description": "Q14 (§5.2a) canonical case: both teams reduced to a single SHIZH each; HOME (attacker, red team) moves its SHIZH from nine-grid cell (6,10) into RIGHT's rail cell (5,10) holding RIGHT's last SHIZH. Same-rank BOMB kills both last pieces → both teams fully dead simultaneously → ATTACKER's team (red=0) wins, NOT a draw.",
+  "tags": ["Q14", "mutual-destruction", "attacker-wins", "full-game", "team-reward"],
+  "legacy_divergence": "Legacy engine has no mutual-destruction resolution; this rule is new to junqi_core v1.1.0.",
+  "debug_include_private": false,
+  "pre_state": {
+    "turn": 0,
+    "move_counter": 210,
+    "moves_since_last_combat": 3,
+    "pieces": [
+      { "seat": 0, "index": 14, "type": "SHIZH", "pos": [6, 10], "dead": false },
+      { "seat": 1, "index": 0,  "type": "SHIZH", "pos": [5, 10], "dead": false }
+    ],
+    "info": [
+      { "seat": 0, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 1, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 2, "dead": true,  "flag_revealed": true,  "jump_count": 0 },
+      { "seat": 3, "dead": true,  "flag_revealed": true,  "jump_count": 0 }
+    ]
+  },
+  "actions": [
+    { "seat": 0, "src": [6, 10], "dst": [5, 10] }
+  ],
+  "expected": {
+    "results": [
+      {
+        "src": [6, 10],
+        "dst": [5, 10],
+        "event": "BOMB",
+        "flag_reveal_src": false,
+        "flag_reveal_dst": false,
+        "flag_captured": false,
+        "seats_died_this_step": [0, 1]
+      }
+    ],
+    "terminated": true,
+    "winner_team": 0,
+    "draw": false
+  }
+}

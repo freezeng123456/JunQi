@@ -1,0 +1,25 @@
+[train rank1] device=cuda:1 seed=10135 env.seed=10135
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/root/JunQi/scripts/train.py", line 1523, in <module>
+[rank1]:     main()
+[rank1]:   File "/root/JunQi/scripts/train.py", line 1519, in main
+[rank1]:     train(cfg)
+[rank1]:   File "/root/JunQi/scripts/train.py", line 983, in train
+[rank1]:     BeliefNetConfig(**cfg.belief.net)
+[rank1]: TypeError: BeliefNetConfig.__init__() got an unexpected keyword argument 'depth'
+[train rank1] device=cuda:1 seed=10135 env.seed=10135
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/root/JunQi/scripts/train.py", line 1523, in <module>
+[rank1]:     main()
+[rank1]:   File "/root/JunQi/scripts/train.py", line 1519, in main
+[rank1]:     train(cfg)
+[rank1]:   File "/root/JunQi/scripts/train.py", line 1214, in train
+[rank1]:     metrics = trainer.train_epoch(rollout, rng=rng)
+[rank1]:   File "/root/JunQi/junqi_rl/training/ppo.py", line 750, in train_epoch
+[rank1]:     batches = list(rollout.minibatches(
+[rank1]:   File "/root/JunQi/junqi_rl/training/rollout_gpu.py", line 500, in minibatches
+[rank1]:     obs_spatial=obs_sp.index_select(0, idx),
+[rank1]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 68.00 MiB. GPU 1 has a total capacity of 95.00 GiB of which 17.94 MiB is free. Process 1983965 has 94.98 GiB memory in use. Of the allocated memory 92.03 GiB is allocated by PyTorch, and 417.47 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[train rank1] device=cuda:1 seed=10135 env.seed=10135
+
+[train] Signal 15 received — will stop after current rollout.

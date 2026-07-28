@@ -1,0 +1,139 @@
+# v41_curriculum_T — fixed-setup curriculum baseline (Phase 1).
+#
+# All four seats use the canonical "三角司令" lineup (style "T") every
+# game.  ArrangementNet training is disabled (move-policy learns
+# in isolation).  BeliefNet training is also disabled to side-step the
+# DDP NaN-skip inconsistency observed in v40 long runs.  This is the
+# cleanest possible baseline for "drive vs-random win-rate to 0.90".
+#
+# Inherits the v38 three-fix recipe:
+#   reward_shaping: false
+#   train_value_on_random_seats: true
+#   adv_filt_rate: 0.20
+#
+# OBS_CHANNELS = 352 (CombatMemory v5 layer-3 enabled by default).
+# 2-rank H20 DDP, 192 envs/rank → 384 cluster envs.
+#
+# Run with:
+#   bash scripts/launch_h20_ddp.sh configs/v41_curriculum_T.yaml 2
+
+env:
+  num_envs: 192
+  steps_per_env: 512
+  max_num_moves: 4000
+  seed: 141
+  use_gpu_rollout: true
+
+net:
+  cnn_channels: 96
+  cnn_layers: 3
+  depth: 6
+  embed_dim: 192
+  n_head: 6
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 48
+  pos_emb_std: 0.02
+
+belief:
+  enabled: true            # Constructed for state-shape compat; training off below.
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  infer_chunk_size: 256
+  refresh_every: 5
+  warmup_rollouts: 9999    # Effectively never (paired with disable_belief_train).
+  net:
+    n_encoder_layer: 6
+    embed_dim: 512
+    n_head: 8
+    ff_factor: 4
+    dropout: 0.1
+  ppo: null
+
+arr:
+  enabled: true            # Constructed but training off below.
+  n_arr: 1024
+  refresh_every: 1
+  storage_duration: 300
+  ema_decay: 0.999
+  reg_norm: 10.0
+  reg_temp_init: 0.1
+  reg_temp_floor: 0.0
+  reg_temp_decay: 0.3
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+
+ppo:
+  clip_range: 0.2
+  vf_coef: 1.0
+  policy_coef: 1.0
+  temperature_coef: 0.05
+  temperature_ceil: 0.1
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true
+  kl_coef: 0.1
+  gamma: 1.0
+  gae_lambda: 0.5
+  td_lambda: 0.8
+  adv_filt_thresh: 0.01
+  adv_filt_rate: 0.20
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_ceil: 1.0e-4
+  lr_floor: 5.0e-6
+  lr_schedule_unit: "rollout"
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+  ema_decay: 0.999
+  num_epochs_per_rollout: 4
+  minibatch_size: 1024
+  dtype: "bfloat16"
+  torch_compile: false
+
+save_dir: "exps/v41_curriculum_T"
+total_rollouts: 200
+save_every: 50
+eval_every: 10
+log_every: 5
+
+early_stop_min_rollout: 2000
+early_stop_patience: 5
+early_stop_win_rate: 0.0
+
+use_wandb: false
+seed: 141
+device: "cuda"
+torch_deterministic: false
+resume: ""
+
+random_opponent: true
+train_value_on_random_seats: true
+reward_shaping: false
+
+# Curriculum: fix all 4 seats to canonical "T" (Triangular SILING) lineup,
+# disable arr and belief training so the move-policy network learns the
+# game in isolation.  Mirrors the suggestion in the user's request.
+fixed_setup_styles: ["T"]
+disable_arr_train: true
+disable_belief_train: true

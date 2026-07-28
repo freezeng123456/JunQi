@@ -1,0 +1,168 @@
+# configs/v35_combat_memory_full.yaml
+#
+# v35: First training run with CombatMemory v4 enabled (DARK mode).
+#
+# Adds the 50-channel CombatMemory v4 tail to the observation
+# (256 → 306).  See docs/COMBAT_MEMORY_DESIGN.md and
+# docs/COMBAT_MEMORY_IMPLEMENTATION.md.
+#
+# Compared to v34 (big-move-belief baseline):
+#   * OBS_CHANNELS: 256 -> 306 (+19%)
+#   * num_envs: 512 -> 320 (compensate the obs-buffer growth)
+#   * net.depth: 4 -> 6 (more capacity for the new feature group)
+#   * belief.embed_dim: 256 -> 512 (CombatMemory most useful for belief)
+#
+# Resume policy: networks read OBS_CHANNELS from
+# junqi_core.observation, so a fresh init is required.  Pre-CombatMemory
+# checkpoints CAN be reloaded by zero-padding the input conv channel
+# axis (indices [0, 256) are bit-compatible) — but for v35 we start
+# fresh because mid-training distribution shift would dominate.
+
+env:
+  num_envs: 384
+  steps_per_env: 512
+  max_num_moves: 4000
+  seed: 135
+  use_gpu_rollout: true
+
+net:
+  cnn_channels: 96
+  cnn_layers: 3
+  depth: 6
+  embed_dim: 192
+  n_head: 6
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 48
+  pos_emb_std: 0.02
+
+belief:
+  enabled: true
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  infer_chunk_size: 256
+  refresh_every: 5
+  warmup_rollouts: 100
+  net:
+    n_encoder_layer: 6
+    embed_dim: 512
+    n_head: 8
+    ff_factor: 4
+    dropout: 0.1
+  ppo: null
+
+arr:
+  enabled: true
+  n_arr: 1024
+  refresh_every: 1
+  storage_duration: 300
+  ema_decay: 0.999
+  reg_norm: 10.0
+  reg_temp_init: 0.1
+  reg_temp_floor: 0.0
+  reg_temp_decay: 0.3
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+
+ppo:
+  # --- Core PPO ---
+  clip_range: 0.2
+  vf_coef: 1.0
+  policy_coef: 1.0
+
+  # --- Entropy / temperature ---
+  temperature_coef: 0.05
+  temperature_ceil: 0.1
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true
+
+  # --- KL anchor (helps fight stall trap) ---
+  kl_coef: 0.1
+
+  # --- GAE / returns ---
+  gamma: 1.0
+  gae_lambda: 0.5
+  td_lambda: 0.8
+  adv_filt_thresh: 0.01
+  adv_filt_rate: 0.75
+
+  # --- Optimiser ---
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_ceil: 1.0e-4
+  lr_floor: 5.0e-6
+  # F-3: per-rollout lr schedule (instead of per-grad-step) — on H20 this
+  # keeps lr at ceil across the full 1500 rollouts instead of floor-ing
+  # at rollout 124.
+  lr_schedule_unit: "rollout"
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+
+  # --- EMA ---
+  ema_decay: 0.999
+
+  # --- Schedule ---
+  num_epochs_per_rollout: 4
+  minibatch_size: 1024
+
+  # --- Mixed precision (H20 native bf16) ---
+  dtype: "bfloat16"
+  torch_compile: false
+
+# --- Run logistics ---
+save_dir: "exps/v35_ddp_combat_memory"
+total_rollouts: 1500
+save_every: 50
+eval_every: 10
+log_every: 5
+
+# --- Early-stop guard against collapse ---
+early_stop_min_rollout: 200
+early_stop_patience: 5
+early_stop_win_rate: 0.45
+
+# --- Logging ---
+use_wandb: false
+wandb_project: "junqi-rl"
+wandb_run_name: "v35_ddp_combat_memory"
+
+# --- Misc ---
+seed: 135
+device: "cuda"
+torch_deterministic: false
+resume: ""
+
+# --- F-4 (UPDATED 2026-05-11): default to FALSE (legacy v17-v35 behaviour).
+# A 2x100R A/B on H20 showed F-4 ON degrades training: |ret| 0.0010 vs 0.0054,
+# last-5-eval mean win 0.581 vs 0.636. The mechanism is unintended — see
+# scripts/train.py TrainConfig.train_value_on_random_seats docstring.
+# Set True only for diagnostic re-runs.
+train_value_on_random_seats: false
+
+# --- F-6: keep reward shaping on (legacy). Set false to test pure
+# terminal-reward baseline.
+reward_shaping: true
+
+# --- F-7: vs-random mode. Flip to false for self-play.
+random_opponent: true

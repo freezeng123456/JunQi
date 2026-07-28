@@ -1,0 +1,145 @@
+# v44_planB_v6_eaten_by_pid — v43 + CombatMemory v6 layer-4 (eaten_by_pid).
+#
+# Builds on v43_planB_belief_on:
+#   * mixed_setup: own team canonical T, enemy team uniform-random (Plan B)
+#   * CombatMemory v6 layer-4 enabled by default (OBS_CHANNELS=412)
+#   * BeliefNet on (warmup 30 rollouts)
+#   * v38 value recipe: reward_shaping=false, train_value_on_random_seats=true
+#
+# Changes vs v43:
+#   * OBS_CHANNELS 352 → 412 (+17%) — v6 cm_eaten_by_pid[60] reverse projection
+#   * num_envs 192 → 160 (compensate for obs slab growth on H20 single-card)
+#   * total_rollouts 500 → 600 (give the new channel time to be exploited
+#     by the policy without changing other hparams)
+#
+# IMPORTANT: junqi_cuda kernel does not yet write the new 60 channels.
+# Set use_gpu_rollout: false until the kernel port lands; CPU rollout
+# is correct but slower. (See src/env/cuda/include/junqi_cuda.h note.)
+#
+# Run (single H20):
+#   python scripts/train_v6.py configs/v44_planB_v6_eaten_by_pid.yaml
+#
+# Dense eval (90% gate):
+#   python scripts/eval_random_dense.py \
+#     --ckpt exps/v44_planB_v6_eaten_by_pid/ckpt_best.pt \
+#     --config configs/v44_planB_v6_eaten_by_pid.yaml --num-games 2048
+
+env:
+  num_envs: 160                # was 192; -17% to fit OBS 412×17×17 slab
+  steps_per_env: 512
+  max_num_moves: 4000
+  seed: 144
+  use_gpu_rollout: false        # CPU only until CUDA kernel ports v6 layer-4
+
+net:
+  cnn_channels: 96
+  cnn_layers: 3
+  depth: 6
+  embed_dim: 192
+  n_head: 6
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 48
+  pos_emb_std: 0.02
+
+belief:
+  enabled: true
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  infer_chunk_size: 256
+  refresh_every: 5
+  warmup_rollouts: 30
+  net:
+    n_encoder_layer: 6
+    embed_dim: 512
+    n_head: 8
+    ff_factor: 4
+    dropout: 0.1
+  ppo: null
+
+arr:
+  enabled: true
+  n_arr: 1024
+  refresh_every: 1
+  storage_duration: 300
+  ema_decay: 0.999
+  reg_norm: 10.0
+  reg_temp_init: 0.1
+  reg_temp_floor: 0.0
+  reg_temp_decay: 0.3
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+
+ppo:
+  clip_range: 0.2
+  vf_coef: 1.0
+  policy_coef: 1.0
+  temperature_coef: 0.05
+  temperature_ceil: 0.1
+  temperature_floor: 0.001
+  temperature_decay: 0.3
+  uniform_magnet: true
+  kl_coef: 0.1
+  gamma: 1.0
+  gae_lambda: 0.5
+  td_lambda: 0.8
+  adv_filt_thresh: 0.01
+  adv_filt_rate: 0.20
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_ceil: 1.0e-4
+  lr_floor: 5.0e-6
+  lr_schedule_unit: "rollout"
+  weight_decay: 0.0
+  max_grad_norm: 0.5
+  ema_decay: 0.999
+  num_epochs_per_rollout: 4
+  minibatch_size: 1024
+  dtype: "bfloat16"
+  torch_compile: false
+
+save_dir: "exps/v44_planB_v6_eaten_by_pid"
+total_rollouts: 600
+save_every: 50
+eval_every: 10
+log_every: 5
+
+early_stop_min_rollout: 2000
+early_stop_patience: 5
+early_stop_win_rate: 0.0
+
+use_wandb: false
+seed: 144
+device: "cuda"
+torch_deterministic: false
+resume: ""
+
+random_opponent: true
+train_value_on_random_seats: true
+reward_shaping: false
+
+mixed_setup: true
+mixed_own_team_styles: ["T"]
+
+disable_arr_train: true
+disable_belief_train: false

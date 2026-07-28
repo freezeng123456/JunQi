@@ -1,0 +1,131 @@
+# ============================================================================
+# beat_random_v21b_narr_8192 — Ataraxos-style: fresh samples every iter.
+#
+# Follow-up to v21a. The paper's Appendix D.2 says they generate
+# ~24k setups per training iteration (1000 per GPU × 16 GPU) and train
+# ONLY on setups from the last data-collection period. No replay
+# retention — they rely on VOLUME OF FRESH SAMPLES PER ITER for
+# training-set diversity.
+#
+# Our v21b approximates this with 1/3 the per-iter volume:
+#   n_arr: 1024 → 8192 (8× more fresh samples per rollout)
+#   storage_duration: 2048 → 4 (effectively keep last 1-2 rollouts)
+#
+# Per-rollout arr training set: 8192 × 4 = 32k rows (vs Ataraxos's ~24k).
+# Memory: 32k rows × ~3.6 KB/row ≈ 115 MB steady + ~60 MB cat peak = 175 MB
+# → vastly safer than v20 (14+ GB) or even v21a (1.1 GB).
+#
+# This tests the OPPOSITE end of the space from v17/v20. Ataraxos chose
+# large-fresh-volume over long-replay; we know large-replay works (v20).
+# Does large-fresh-volume work equally well in our 4-player setting?
+#
+# If v21b ≥ v21a win_rate: go with v21b (safer, no OOM ever, closer to paper).
+# If v21b < v21a: the 4-player setting needs replay to handle slow
+#   credit assignment. Stick with v21a as our baseline for P1 belief.
+# ============================================================================
+
+arr:
+  enabled: true
+  ema_decay: 0.999
+  # BIG FRESH VOLUME: 8192 samples per rollout, 8× more than v17/v20.
+  # This keeps the arr trainer well-fed without needing long replay.
+  n_arr: 8192
+  refresh_every: 1
+  # TINY REPLAY: only keep last 4 rollouts. Combined with n_arr=8192,
+  # that's 32k steady-state rows — close to Ataraxos's per-iter total.
+  storage_duration: 4
+  reg_temp_init: 0.1
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_norm: 10.0
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: float32
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+
+device: cuda
+env:
+  max_num_moves: 4000
+  num_envs: 128
+  seed: 42
+  steps_per_env: 512
+  use_gpu_rollout: true
+eval_every: 10
+log_every: 5
+
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.2
+  dtype: float16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.1
+  lr_ceil: 0.0001
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.267
+  num_epochs_per_rollout: 1
+  minibatch_size: 512
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: true
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+  net:
+    action_key_dim: 32
+    cnn_channels: 64
+    cnn_layers: 2
+    depth: 4
+    dropout: 0.0
+    embed_dim: 128
+    ff_factor: 4
+    n_head: 4
+    pos_emb_std: 0.02
+    use_cat_vf: true
+
+resume: ''
+save_dir: exps/beat_random_v21b_narr_8192
+save_every: 50
+seed: 42
+torch_deterministic: false
+total_rollouts: 500
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: ''

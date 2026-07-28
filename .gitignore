@@ -1,0 +1,78 @@
+# C build artifacts
+*.o
+*.a
+*.so
+obj/
+bin/
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build products (legacy_engine / legacy_gui)
+legacy_engine/obj/
+legacy_engine/bin/
+legacy_gui/obj/
+legacy_gui/bin/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.venv/
+venv/
+
+# Local work logs (terminal redirect targets to avoid pipe blocking)
+.junqi_tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Experiment outputs — only cfg.yaml is tracked under exps/
+exps/*/*.pt
+exps/**/*.pt
+exps/*/train*.log
+exps/*/log.*
+exps/*/logs/
+# launcher artifacts (per-run state, not source)
+exps/*/launch.log
+exps/*/launch.pid
+# runtime-resolved cfg (training script writes this; cfg.yaml stays canonical)
+exps/*/cfg.runtime.yaml
+
+# Crash post-mortems (exps/_crash_*) — we DO want the train.log committed
+# as evidence for the failure mode, even though normal exps/ logs are
+# ignored. Negative pattern below re-includes them.
+!exps/_crash_*/train.log
+!exps/_crash_*/cfg.yaml
+
+# DDP smoke / debug experiment dirs (start with underscore, by convention)
+exps/_smoke_*/
+
+# H20 launch batch artifacts — only the README is tracked
+exps/h20_launch/pids.txt
+exps/h20_launch/STATUS.md
+exps/h20_launch/*.log
+
+# Local helper scripts (one-shot launch/kill/resume shims)
+_start_v*.py
+_start_train.py
+_restart_*.py
+_kill.py
+_git_push.py
+
+# Claude Code local tooling
+.claude/

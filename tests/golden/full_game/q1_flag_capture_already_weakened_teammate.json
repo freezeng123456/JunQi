@@ -1,0 +1,45 @@
+
+{
+  "schema_version": "1.0",
+  "rules_version": "1.1.0",
+  "category": "full_game",
+  "id": "q1_flag_capture_already_weakened_teammate",
+  "description": "Q1 + team-kill interaction: defending team's teammate (LEFT) is already dead; HOME captures RIGHT's flag → RIGHT surrenders → both blue seats are dead → red team wins immediately.",
+  "tags": ["Q1", "flag-capture", "team-kill", "full-game"],
+  "legacy_divergence": "Legacy handles this via DestroyAllChess + team-check; junqi_core does it via _check_victory on alive seats.",
+  "debug_include_private": false,
+  "pre_state": {
+    "turn": 0,
+    "move_counter": 88,
+    "moves_since_last_combat": 2,
+    "pieces": [
+      { "seat": 0, "index": 5,  "type": "SILING", "pos": [1, 9], "dead": false },
+      { "seat": 0, "index": 29, "type": "PAIZH",  "pos": [6, 16], "dead": false },
+      { "seat": 1, "index": 26, "type": "JUNQI",  "pos": [0, 9], "dead": false },
+      { "seat": 1, "index": 27, "type": "PAIZH",  "pos": [1, 8], "dead": false },
+      { "seat": 2, "index": 0,  "type": "LIANZH", "pos": [6, 5], "dead": false }
+    ],
+    "info": [
+      { "seat": 0, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 1, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 2, "dead": false, "flag_revealed": false, "jump_count": 0 },
+      { "seat": 3, "dead": true,  "flag_revealed": true,  "jump_count": 0 }
+    ]
+  },
+  "actions": [
+    { "seat": 0, "src": [1, 9], "dst": [0, 9] }
+  ],
+  "expected": {
+    "results": [
+      {
+        "src": [1, 9], "dst": [0, 9],
+        "event": "EAT",
+        "flag_reveal_src": false, "flag_reveal_dst": false, "flag_captured": true,
+        "seats_died_this_step": [1]
+      }
+    ],
+    "terminated": true,
+    "winner_team": 0,
+    "draw": false
+  }
+}
