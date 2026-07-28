@@ -17,6 +17,8 @@ except ImportError:
 import random
 
 from junqi_core.replay_with_policy import (
+    ACTION_SOURCE_POLICY_GREEDY,
+    ACTION_SOURCE_RANDOM_OPPONENT,
     TrajectoryWithPolicy,
     probs_to_top_k,
 )
@@ -34,6 +36,16 @@ def test_trajectory_with_policy_save_load_roundtrip():
     values = np.linspace(-1, 1, T, dtype=np.float32)
     actions = np.zeros((T, 5), dtype=np.int16)
     seats = np.array([0, 1, 2, 3, 0], dtype=np.int8)
+    sources = np.array(
+        [
+            ACTION_SOURCE_POLICY_GREEDY,
+            ACTION_SOURCE_RANDOM_OPPONENT,
+            ACTION_SOURCE_POLICY_GREEDY,
+            ACTION_SOURCE_RANDOM_OPPONENT,
+            ACTION_SOURCE_POLICY_GREEDY,
+        ],
+        dtype=np.int8,
+    )
 
     traj = TrajectoryWithPolicy(
         setups=setups,
@@ -46,6 +58,7 @@ def test_trajectory_with_policy_save_load_roundtrip():
         top_probs=top_probs,
         values=values,
         acting_seats=seats,
+        action_sources=sources,
         meta={"iteration": 42, "win_rate": 0.75},
     )
     with tempfile.TemporaryDirectory() as tmp:
@@ -55,6 +68,8 @@ def test_trajectory_with_policy_save_load_roundtrip():
     assert np.array_equal(loaded.top_action_ids, top_ids)
     assert np.allclose(loaded.top_probs, top_probs)
     assert np.allclose(loaded.values, values)
+    assert np.array_equal(loaded.action_sources, sources)
+    assert loaded.step_record(1).action_source_name == "random_opponent"
     assert loaded.num_steps == T
     assert loaded.top_k == K
     assert loaded.meta == {"iteration": 42, "win_rate": 0.75}
@@ -109,7 +124,7 @@ def test_record_game_with_policy_smoke():
 
     # replay_with_records yields (state, move_result, step_record)
     n_yielded = 0
-    for post_state, mr, rec in traj.replay_with_records():
+    for _post_state, _mr, rec in traj.replay_with_records():
         n_yielded += 1
         assert rec.step == n_yielded - 1
         assert rec.top_action_ids.shape == (8,)

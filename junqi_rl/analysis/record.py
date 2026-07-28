@@ -15,6 +15,9 @@ import torch
 
 from junqi_core.board import COMPACT_TO_FLAT, FLAT_TO_COMPACT, NUM_ON_BOARD_CELLS
 from junqi_core.replay_with_policy import (
+    ACTION_SOURCE_POLICY_GREEDY,
+    ACTION_SOURCE_POLICY_SAMPLE,
+    ACTION_SOURCE_RANDOM_OPPONENT,
     NUM_CELLS,
     NUM_TRACKED_TYPES,
     TrajectoryWithPolicy,
@@ -42,6 +45,8 @@ def record_game_with_policy(
     top_k: int = 16,
     max_steps: int = 1000,
     greedy: bool = False,
+    random_opponent: bool = False,
+    policy_team: int = 0,
     record_beliefs: bool = False,
     meta: dict[str, Any] | None = None,
 ) -> TrajectoryWithPolicy:
@@ -58,6 +63,14 @@ def record_game_with_policy(
         A trained :class:`JunqiNet` already ``.to(device)`` and ``.eval()``.
     greedy
         If True, take argmax of policy each step; otherwise sample.
+    random_opponent
+        If True, seats on the opposing team choose uniformly from legal
+        world-frame actions.  The policy forward pass is still recorded so
+        the viewer can compare what the model preferred with what the random
+        opponent actually played.
+    policy_team
+        Team controlled by the policy when ``random_opponent`` is enabled:
+        0 = SOUTH/NORTH, 1 = WEST/EAST.
     record_beliefs
         If True, store the per-seat rule-based belief tensor at each step.
     meta
@@ -71,6 +84,8 @@ def record_game_with_policy(
 
     rng = random.Random(rng_seed)
     recorded_seed = -1 if rng_seed is None else int(rng_seed)
+    if policy_team not in (0, 1):
+        raise ValueError(f"policy_team must be 0 or 1, got {policy_team}")
 
     if setups is None:
         setups = generate_random_setup(rng)
@@ -93,6 +108,7 @@ def record_game_with_policy(
     top_probs_buf: list[np.ndarray] = []
     values_buf: list[float] = []
     acting_buf: list[int] = []
+    action_sources_buf: list[int] = []
     beliefs_buf: list[np.ndarray] = []  # only used if record_beliefs
 
     policy.eval()
@@ -135,14 +151,35 @@ def record_game_with_policy(
         log_probs = out["log_probs"].squeeze(0)      # (FLAT,)
         probs = log_probs.exp().cpu().numpy().astype(np.float32)
 
-        chosen_can = int(probs.argmax()) if greedy else int(out["action"].item())
+        is_random_turn = random_opponent and ((seat.value & 1) != policy_team)
+        if is_random_turn:
+            chosen_world_full = int(rng.choice(ids_world))
+            src_flat = chosen_world_full // NUM_CELLS
+            dst_flat = chosen_world_full % NUM_CELLS
+            action_source = ACTION_SOURCE_RANDOM_OPPONENT
+        else:
+            if greedy:
+                chosen_can = int(probs.argmax())
+                action_source = ACTION_SOURCE_POLICY_GREEDY
+            else:
+                legal_probs = probs[can_ids].astype(np.float64, copy=False)
+                total_prob = float(legal_probs.sum())
+                weights = (
+                    legal_probs / total_prob
+                    if total_prob > 0.0
+                    else np.full(legal_probs.shape, 1.0 / len(legal_probs))
+                )
+                chosen_can = int(
+                    rng.choices(can_ids.tolist(), weights=weights.tolist(), k=1)[0]
+                )
+                action_source = ACTION_SOURCE_POLICY_SAMPLE
 
-        # Convert compact canonical → compact world → world-full, decode src/dst.
-        compact_world_chosen = int(UNROTATE_LUT[seat.value][chosen_can])
-        src_c = compact_world_chosen // NUM_ON_BOARD_CELLS
-        dst_c = compact_world_chosen %  NUM_ON_BOARD_CELLS
-        src_flat = int(COMPACT_TO_FLAT[src_c])
-        dst_flat = int(COMPACT_TO_FLAT[dst_c])
+            # Convert compact canonical → compact world → world-full.
+            compact_world_chosen = int(UNROTATE_LUT[seat.value][chosen_can])
+            src_c = compact_world_chosen // NUM_ON_BOARD_CELLS
+            dst_c = compact_world_chosen % NUM_ON_BOARD_CELLS
+            src_flat = int(COMPACT_TO_FLAT[src_c])
+            dst_flat = int(COMPACT_TO_FLAT[dst_c])
         sy, sx = divmod(src_flat, 17)
         dy, dx = divmod(dst_flat, 17)
 
@@ -158,13 +195,20 @@ def record_game_with_policy(
         # Record (top-K in canonical frame first — un-rotate to world for
         # visualisation so users see moves in world coords).
         top_can_ids, top_can_probs = probs_to_top_k(probs, mask_np, k=top_k)
-        top_world_ids = UNROTATE_LUT[seat.value][top_can_ids]
+        top_compact_world = UNROTATE_LUT[seat.value][top_can_ids]
+        top_src_c = top_compact_world // NUM_ON_BOARD_CELLS
+        top_dst_c = top_compact_world % NUM_ON_BOARD_CELLS
+        compact_to_flat = np.asarray(COMPACT_TO_FLAT, dtype=np.int64)
+        top_world_ids = (
+            compact_to_flat[top_src_c] * NUM_CELLS + compact_to_flat[top_dst_c]
+        )
         top_ids_buf.append(top_world_ids.astype(np.int32))
         top_probs_buf.append(top_can_probs.astype(np.float32))
 
         value = float(out["value"].item())
         values_buf.append(value)
         acting_buf.append(int(seat.value))
+        action_sources_buf.append(action_source)
         actions_rows.append((int(seat.value), sx, sy, dx, dy))
 
         if record_beliefs:
@@ -190,6 +234,8 @@ def record_game_with_policy(
         "policy_type": type(policy).__name__,
         "device": str(dev),
         "greedy": bool(greedy),
+        "random_opponent": bool(random_opponent),
+        "policy_team": int(policy_team),
         "top_k": int(top_k),
         "record_beliefs": bool(record_beliefs),
     })
@@ -209,6 +255,7 @@ def record_game_with_policy(
         ),
         values=np.asarray(values_buf, dtype=np.float32),
         acting_seats=np.asarray(acting_buf, dtype=np.int8),
+        action_sources=np.asarray(action_sources_buf, dtype=np.int8),
         beliefs=beliefs_arr,
         meta=replay_meta,
     )

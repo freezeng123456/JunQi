@@ -43,6 +43,7 @@ def test_policy_replay_exposes_step_alignment() -> None:
     if t:
         assert viewer.seek(1).policy is not None
         assert viewer.seek(1).policy.value == 0.0
+        assert viewer.seek(1).policy.action_source_name == "policy_sample"
 
 
 def test_frame_summary_is_json_friendly() -> None:

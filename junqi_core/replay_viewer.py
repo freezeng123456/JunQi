@@ -126,6 +126,7 @@ def frame_summary(frame: ViewerFrame) -> dict[str, Any]:
     if frame.policy is not None:
         summary["policy"] = {
             "acting_seat": ALL_SEATS[frame.policy.acting_seat].name,
+            "action_source": frame.policy.action_source_name,
             "value": float(frame.policy.value),
             "chosen_action_id": int(frame.policy.chosen_action_id),
             "top_action_ids": frame.policy.top_action_ids.astype(np.int64).tolist(),

@@ -320,6 +320,26 @@ class TrainConfig:
     eval_every: int = 50
     """Run evaluation every N rollouts."""
 
+    eval_num_games: int = 128
+    """Total games per evaluation. Half run with the policy as team 0 and
+    half as team 1 on paired seeds, removing fixed-seat/setup bias."""
+
+    eval_record_games: int = 1
+    """Save this many policy-augmented ``.npz`` replays after each eval.
+    Set 0 to disable automatic progress recordings."""
+
+    eval_record_beliefs: bool = False
+    """Include full per-seat belief snapshots in automatic eval replays.
+    Useful for diagnosis but substantially increases file size."""
+
+    league_max_checkpoints: int = 12
+    """Maximum historical checkpoints retained in ``league.json``."""
+
+    league_eval_games: int = 16
+    """Reserved cross-play budget for the historical-opponent evaluator.
+    The persistent pool is always maintained; set 0 when a run should only
+    collect snapshots without scheduling cross-play."""
+
     early_stop_win_rate: float = 0.0
     """If > 0, training stops when ``eval/win_rate`` stays below this value
     for ``early_stop_patience`` consecutive evals *after* rollout
@@ -625,6 +645,8 @@ def evaluate_vs_random_gpu(
     seed: int = 0,
     max_moves: int = 4000,
     autocast_dtype: torch.dtype | None = None,
+    trained_team: int = 0,
+    greedy: bool = True,
 ) -> dict[str, float]:
     """GPU-accelerated evaluation: policy team (SOUTH+NORTH) vs random (WEST+EAST).
 
@@ -638,6 +660,10 @@ def evaluate_vs_random_gpu(
     allocation/deallocation which causes OOM after many eval rounds.
     """
     from junqi_rl.gpu_rollout import GpuRollout
+    from junqi_rl.analysis.protocol import EvaluationCounts
+
+    if trained_team not in (0, 1):
+        raise ValueError(f"trained_team must be 0 or 1, got {trained_team}")
 
     policy.eval()
     N = min(num_envs, num_games)
@@ -652,6 +678,8 @@ def evaluate_vs_random_gpu(
     draws = 0
     total_games = 0
     total_steps = 0
+    eval_generator = torch.Generator(device=device)
+    eval_generator.manual_seed(seed)
 
     while total_games < num_games:
         turn_t = rollout.turn_torch()           # (N,) int8 CUDA
@@ -665,17 +693,25 @@ def evaluate_vs_random_gpu(
         # Use the original (non-compiled) act to avoid CUDA graph shape mismatch
         # when eval N differs from collect N. Match the training/collect dtype;
         # v33d relies on bf16 to avoid fp16 overflow in confident policies.
-        _act_fn = getattr(policy, '_orig_act', policy.act)
         eval_dtype = autocast_dtype or torch.bfloat16
         with torch.no_grad(), torch.amp.autocast("cuda", dtype=eval_dtype):
-            actions, _, _ = _act_fn(obs_sp, obs_gl, lm_t)
+            if greedy:
+                actions = policy.act_greedy(obs_sp, obs_gl, lm_t)
+            else:
+                _act_fn = getattr(policy, "_orig_act", policy.act)
+                actions, _, _ = _act_fn(obs_sp, obs_gl, lm_t)
         actions = actions.to(torch.int32)
 
-        # Replace enemy seats (1, 3) with random legal actions
-        is_enemy = (acting_t == 1) | (acting_t == 3)
+        # Replace the opposing team's seats with random legal actions.
+        is_enemy = (acting_t.to(torch.int64) & 1) != trained_team
         if is_enemy.any():
             uniform = torch.where(lm_t, 0.0, float('-inf'))
-            u = torch.rand_like(uniform.float()).clamp_(1e-10, 1.0)
+            u = torch.rand(
+                uniform.shape,
+                dtype=torch.float32,
+                device=uniform.device,
+                generator=eval_generator,
+            ).clamp_(1e-10, 1.0)
             gumbel = -torch.log(-torch.log(u))
             random_acts = (uniform + gumbel).argmax(dim=-1).to(torch.int32)
             actions = torch.where(is_enemy, random_acts, actions)
@@ -699,7 +735,7 @@ def evaluate_vs_random_gpu(
                     total_games += 1
                     if draw_np[i]:
                         draws += 1
-                    elif winner_np[i] == 0:  # team 0 (SOUTH+NORTH) wins
+                    elif winner_np[i] == trained_team:
                         wins += 1
                     else:
                         losses += 1
@@ -715,19 +751,21 @@ def evaluate_vs_random_gpu(
     ongoing = max(0, num_games - completed)
     denom = max(1, num_games)
     completed_denom = max(1, completed)
-    return {
+    metrics = EvaluationCounts(
+        wins=wins,
+        losses=losses,
+        draws=draws,
+        ongoing=ongoing,
+    ).as_metrics()
+    metrics.update({
         # Rates are over the requested evaluation size, not just completed games.
         # This prevents 1/1 finished games from being reported as 100% while
         # the other 127 games are still ongoing/stalled at the safety cap.
-        "eval/win_rate": wins / denom,
-        "eval/loss_rate": losses / denom,
-        "eval/draw_rate": draws / denom,
-        "eval/ongoing_rate": ongoing / denom,
         "eval/avg_game_len": total_steps / completed_denom,
         "eval/avg_game_len_all": total_steps / denom,
-        "eval/num_games": float(completed),
-        "eval/requested_games": float(num_games),
-    }
+        "eval/trained_team": float(trained_team),
+    })
+    return metrics
 
 
 def evaluate_vs_random(
@@ -737,12 +775,18 @@ def evaluate_vs_random(
     device: str = "cpu",
     seed: int = 0,
     max_moves: int = 4000,
+    trained_team: int = 0,
+    greedy: bool = True,
 ) -> dict[str, float]:
     """Run ``num_games`` episodes: EMA policy (SOUTH team) vs random (NORTH team).
 
     Returns metrics dict with win/loss/draw rates and average game length.
     """
     from junqi_core.rules import Seat
+    from junqi_rl.analysis.protocol import EvaluationCounts
+
+    if trained_team not in (0, 1):
+        raise ValueError(f"trained_team must be 0 or 1, got {trained_team}")
 
     policy.eval()
 
@@ -756,6 +800,7 @@ def evaluate_vs_random(
     total_moves = 0
 
     obs_sp, obs_gl = env.reset(seed_base=seed)
+    eval_rng = np.random.default_rng(seed)
 
     game_moves = np.zeros(n, dtype=np.int32)
 
@@ -779,18 +824,21 @@ def evaluate_vs_random(
             wids = env.envs[i].legal_action_ids(seat)
             if len(wids) == 0:
                 continue
-            if seat in (Seat.SOUTH, Seat.NORTH):  # policy team
+            if (seat.value & 1) == trained_team:
                 # Use policy for this env
                 sp_t = torch.from_numpy(act_obs_sp[i : i + 1]).to(device)
                 gl_t = torch.from_numpy(act_obs_gl[i : i + 1]).to(device)
                 lm_t = torch.from_numpy(legal_mask_np[i : i + 1]).to(device)
                 with torch.no_grad():
-                    acts, _, _ = policy.act(sp_t, gl_t, lm_t)
+                    if greedy:
+                        acts = policy.act_greedy(sp_t, gl_t, lm_t)
+                    else:
+                        acts, _, _ = policy.act(sp_t, gl_t, lm_t)
                 from junqi_rl.env import unrotate_compact_action_id
                 actions_world[i] = unrotate_compact_action_id(int(acts[0].cpu()), seat)
             else:
                 # Random legal action
-                actions_world[i] = int(np.random.choice(wids))
+                actions_world[i] = int(eval_rng.choice(wids))
 
         obs_sp, obs_gl, rewards_np, done_np, infos = env.step(actions_world)
         game_moves += 1
@@ -798,10 +846,13 @@ def evaluate_vs_random(
         for i, done_i in enumerate(done_np):
             if done_i:
                 # rewards_np[i] shape: (4,) — reward per seat
-                south_reward = float(rewards_np[i, Seat.SOUTH.value])
-                if south_reward > 0:
+                team_zero_reward = float(rewards_np[i, Seat.SOUTH.value])
+                trained_reward = (
+                    team_zero_reward if trained_team == 0 else -team_zero_reward
+                )
+                if trained_reward > 0:
                     wins += 1
-                elif south_reward < 0:
+                elif trained_reward < 0:
                     losses += 1
                 else:
                     draws += 1
@@ -820,16 +871,17 @@ def evaluate_vs_random(
                 obs_gl = env.obs_global
 
     env_games = total_games if total_games > 0 else 1
-    return {
-        "eval/win_rate": wins / env_games,
-        "eval/loss_rate": losses / env_games,
-        "eval/draw_rate": draws / env_games,
-        "eval/ongoing_rate": 0.0,
+    metrics = EvaluationCounts(
+        wins=wins,
+        losses=losses,
+        draws=draws,
+    ).as_metrics()
+    metrics.update({
         "eval/avg_game_len": total_moves / env_games,
         "eval/avg_game_len_all": total_moves / env_games,
-        "eval/num_games": float(total_games),
-        "eval/requested_games": float(num_games),
-    }
+        "eval/trained_team": float(trained_team),
+    })
+    return metrics
 
 
 # ---------------------------------------------------------------------------
@@ -909,6 +961,15 @@ def train(cfg: TrainConfig) -> None:
     if is_distributed:
         dist.barrier()
     log_dir = os.path.join(cfg.save_dir, "logs")
+    if is_rank0:
+        from junqi_rl.analysis.league import LeaguePool
+
+        league_pool: LeaguePool | None = LeaguePool(
+            os.path.join(cfg.save_dir, "league.json"),
+            max_entries=cfg.league_max_checkpoints,
+        )
+    else:
+        league_pool = None
 
     # ---- Tee stdout/stderr to train.log so user can always tail the file ----
     # Under DDP each rank gets its own log file (train.log on rank 0,
@@ -1595,6 +1656,12 @@ def train(cfg: TrainConfig) -> None:
                     belief_trainer=belief_trainer,
                 )
                 print(f"[train] Checkpoint saved: {ckpt_path}")
+                assert league_pool is not None
+                league_pool.register(
+                    ckpt_path,
+                    rollout=rollout_idx + 1,
+                    tags={"kind": "periodic"},
+                )
                 # Log config text once on first save
                 if rollout_idx + 1 == cfg.save_every:
                     with open(cfg_path) as f:
@@ -1614,25 +1681,66 @@ def train(cfg: TrainConfig) -> None:
             if is_rank0:
                 print(f"[train] Evaluating (rollout {rollout_idx + 1})…")
                 try:
+                    from junqi_rl.analysis.protocol import merge_evaluations
+
+                    if cfg.eval_num_games <= 0:
+                        raise ValueError("eval_num_games must be positive")
+                    team0_games = (cfg.eval_num_games + 1) // 2
+                    team1_games = cfg.eval_num_games - team0_games
+                    eval_seed = cfg.env.seed + rollout_idx + 1_000_000
                     if cfg.env.use_gpu_rollout:
-                        eval_metrics = evaluate_vs_random_gpu(
+                        eval_team0 = evaluate_vs_random_gpu(
                             policy=trainer.ema.model,
-                            num_envs=64,
-                            num_games=128,
+                            num_envs=min(64, team0_games),
+                            num_games=team0_games,
                             device=str(device),
-                            seed=cfg.env.seed + rollout_idx + 1000000,
+                            seed=eval_seed,
                             max_moves=cfg.env.max_num_moves,
                             autocast_dtype=cfg.ppo.get_dtype(),
+                            trained_team=0,
+                            greedy=True,
                         )
+                        eval_shards = [eval_team0]
+                        if team1_games > 0:
+                            eval_shards.append(
+                                evaluate_vs_random_gpu(
+                                    policy=trainer.ema.model,
+                                    num_envs=min(64, team1_games),
+                                    num_games=team1_games,
+                                    device=str(device),
+                                    seed=eval_seed,
+                                    max_moves=cfg.env.max_num_moves,
+                                    autocast_dtype=cfg.ppo.get_dtype(),
+                                    trained_team=1,
+                                    greedy=True,
+                                )
+                            )
                     else:
-                        eval_metrics = evaluate_vs_random(
+                        eval_team0 = evaluate_vs_random(
                             policy=trainer.ema.model,
                             num_envs=min(cfg.env.num_envs, 16),
-                            num_games=max(32, cfg.env.num_envs // 2),
+                            num_games=team0_games,
                             device=str(device),
-                            seed=cfg.env.seed + rollout_idx,
+                            seed=eval_seed,
                             max_moves=cfg.env.max_num_moves,
+                            trained_team=0,
+                            greedy=True,
                         )
+                        eval_shards = [eval_team0]
+                        if team1_games > 0:
+                            eval_shards.append(
+                                evaluate_vs_random(
+                                    policy=trainer.ema.model,
+                                    num_envs=min(cfg.env.num_envs, 16),
+                                    num_games=team1_games,
+                                    device=str(device),
+                                    seed=eval_seed,
+                                    max_moves=cfg.env.max_num_moves,
+                                    trained_team=1,
+                                    greedy=True,
+                                )
+                            )
+                    eval_metrics = merge_evaluations(*eval_shards)
                     logger.log(eval_metrics, step=rollout_idx)
                     win_rate = eval_metrics.get("eval/win_rate", 0.0)
                     loss_rate = eval_metrics.get("eval/loss_rate", 0.0)
@@ -1643,7 +1751,137 @@ def train(cfg: TrainConfig) -> None:
                     requested_games = int(eval_metrics.get("eval/requested_games", 0.0))
                     print(f"[eval]  win={win_rate:.3f}  loss={loss_rate:.3f}  "
                           f"draw={draw_rate:.3f}  ongoing={ongoing_rate:.3f}  "
-                          f"avg_len={avg_len:.0f}  done={done_games}/{requested_games}")
+                          f"avg_len={avg_len:.0f}  done={done_games}/{requested_games}  "
+                          f"ci95=[{eval_metrics.get('eval/win_rate_ci95_low', 0.0):.3f}, "
+                          f"{eval_metrics.get('eval/win_rate_ci95_high', 1.0):.3f}]")
+
+                    if cfg.eval_record_games > 0:
+                        from junqi_rl.analysis.record import record_game_with_policy
+
+                        replay_dir = os.path.join(cfg.save_dir, "replays")
+                        os.makedirs(replay_dir, exist_ok=True)
+                        for replay_idx in range(cfg.eval_record_games):
+                            policy_team = replay_idx & 1
+                            replay_seed = eval_seed + replay_idx
+                            trajectory = record_game_with_policy(
+                                trainer.ema.model,
+                                rng_seed=replay_seed,
+                                device=device,
+                                max_steps=cfg.env.max_num_moves,
+                                greedy=True,
+                                random_opponent=True,
+                                policy_team=policy_team,
+                                record_beliefs=cfg.eval_record_beliefs,
+                                meta={
+                                    "rollout": rollout_idx + 1,
+                                    "policy_team": policy_team,
+                                    "checkpoint_kind": "ema",
+                                    **eval_metrics,
+                                },
+                            )
+                            replay_path = os.path.join(
+                                replay_dir,
+                                f"eval_{rollout_idx + 1:06d}_"
+                                f"{replay_idx:02d}_team{policy_team}.npz",
+                            )
+                            trajectory.save(replay_path)
+                            print(f"[eval] Replay saved: {replay_path}")
+
+                    if cfg.league_eval_games > 0:
+                        from junqi_rl.analysis.evaluate import eval_head_to_head
+
+                        assert league_pool is not None
+                        current_path = save_checkpoint(
+                            trainer,
+                            cfg,
+                            rollout_idx + 1,
+                            cfg.save_dir,
+                            arr_trainer=arr_trainer,
+                            arr_ema=arr_ema,
+                            belief_trainer=belief_trainer,
+                        )
+                        current_entry = league_pool.register(
+                            current_path,
+                            rollout=rollout_idx + 1,
+                            tags={"kind": "evaluation", "win_rate": win_rate},
+                        )
+                        opponent_entry = league_pool.sample(
+                            seed=eval_seed,
+                            exclude_rollout=rollout_idx + 1,
+                        )
+                        if opponent_entry is not None:
+                            opponent = JunqiNet(cfg.net).to(device)
+                            opponent_state = torch.load(
+                                opponent_entry.checkpoint,
+                                map_location=device,
+                                weights_only=False,
+                            )
+                            ema_state = opponent_state.get("ema", {})
+                            weights = (
+                                ema_state.get("shadow")
+                                if isinstance(ema_state, dict)
+                                else None
+                            )
+                            if weights is None:
+                                weights = opponent_state["policy"]
+                            opponent.load_state_dict(weights)
+                            opponent.eval()
+
+                            league_team0_games = max(1, cfg.league_eval_games // 2)
+                            league_team1_games = (
+                                cfg.league_eval_games - league_team0_games
+                            )
+                            league_shards = [
+                                eval_head_to_head(
+                                    trainer.ema.model,
+                                    opponent,
+                                    num_games=league_team0_games,
+                                    first_team=0,
+                                    max_steps=cfg.env.max_num_moves,
+                                    device=device,
+                                    seed_base=eval_seed,
+                                    greedy=True,
+                                )
+                            ]
+                            if league_team1_games > 0:
+                                league_shards.append(
+                                    eval_head_to_head(
+                                        trainer.ema.model,
+                                        opponent,
+                                        num_games=league_team1_games,
+                                        first_team=1,
+                                        max_steps=cfg.env.max_num_moves,
+                                        device=device,
+                                        seed_base=eval_seed,
+                                        greedy=True,
+                                    )
+                                )
+                            league_metrics = merge_evaluations(
+                                *league_shards,
+                                prefix="league",
+                            )
+                            league_metrics["league/opponent_rollout"] = float(
+                                opponent_entry.rollout
+                            )
+                            logger.log(league_metrics, step=rollout_idx)
+                            league_pool.record_match(
+                                current_entry.sha256,
+                                opponent_entry.sha256,
+                                first_score=league_metrics[
+                                    "league/score_completed"
+                                ],
+                                games=int(
+                                    league_metrics["league/num_games"]
+                                ),
+                            )
+                            print(
+                                "[league] "
+                                f"vs rollout {opponent_entry.rollout}: "
+                                f"score={league_metrics['league/score_completed']:.3f} "
+                                f"win={league_metrics['league/win_rate']:.3f} "
+                                f"games={int(league_metrics['league/num_games'])}"
+                            )
+                            del opponent
 
                     if (
                         requested_games > 0
@@ -1657,6 +1895,12 @@ def train(cfg: TrainConfig) -> None:
                             arr_trainer=arr_trainer,
                             arr_ema=arr_ema,
                             belief_trainer=belief_trainer,
+                        )
+                        assert league_pool is not None
+                        league_pool.register(
+                            best_path,
+                            rollout=rollout_idx + 1,
+                            tags={"kind": "best", "win_rate": win_rate},
                         )
                         best_link = os.path.join(cfg.save_dir, "ckpt_best.pt")
                         if os.path.islink(best_link) or os.path.exists(best_link):

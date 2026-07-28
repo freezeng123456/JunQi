@@ -17,7 +17,9 @@ This is the data object consumed by the replay viewer (CLI / notebook)
 to surface "why did the agent play this move?" and "what does the agent
 think the opponent's flag is?".
 
-File format: `.npz` with a header field ``kind = "with_policy_v1"``.
+File format: `.npz` with a header field ``kind = "with_policy_v2"``.
+Version 2 adds an ``action_sources`` column while remaining able to load
+version-1 recordings.
 """
 
 from __future__ import annotations
@@ -43,6 +45,15 @@ NUM_TRACKED_TYPES = 12
 NUM_CELLS = 289
 NUM_SEATS = 4
 
+ACTION_SOURCE_POLICY_SAMPLE = 0
+ACTION_SOURCE_POLICY_GREEDY = 1
+ACTION_SOURCE_RANDOM_OPPONENT = 2
+ACTION_SOURCE_NAMES = (
+    "policy_sample",
+    "policy_greedy",
+    "random_opponent",
+)
+
 
 @dataclass
 class StepPolicyRecord:
@@ -55,6 +66,13 @@ class StepPolicyRecord:
     top_probs: np.ndarray       # (K,) float32
     value: float                # V(s) scalar estimate
     chosen_action_id: int       # world-frame; == top_action_ids[0] if greedy
+    action_source: int = ACTION_SOURCE_POLICY_SAMPLE
+
+    @property
+    def action_source_name(self) -> str:
+        if 0 <= self.action_source < len(ACTION_SOURCE_NAMES):
+            return ACTION_SOURCE_NAMES[self.action_source]
+        return "unknown"
 
 
 @dataclass
@@ -89,6 +107,7 @@ class TrajectoryWithPolicy:
     top_probs: np.ndarray      = field(default_factory=lambda: np.zeros((0, 0), dtype=np.float32))
     values: np.ndarray         = field(default_factory=lambda: np.zeros((0,),   dtype=np.float32))
     acting_seats: np.ndarray   = field(default_factory=lambda: np.zeros((0,),   dtype=np.int8))
+    action_sources: np.ndarray | None = None
 
     # Optional belief snapshot per step (one entry per acting step).
     beliefs: np.ndarray | None = None   # (T, 4, 12, 289) float16, optional
@@ -96,7 +115,7 @@ class TrajectoryWithPolicy:
     # Version tags
     rules_version: str = RULES_VERSION
     state_version: str = "2.0"
-    policy_version: str = "with_policy_v1"
+    policy_version: str = "with_policy_v2"
 
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -111,14 +130,31 @@ class TrajectoryWithPolicy:
         self.top_probs = np.asarray(self.top_probs, dtype=np.float32)
         self.values = np.asarray(self.values, dtype=np.float32)
         self.acting_seats = np.asarray(self.acting_seats, dtype=np.int8)
+        if self.action_sources is None:
+            self.action_sources = np.full(
+                (t,), ACTION_SOURCE_POLICY_SAMPLE, dtype=np.int8
+            )
+        else:
+            self.action_sources = np.asarray(self.action_sources, dtype=np.int8)
         if self.top_action_ids.ndim != 2 or self.top_action_ids.shape[0] != t:
             raise ValueError("top_action_ids must have shape (T, K)")
         if self.top_probs.shape != self.top_action_ids.shape:
             raise ValueError("top_probs must have the same shape as top_action_ids")
-        if self.values.shape != (t,) or self.acting_seats.shape != (t,):
-            raise ValueError("values and acting_seats must have shape (T,)")
+        if (
+            self.values.shape != (t,)
+            or self.acting_seats.shape != (t,)
+            or self.action_sources.shape != (t,)
+        ):
+            raise ValueError(
+                "values, acting_seats and action_sources must have shape (T,)"
+            )
         if np.any((self.acting_seats < 0) | (self.acting_seats > 3)):
             raise ValueError("acting_seats must be in [0, 3]")
+        if np.any(
+            (self.action_sources < 0)
+            | (self.action_sources >= len(ACTION_SOURCE_NAMES))
+        ):
+            raise ValueError("action_sources contains an unsupported value")
         if self.beliefs is not None:
             self.beliefs = np.asarray(self.beliefs, dtype=np.float16)
             expected = (t, NUM_SEATS, NUM_TRACKED_TYPES, NUM_CELLS)
@@ -156,6 +192,7 @@ class TrajectoryWithPolicy:
     def save(self, path: str | os.PathLike[str]) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
+        assert self.action_sources is not None
         setup_names = np.asarray(setup_to_names(self.setups), dtype=object)
         extras: dict[str, Any] = {}
         if self.beliefs is not None:
@@ -175,6 +212,7 @@ class TrajectoryWithPolicy:
             top_probs=self.top_probs.astype(np.float32, copy=False),
             values=self.values.astype(np.float32, copy=False),
             acting_seats=self.acting_seats.astype(np.int8, copy=False),
+            action_sources=self.action_sources.astype(np.int8, copy=False),
             meta_json=np.array(json.dumps(self.meta, ensure_ascii=False, default=str)),
             **extras,
         )
@@ -189,6 +227,11 @@ class TrajectoryWithPolicy:
                 )
             setup_names = data["setups"].tolist()
             beliefs = data["beliefs"] if "beliefs" in data.files else None
+            action_sources = (
+                np.asarray(data["action_sources"], dtype=np.int8)
+                if "action_sources" in data.files
+                else None
+            )
             meta: dict[str, Any] = {}
             if "meta_json" in data.files:
                 try:
@@ -208,6 +251,7 @@ class TrajectoryWithPolicy:
                 top_probs=np.asarray(data["top_probs"], dtype=np.float32),
                 values=np.asarray(data["values"], dtype=np.float32),
                 acting_seats=np.asarray(data["acting_seats"], dtype=np.int8),
+                action_sources=action_sources,
                 rules_version=str(data["rules_version"]),
                 state_version=str(data["state_version"]),
                 beliefs=beliefs,
@@ -219,6 +263,7 @@ class TrajectoryWithPolicy:
     # ------------------------------------------------------------------
     def step_record(self, t: int) -> StepPolicyRecord:
         """Return the :class:`StepPolicyRecord` for the ``t``-th step."""
+        assert self.action_sources is not None
         return StepPolicyRecord(
             step=t,
             acting_seat=int(self.acting_seats[t]),
@@ -226,6 +271,7 @@ class TrajectoryWithPolicy:
             top_probs=self.top_probs[t],
             value=float(self.values[t]),
             chosen_action_id=_chosen_world_action_id(self.actions[t]),
+            action_source=int(self.action_sources[t]),
         )
 
     def replay_with_records(
@@ -313,6 +359,10 @@ def probs_to_top_k(
 
 
 __all__ = [
+    "ACTION_SOURCE_NAMES",
+    "ACTION_SOURCE_POLICY_GREEDY",
+    "ACTION_SOURCE_POLICY_SAMPLE",
+    "ACTION_SOURCE_RANDOM_OPPONENT",
     "NUM_CELLS",
     "NUM_SEATS",
     "NUM_TRACKED_TYPES",
