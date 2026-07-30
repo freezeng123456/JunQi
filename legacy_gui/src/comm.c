@@ -48,7 +48,7 @@ void SendData(Junqi* pJunqi, CommHeader *header, void *data, int len)
 	//但是需要分析的时候可以
     if( !pJunqi->bReplay || pJunqi->bAnalyse )
     {
-		sendto(pJunqi->socket_fd, buf, length, 0,
+		sendto(pJunqi->socket_fd, (const char *)buf, length, 0,
 				(struct sockaddr *)&pJunqi->addr, sizeof(struct sockaddr));
     }
 }
@@ -71,7 +71,7 @@ void SendReplyData(Junqi* pJunqi, CommHeader *header, void *data, int len)
 		memcpy(buf+length, data, len);
 	length += len;
 
-	sendto(pJunqi->socket_fd, buf, length, 0,
+	sendto(pJunqi->socket_fd, (const char *)buf, length, 0,
 			(struct sockaddr *)&pJunqi->addr, sizeof(struct sockaddr));
 
 }
@@ -402,7 +402,7 @@ void *comm_thread(void *arg)
 	local.sin_addr.s_addr=INADDR_ANY;
 	local.sin_port = htons(1234);
     int opt = 1;
-    setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 
 	if(bind(socket_fd, (struct sockaddr *)&local, sizeof(struct sockaddr) )<0)
 	{
@@ -431,7 +431,7 @@ void *comm_thread(void *arg)
 
 	while(1)
 	{
-		recvbytes=recvfrom(socket_fd, buf, sizeof(buf), 0,NULL ,NULL);
+		recvbytes=recvfrom(socket_fd, (char *)buf, sizeof(buf), 0,NULL ,NULL);
 		if (recvbytes < 0)
 		{
 			if (junqi_socket_last_error() != EINTR)

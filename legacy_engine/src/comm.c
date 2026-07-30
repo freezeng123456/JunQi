@@ -43,7 +43,7 @@ void SendData(Junqi* pJunqi, CommHeader *header, void *data, int len)
 		memcpy(buf+length, data, (size_t)len);
 	length += len;
 
-	sendto(pJunqi->socket_fd, buf, length, 0,
+	sendto(pJunqi->socket_fd, (const char *)buf, length, 0,
 			(struct sockaddr *)&pJunqi->addr, sizeof(struct sockaddr));
 	LOG_TRACE(LOG_CAT_COMM, "send %d bytes", length);
 	SafeMemout(buf,length);
@@ -320,7 +320,7 @@ void *comm_thread(void *arg)
 
 	local.sin_port = htons(local_port);
     int opt = 1;
-    setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 
 	if(bind(socket_fd, (struct sockaddr *)&local, sizeof(struct sockaddr) )<0)
 	{
@@ -348,7 +348,7 @@ void *comm_thread(void *arg)
 
 	while(1)
 	{
-		recvbytes=recvfrom(socket_fd, buf, REC_LEN, 0,NULL ,NULL);
+		recvbytes=recvfrom(socket_fd, (char *)buf, REC_LEN, 0,NULL ,NULL);
 		if ((int)recvbytes <= 0) {
 			LOG_WARN(LOG_CAT_COMM, "recvfrom returned %d, error=%d",
 			         (int)recvbytes, junqi_socket_last_error());

@@ -19,6 +19,7 @@
 #include <windows.h>
 #include <io.h>
 #include <fcntl.h>
+#include <process.h>
 #include <errno.h>
 
 typedef SOCKET junqi_socket_t;
