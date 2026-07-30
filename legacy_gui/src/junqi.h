@@ -181,7 +181,7 @@ struct Junqi
 
 	struct sockaddr_in addr;
 	struct sockaddr_in addr_tmp[2];
-	int socket_fd;
+	junqi_socket_t socket_fd;
 	GtkWidget *comm;
 	u8 *pCommData;
 	size_t commDataLen;

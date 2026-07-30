@@ -8,8 +8,8 @@
 #ifndef UTILITY_H_
 #define UTILITY_H_
 #include "type.h"
+#include "junqi_platform.h"
 #include <stdarg.h>
-#include <unistd.h>
 #include <pthread.h>
 
 /* ============================================================

@@ -1,6 +1,20 @@
 CC      = gcc
-CFLAGS  = -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -g -I./src
+CFLAGS  = -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -g -I./src -I../legacy_common
 LDFLAGS = -lpthread
+
+# Set WINDOWS=1 for the MSYS2/MinGW build. Windows binaries stay in their
+# own directory so they never overwrite the Mac/Linux build output.
+WINDOWS ?= 0
+ifeq ($(WINDOWS),1)
+	LDFLAGS += -lws2_32
+	BIN_DIR = bin/windows
+	WIN_SUFFIX = .exe
+	OBJ_SUFFIX = -windows
+else
+	BIN_DIR = bin
+	WIN_SUFFIX =
+	OBJ_SUFFIX =
+endif
 
 # Build profile. Override with: make PROFILE=release
 PROFILE ?= debug
@@ -20,13 +34,12 @@ else
 endif
 
 SRC_DIR = src
-OBJ_DIR = obj/$(PROFILE)
-BIN_DIR = bin
+OBJ_DIR = obj/$(PROFILE)$(OBJ_SUFFIX)
 
 SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
-TARGET = $(BIN_DIR)/JunQiEngine
-PROFILE_TARGET = $(BIN_DIR)/$(PROFILE)/JunQiEngine
+TARGET = $(BIN_DIR)/JunQiEngine$(WIN_SUFFIX)
+PROFILE_TARGET = $(BIN_DIR)/$(PROFILE)/JunQiEngine$(WIN_SUFFIX)
 
 all: $(PROFILE_TARGET)
 	@mkdir -p $(BIN_DIR)

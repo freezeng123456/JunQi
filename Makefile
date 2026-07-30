@@ -38,4 +38,9 @@ check: lint-critical lint-core typecheck test
 run:
 	./run_mac.sh
 
-.PHONY: all clean legacy-engine legacy-gui legacy-sanitize test test-rl lint-critical lint-core typecheck check run
+windows:
+	$(MAKE) -C legacy_engine WINDOWS=1 PROFILE=release
+	$(MAKE) -C legacy_gui WINDOWS=1 PROFILE=release
+	@echo "Windows client built under legacy_gui/bin/windows and legacy_engine/bin/windows"
+
+.PHONY: all clean legacy-engine legacy-gui legacy-sanitize test test-rl lint-critical lint-core typecheck check run windows

@@ -10,6 +10,7 @@
 #include "junqi.h"
 #include <pthread.h>
 #include <unistd.h>
+#include "junqi_platform.h"
 #include "rule.h"
 #include "comm.h"
 
@@ -63,7 +64,7 @@ static void StopActiveSound(void)
 	pthread_mutex_unlock(&gSoundMutex);
 }
 
-void PlaySound(const char* pszSound, void* hmod, int fdwSound) {
+void JunqiPlaySound(const char* pszSound, void* hmod, int fdwSound) {
     pid_t pid;
 
     (void)hmod;
@@ -92,7 +93,20 @@ void PlaySound(const char* pszSound, void* hmod, int fdwSound) {
 
 #define Sleep(ms) usleep((ms) * 1000)
 #else
-static void StopActiveSound(void) {}
+#include <mmsystem.h>
+
+static void StopActiveSound(void)
+{
+	/* PlaySound(NULL, ...) cancels the process-wide asynchronous wave. */
+	(void)PlaySoundA(NULL, NULL, 0);
+}
+
+void JunqiPlaySound(const char* pszSound, void* hmod, int fdwSound)
+{
+	if(pszSound == NULL || (gJunqi != NULL && gJunqi->bMute))
+		return;
+	(void)PlaySoundA(pszSound, (HMODULE)hmod, (DWORD)fdwSound);
+}
 #endif
 
 typedef struct BoardItem
@@ -1009,35 +1023,35 @@ void *sound_thread(void *arg)
 	        case MOVE:
 		    	if( pJunqi->szPathForSound>2 )
 		    	{
-		    		PlaySound (MOVE_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_LOOP);
+			    JunqiPlaySound (MOVE_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_LOOP);
 	    			Sleep(250);
 		    	}
     			//异步播放后，非异步的移动声就播不出，此处做暂停用
-    			PlaySound (MOVE_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+				JunqiPlaySound (MOVE_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 	        	break;
 	        case BOMB:
-	        	PlaySound (BOMB_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+			JunqiPlaySound (BOMB_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 	        	break;
 	        case EAT:
-	        	PlaySound (EAT_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+			JunqiPlaySound (EAT_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 	        	break;
 	        case KILLED:
-	        	PlaySound (KILLED_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+			JunqiPlaySound (KILLED_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 	        	break;
 	        case SELECT:
-	        	PlaySound (SELECT_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+			JunqiPlaySound (SELECT_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 	        	break;
 	        case SHOW_FLAG:
-	        	PlaySound (SHOW_FLAG_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+			JunqiPlaySound (SHOW_FLAG_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 	        	break;
 	        case DEAD:
-	        	PlaySound (DEAD_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+			JunqiPlaySound (DEAD_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 	        	break;
 	        case BEGIN:
-	        	PlaySound (BEGIN_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+			JunqiPlaySound (BEGIN_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 	        	break;
 	        case TIMER:
-	        	PlaySound (TIMER_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+			JunqiPlaySound (TIMER_SOUND, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
 	        	break;
 	        default:
 	        	break;

@@ -31,6 +31,35 @@ make
 客户端自身的声音开关位于“设置 → 静音”。它会持久化到
 `legacy_gui/bin/config.ini`，并立即终止仍在播放的声音进程。
 
+### Windows 客户端
+
+Windows 版本沿用同一个 GTK 界面、C 引擎、UDP 协议、复盘和静音逻辑，
+使用 MSYS2 的 UCRT64/MinGW 工具链构建。先安装 [MSYS2](https://www.msys2.org/)，
+在 **UCRT64** 终端执行：
+
+```bash
+pacman -Syu
+pacman -S --needed mingw-w64-ucrt-x86_64-toolchain \
+  mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-pkgconf
+cd /path/to/JunQi
+make windows
+```
+
+构建结果位于 `legacy_engine/bin/windows/` 和
+`legacy_gui/bin/windows/`。在仓库根目录双击 `run_windows.bat`，或在
+PowerShell 执行 `./run_windows.ps1` 即可启动；脚本只会回收自己启动的
+两个引擎进程，不会影响其他 JunQi 进程。
+
+需要分发给没有 MSYS2 的机器时，在 UCRT64 终端执行：
+
+```bash
+bash tools/package_windows.sh
+```
+
+`dist/JunQi-windows/` 会包含棋盘资源、声音、启动脚本和 GTK/MinGW 运行库，
+可直接压缩后分发。每次推送到 GitHub 后，Actions 的 **Windows client** 工作
+流也会自动构建并上传同名 artifact。
+
 ### 安装 Python 核心
 
 ```bash

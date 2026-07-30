@@ -1,0 +1,38 @@
+name: Windows client
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: GTK client / MSYS2 UCRT64
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-gtk3
+            mingw-w64-ucrt-x86_64-pkgconf
+      - name: Build Windows engine and GTK client
+        run: make windows
+      - name: Protocol smoke test
+        run: python tools/test_legacy_protocol.py legacy_engine/bin/windows/JunQiEngine.exe
+      - name: Assemble standalone package
+        run: bash tools/package_windows.sh dist/JunQi-windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JunQi-windows
+          path: dist/JunQi-windows
+          if-no-files-found: error

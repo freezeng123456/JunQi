@@ -13,7 +13,7 @@
 #include "search.h"
 #include <time.h>
 #include <signal.h>
-#include <getopt.h>
+#include "junqi_getopt.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,15 +23,24 @@ static volatile sig_atomic_t g_shutdown_requested = 0;
 static void handle_shutdown(int sig)
 {
 	g_shutdown_requested = 1;
+	#ifdef _WIN32
+	(void)fprintf(stderr, "\n[signal] shutdown requested\n");
+	_exit(128 + sig);
+	#else
 	/* We cannot call logging helpers from a signal handler safely,
 	 * so we write directly with async-signal-safe calls only. */
 	const char msg[] = "\n[signal] shutdown requested, cleaning up...\n";
 	(void)write(STDERR_FILENO, msg, sizeof(msg) - 1);
 	_exit(128 + sig);
+	#endif
 }
 
 static void install_signal_handlers(void)
 {
+	#ifdef _WIN32
+	signal(SIGINT, handle_shutdown);
+	signal(SIGTERM, handle_shutdown);
+	#else
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = handle_shutdown;
@@ -41,6 +50,7 @@ static void install_signal_handlers(void)
 	sigaction(SIGTERM, &sa, NULL);
 	/* Ignore SIGPIPE - socket partners may close abruptly. */
 	signal(SIGPIPE, SIG_IGN);
+	#endif
 }
 
 static void print_usage(const char *prog)

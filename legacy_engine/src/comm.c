@@ -284,17 +284,26 @@ malformed:
 void *comm_thread(void *arg)
 {
 	Junqi* pJunqi = (Junqi*)arg;
-	int socket_fd;
+	junqi_socket_t socket_fd;
 	struct sockaddr_in addr,local;
 	size_t recvbytes = 0;
 	u8 buf[REC_LEN]={0};
 	u16 local_port;
 	u16 remote_port;
 
-	socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (socket_fd < 0)
+	if (junqi_socket_init() != 0)
 	{
-		LOG_ERROR(LOG_CAT_COMM, "Create Socket Failed: errno=%d", errno);
+		LOG_ERROR(LOG_CAT_COMM, "initialize UDP networking failed: %d",
+		          junqi_socket_last_error());
+		return NULL;
+	}
+
+	socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (socket_fd == JUNQI_INVALID_SOCKET)
+	{
+		LOG_ERROR(LOG_CAT_COMM, "Create Socket Failed: error=%d",
+		          junqi_socket_last_error());
+		junqi_socket_cleanup();
 		return NULL;
 	}
 
@@ -315,8 +324,10 @@ void *comm_thread(void *arg)
 
 	if(bind(socket_fd, (struct sockaddr *)&local, sizeof(struct sockaddr) )<0)
 	{
-		LOG_ERROR(LOG_CAT_COMM, "Bind to port %d failed: errno=%d", local_port, errno);
-		close(socket_fd);  /* M4: was leaked before */
+		LOG_ERROR(LOG_CAT_COMM, "Bind to port %d failed: error=%d", local_port,
+		          junqi_socket_last_error());
+		junqi_socket_close(socket_fd);  /* M4: was leaked before */
+		junqi_socket_cleanup();
         return NULL;
 	}
 
@@ -339,15 +350,16 @@ void *comm_thread(void *arg)
 	{
 		recvbytes=recvfrom(socket_fd, buf, REC_LEN, 0,NULL ,NULL);
 		if ((int)recvbytes <= 0) {
-			LOG_WARN(LOG_CAT_COMM, "recvfrom returned %d, errno=%d",
-			         (int)recvbytes, errno);
+			LOG_WARN(LOG_CAT_COMM, "recvfrom returned %d, error=%d",
+			         (int)recvbytes, junqi_socket_last_error());
 			continue;
 		}
 		DealRecData(pJunqi, buf, recvbytes);
 	}
 
 	/* Unreachable in current design; retained for completeness. */
-	close(socket_fd);
+	junqi_socket_close(socket_fd);
+	junqi_socket_cleanup();
 	return NULL;
 }
 

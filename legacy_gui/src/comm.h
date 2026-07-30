@@ -8,11 +8,7 @@
 #ifndef COMM_H_
 #define COMM_H_
 
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include "junqi_platform.h"
 #include "type.h"
 
 #define COMM_OK          0

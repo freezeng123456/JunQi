@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include "junqi_platform.h"
 #include "junqi.h"
 #include "board.h"
 #include "rule.h"
@@ -26,13 +27,13 @@ int OsRead(int fd, void *zBuf, int iAmt, long iOfst)
 
   if(zBuf == NULL || iAmt < 0)
     return -1;
-  ofst = lseek(fd, iOfst, SEEK_SET);
+  ofst = junqi_file_seek(fd, iOfst, SEEK_SET);
   if( ofst!=iOfst ){
     return -1;
   }
   while(total < iAmt)
   {
-    ssize_t nRead = read(fd, (u8 *)zBuf + total, (size_t)(iAmt - total));
+    ssize_t nRead = junqi_file_read(fd, (u8 *)zBuf + total, (size_t)(iAmt - total));
     if(nRead == 0)
       break;
     if(nRead < 0)
@@ -58,13 +59,13 @@ int OsWrite(
 
   if(zBuf == NULL || iAmt < 0)
     return -1;
-  ofst = lseek(fd, iOfst, SEEK_SET);
+  ofst = junqi_file_seek(fd, iOfst, SEEK_SET);
   if( ofst!=iOfst ){
     return -1;
   }
   while(total < iAmt)
   {
-    ssize_t nWrite = write(fd, (u8 *)zBuf + total, (size_t)(iAmt - total));
+    ssize_t nWrite = junqi_file_write(fd, (u8 *)zBuf + total, (size_t)(iAmt - total));
     if(nWrite < 0)
     {
       if(errno == EINTR)
@@ -1442,11 +1443,11 @@ void get_lineup_cb (GtkNativeDialog *dialog,
 		}
 		if (OsRead(fd, aBuf, 4096, 0) < (int)sizeof(Jql))
 		{
-			close(fd);
+			junqi_file_close(fd);
 			ShowDialogMessage(pJunqi, "布阵文件不完整", 0);
 			goto lineup_done;
 		}
-		close(fd);
+		junqi_file_close(fd);
 		pLineup = (Jql*)(&aBuf[0]);
 		if( memcmp(pLineup->aMagic, aMagic, 4)!=0 )
 		{
@@ -1509,7 +1510,7 @@ void OpenReplay(GtkNativeDialog *dialog,
 			goto replay_done;
 		}
 		int bytes_read = OsRead(fd, aBuf, PAGE_SIZE, 0);
-		close(fd);
+		junqi_file_close(fd);
 		if( bytes_read >= MOVE_OFFSET && memcmp(aBuf, aMagic, 4)==0 )
 		{
 			int max_step = 0;
@@ -1724,7 +1725,7 @@ void SaveLineup(GtkNativeDialog *dialog,
 		}
 
 		OsWrite(fd, aBuf, sizeof(aBuf), 0);
-		close(fd);
+		junqi_file_close(fd);
 	}
 
 	lineup_save_done:
@@ -1754,7 +1755,7 @@ void SaveReplay(GtkNativeDialog *dialog,
 		}
 		if (pJunqi->iReOfst < MOVE_OFFSET || pJunqi->iReOfst > PAGE_SIZE)
 		{
-			close(fd);
+			junqi_file_close(fd);
 			ShowDialogMessage(pJunqi, "复盘数据长度无效", 0);
 			goto replay_save_done;
 		}
@@ -1762,7 +1763,7 @@ void SaveReplay(GtkNativeDialog *dialog,
 		SetReplayData(pJunqi, (u8*)&iTolalStep, 4, 4);
 		if (OsWrite(fd, pJunqi->aReplay, pJunqi->iReOfst, 0) != pJunqi->iReOfst)
 			ShowDialogMessage(pJunqi, "复盘文件写入不完整", 0);
-		close(fd);
+		junqi_file_close(fd);
 	}
 	replay_save_done:
 	gtk_native_dialog_destroy (GTK_NATIVE_DIALOG (native));

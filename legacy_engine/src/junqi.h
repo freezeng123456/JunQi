@@ -152,7 +152,7 @@ struct Junqi
 
 
 	struct sockaddr_in addr;
-	int socket_fd;
+	junqi_socket_t socket_fd;
 
 	/* Per-instance state (moved out of file-scope globals so that
 	 * multiple Junqi instances can coexist in one process, e.g. an

@@ -376,17 +376,24 @@ malformed:
 void *comm_thread(void *arg)
 {
 	Junqi* pJunqi = (Junqi*)arg;
-	int socket_fd;
+	junqi_socket_t socket_fd;
 	struct sockaddr_in addr,local;
 	struct sockaddr_in addr1;
-	ssize_t recvbytes;
+	int recvbytes;
 	u8 buf[200]={0};
 	u8 tmp_buf[200]={0};
 
-	socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (socket_fd < 0)
+	if (junqi_socket_init() != 0)
 	{
-		log_b("create UDP socket failed: %s", strerror(errno));
+		log_b("initialize UDP networking failed: %d", junqi_socket_last_error());
+		return NULL;
+	}
+
+	socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (socket_fd == JUNQI_INVALID_SOCKET)
+	{
+		log_b("create UDP socket failed: %d", junqi_socket_last_error());
+		junqi_socket_cleanup();
 		return NULL;
 	}
 
@@ -399,8 +406,9 @@ void *comm_thread(void *arg)
 
 	if(bind(socket_fd, (struct sockaddr *)&local, sizeof(struct sockaddr) )<0)
 	{
-		log_b("bind UDP port %d failed: %s", LOCAL_PORT, strerror(errno));
-		close(socket_fd);
+		log_b("bind UDP port %d failed: %d", LOCAL_PORT, junqi_socket_last_error());
+		junqi_socket_close(socket_fd);
+		junqi_socket_cleanup();
         return NULL;
 	}
 
@@ -426,13 +434,13 @@ void *comm_thread(void *arg)
 		recvbytes=recvfrom(socket_fd, buf, sizeof(buf), 0,NULL ,NULL);
 		if (recvbytes < 0)
 		{
-			if (errno != EINTR)
-				log_b("UDP receive failed: %s", strerror(errno));
+			if (junqi_socket_last_error() != EINTR)
+				log_b("UDP receive failed: %d", junqi_socket_last_error());
 			continue;
 		}
 		if ((size_t)recvbytes < sizeof(CommHeader))
 		{
-			log_b("drop short UDP packet: %zd bytes", recvbytes);
+			log_b("drop short UDP packet: %d bytes", recvbytes);
 			continue;
 		}
 
@@ -446,7 +454,8 @@ void *comm_thread(void *arg)
 
 	}
 
-	close(socket_fd);
+	junqi_socket_close(socket_fd);
+	junqi_socket_cleanup();
 	return NULL;
 
 }
