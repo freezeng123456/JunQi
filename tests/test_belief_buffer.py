@@ -56,7 +56,8 @@ def _fake_samples(
 def test_construction_defaults():
     buf = BeliefBuffer()
     assert len(buf) == 0
-    assert buf.capacity == 50_000
+    assert buf.capacity == 12_000
+    assert buf._obs.shape[0] == 0
     assert buf.head == 0
     assert not buf.is_full
 

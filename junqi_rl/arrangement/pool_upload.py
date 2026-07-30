@@ -119,12 +119,13 @@ def refresh_gpu_setup_pool(pool: np.ndarray) -> None:
 
     Split out so tests can monkey-patch the CUDA call.
     """
-    import junqi_cuda as _cuda
-
     if pool.ndim != 2 or pool.shape[1] != 120:
         raise ValueError(f"pool must be (P, 120) int8, got {pool.shape}")
     if pool.dtype != np.int8:
         pool = pool.astype(np.int8, copy=False)
+
+    import junqi_cuda as _cuda
+
     _cuda.upload_setup_pool(pool)
 
 

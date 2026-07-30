@@ -18,12 +18,13 @@ CPU memory and uploading per minibatch is the right trade-off.
 the oldest entries (LRU). Avoids the Python-list-copy cost that would
 otherwise dominate at ~50 k entries.
 
-**Contiguous ndarray storage.** We keep four parallel
+**Lazily-grown contiguous storage.** We keep four parallel
 ``numpy.ndarray`` buffers (``obs``, ``seat``, ``label``, ``enemy_mask``)
-and track ``head`` (next write index) + ``size`` (current count). Sampling
-does a single gather with ``numpy.random.choice``, then bulk-converts to
-torch with ``torch.from_numpy``. Round-trip benchmarked at ~40 μs for a
-64-batch sample on T4 hardware (negligible vs the ~10 ms forward pass).
+and track ``head`` (next write index) + ``size`` (current count). Physical
+storage grows geometrically as samples arrive instead of reserving the whole
+logical capacity in the constructor. Sampling does a single gather with
+``numpy.random.choice``, then bulk-converts to torch with
+``torch.from_numpy``.
 
 **Label domain**. Each cell's label is either an int in
 ``[0, N_BELIEF_TYPES)`` (type revealed) or ``-1`` (still unknown). The
@@ -32,10 +33,9 @@ loss function (P1.4) only contributes CE from revealed cells via
 the mask — storing ``-1`` as a sentinel keeps the buffer homogeneous.
 
 **No padding / variable-length support.** ``obs_spatial`` is always
-``(OBS_CHANNELS, 17, 17)`` = 74 KB of float32. With 50k entries the
-obs array alone is ~3.7 GB — fits on the 30 GB RAM T4 instance easily.
-If the buffer needs to grow 10× we'd compress obs to uint8 + delta
-encoding, but that's P1.5+ work.
+``(OBS_CHANNELS, 17, 17)``. Under the v6/412-channel layout one float16
+sample is about 233 KiB; the 12k default therefore caps observation storage
+near 2.66 GiB.
 """
 
 from __future__ import annotations
@@ -104,7 +104,7 @@ class BeliefBuffer:
 
     .. code-block:: python
 
-        buf = BeliefBuffer(capacity=50_000)
+        buf = BeliefBuffer(capacity=12_000)
         # during rollout, on every reveal:
         buf.add(obs_np, seat_np, type_labels_np, enemy_mask_np)
         # ...
@@ -118,7 +118,7 @@ class BeliefBuffer:
     def __init__(
         self,
         *,
-        capacity: int = 50_000,
+        capacity: int = 12_000,
         seed: int | None = None,
     ) -> None:
         if not isinstance(capacity, int) or capacity <= 0:
@@ -127,18 +127,15 @@ class BeliefBuffer:
         self.capacity = capacity
         self._rng = np.random.default_rng(seed)
 
-        # Pre-allocate the four aligned arrays. ``obs`` is the biggest by
-        # far; at the default 50k capacity it's 50k * 74KB = 3.7 GB. We
-        # store it float16 to halve the RAM footprint (the net forwards
-        # through autocast anyway, so fp16 round-trip loses nothing).
+        # Avoid reserving several GiB merely to construct an empty buffer.
+        # The arrays stay contiguous but grow geometrically on demand.
+        self._allocated = 0
         self._obs = np.zeros(
-            (capacity, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE), dtype=np.float16,
+            (0, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE), dtype=np.float16,
         )
-        self._seat = np.zeros((capacity,), dtype=np.int64)
-        self._label = np.full(
-            (capacity, NUM_CELLS), -1, dtype=np.int64,
-        )  # -1 sentinel for unknown
-        self._enemy = np.zeros((capacity, NUM_CELLS), dtype=bool)
+        self._seat = np.zeros((0,), dtype=np.int64)
+        self._label = np.full((0, NUM_CELLS), -1, dtype=np.int64)
+        self._enemy = np.zeros((0, NUM_CELLS), dtype=bool)
 
         # Ring-buffer bookkeeping.
         self._head: int = 0       # next write index
@@ -164,6 +161,34 @@ class BeliefBuffer:
         """Drop all entries. Capacity (allocated arrays) unchanged."""
         self._head = 0
         self._size = 0
+
+    def _ensure_allocated(self, required: int) -> None:
+        """Grow physical storage to at least ``required`` logical slots."""
+        if required <= self._allocated:
+            return
+        if required > self.capacity:
+            raise ValueError(
+                f"required storage {required} exceeds capacity {self.capacity}"
+            )
+        grown = 64 if self._allocated == 0 else self._allocated * 2
+        new_size = min(self.capacity, max(required, grown))
+
+        obs = np.zeros(
+            (new_size, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE), dtype=np.float16,
+        )
+        seat = np.zeros((new_size,), dtype=np.int64)
+        label = np.full((new_size, NUM_CELLS), -1, dtype=np.int64)
+        enemy = np.zeros((new_size, NUM_CELLS), dtype=bool)
+        if self._allocated:
+            obs[: self._allocated] = self._obs
+            seat[: self._allocated] = self._seat
+            label[: self._allocated] = self._label
+            enemy[: self._allocated] = self._enemy
+        self._obs = obs
+        self._seat = seat
+        self._label = label
+        self._enemy = enemy
+        self._allocated = new_size
 
     # ------------------------------------------------------------------
     # Add
@@ -235,6 +260,11 @@ class BeliefBuffer:
             true_type_idx = true_type_idx[-self.capacity:]
             enemy_mask = enemy_mask[-self.capacity:]
             N = self.capacity
+
+        # Before the logical ring is full, writes occupy a linear prefix.
+        # Once full, physical allocation is necessarily equal to capacity.
+        required = min(self.capacity, max(self._size + N, self._head + N))
+        self._ensure_allocated(required)
 
         # Cast to storage dtypes (explicit copy, not view — safer across
         # strides).
@@ -338,7 +368,7 @@ class BeliefBuffer:
 
         Keys:
         * ``belief_buf/size``        — current number of stored samples
-        * ``belief_buf/capacity``    — allocated capacity
+        * ``belief_buf/capacity``    — configured logical capacity
         * ``belief_buf/fill_ratio``  — size / capacity ∈ [0, 1]
         * ``belief_buf/reveal_ratio`` — mean (over ready samples) of the
           fraction of cells that actually have a label (i.e. not ``-1``).
@@ -372,8 +402,8 @@ class BeliefBuffer:
     def state_dict(self) -> dict:
         """Return a picklable state dict for checkpointing.
 
-        Only includes *valid* (written) slots, so a 50k-capacity buffer
-        with 3k entries ships 3k × 74 KB ≈ 220 MB rather than 3.7 GB.
+        Only includes *valid* (written) slots, so a 12k-capacity buffer
+        with 3k entries ships roughly 700 MiB rather than 2.66 GiB.
         """
         n = self._size
         return {
@@ -401,6 +431,7 @@ class BeliefBuffer:
         self._head = int(sd["head"])
         self._size = int(sd["size"])
         n = self._size
+        self._ensure_allocated(n)
         if n < self.capacity:
             self._obs[:n] = sd["obs"]
             self._seat[:n] = sd["seat"]

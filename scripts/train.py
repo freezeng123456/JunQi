@@ -263,10 +263,10 @@ class BeliefTrainConfig:
     (highest signal, highest cost). Higher values let beliefs go stale but
     save throughput."""
 
-    buffer_capacity: int = 50_000
-    """Max CPU replay-buffer size. 50k × 74 KB/sample ≈ 3.7 GB RAM (fp16
-    obs storage). At 128 envs × ~10 terminal reveals/rollout we fill in
-    ~40 rollouts of training."""
+    buffer_capacity: int = 12_000
+    """Max CPU replay-buffer size. With the v6/412-channel observation,
+    one fp16 sample is about 233 KiB and 12k samples use about 2.66 GiB.
+    Storage is allocated lazily as samples arrive."""
 
     warmup_rollouts: int = 20
     """Defer refresh_beliefs_neural until this many rollouts have passed,
@@ -517,7 +517,9 @@ def _dataclass_to_dict(obj: Any) -> Any:
     if dataclasses.is_dataclass(obj):
         return {f.name: _dataclass_to_dict(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
     elif isinstance(obj, (list, tuple)):
-        return type(obj)(_dataclass_to_dict(x) for x in obj)
+        # YAML safe loaders do not support PyYAML's ``!!python/tuple`` tag.
+        # Lists preserve the configuration meaning and remain portable.
+        return [_dataclass_to_dict(x) for x in obj]
     else:
         return obj
 
@@ -1002,7 +1004,7 @@ def train(cfg: TrainConfig) -> None:
     cfg_path = os.path.join(cfg.save_dir, "cfg.runtime.yaml")
     if is_rank0:
         with open(cfg_path, "w") as f:
-            yaml.dump(_dataclass_to_dict(cfg), f, default_flow_style=False)
+            yaml.safe_dump(_dataclass_to_dict(cfg), f, default_flow_style=False)
         print(f"[train] Runtime config saved to {cfg_path}")
         if is_distributed:
             print(f"[train] DDP world_size={world_size} backend="

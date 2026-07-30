@@ -1,6 +1,7 @@
-"""Quick test: verify torch CUDA is operational after install."""
-import torch
+"""Quick test: verify Torch and, when available, its CUDA runtime."""
+
 import pytest
+import torch
 
 
 def test_torch_version():
@@ -13,10 +14,14 @@ def test_torch_version():
     )
 
 
+@pytest.mark.cuda
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA GPU not available")
 def test_cuda_available():
-    assert torch.cuda.is_available(), "torch.cuda not available — driver mismatch?"
+    assert torch.cuda.is_available()
 
 
+@pytest.mark.cuda
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA GPU not available")
 def test_cuda_compute():
     x = torch.randn(128, 128, device="cuda")
     y = x @ x.T
@@ -24,6 +29,8 @@ def test_cuda_compute():
     assert torch.isfinite(y).all()
 
 
+@pytest.mark.cuda
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA GPU not available")
 def test_cuda_device_name():
     assert torch.cuda.device_count() >= 1
     print("\n[torch]", torch.__version__, "cuda=", torch.version.cuda)

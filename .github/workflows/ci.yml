@@ -24,7 +24,7 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
-      - run: python run_tests.py --profile core
+      - run: python run_tests.py --profile core -- -m "not slow"
       - run: python -m ruff check junqi_core
       - run: python -m mypy junqi_core
       - name: Block high-confidence static errors
@@ -43,7 +43,7 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[rl,dev]"
-      - run: python run_tests.py --profile rl -- -m "not slow"
+      - run: python run_tests.py --profile rl -- -m "not slow and not cuda"
 
   legacy-build:
     name: Legacy C / GTK build

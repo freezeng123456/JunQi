@@ -1,9 +1,19 @@
-"""Verify torch consumes __cuda_array_interface__ for our DeviceObservationBatch pointers."""
-import torch
+"""Verify Torch consumes CUDA observation pointers without a host copy."""
+
 import numpy as np
+import pytest
+import torch
 
 from junqi_core.observation import OBS_CHANNELS
 from junqi_rl.gpu_rollout import GpuRollout
+
+pytestmark = [
+    pytest.mark.cuda,
+    pytest.mark.skipif(
+        not torch.cuda.is_available(),
+        reason="CUDA GPU not available",
+    ),
+]
 
 
 def test_zero_copy_spatial():

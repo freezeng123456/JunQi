@@ -45,7 +45,8 @@ net:
 
 belief:
   enabled: true
-  buffer_capacity: 50000
+  # v6 has 412 spatial channels; 12k fp16 samples are about 2.66 GiB.
+  buffer_capacity: 12000
   ema_decay: 0.999
   infer_chunk_size: 256
   refresh_every: 5

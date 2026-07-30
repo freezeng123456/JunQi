@@ -81,7 +81,7 @@ def test_belief_train_config_defaults():
     # to before this landed.
     assert cfg.belief.enabled is False
     assert cfg.belief.refresh_every == 1
-    assert cfg.belief.buffer_capacity == 50_000
+    assert cfg.belief.buffer_capacity == 12_000
     assert cfg.belief.warmup_rollouts == 20
     assert cfg.belief.ema_decay == 0.999
 
