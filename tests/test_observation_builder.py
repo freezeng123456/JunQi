@@ -28,7 +28,6 @@ These tests pin down the Phase 0.4 M2 contracts:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import random
 import tracemalloc
@@ -48,6 +47,7 @@ from junqi_core.observation import (
 from junqi_core.rules import ALL_SEATS, Seat, ShowMode
 from junqi_core.setup import generate_random_setup
 from junqi_core.state import GameState
+from tools.gen_obs_golden import GOLDEN_HASH_KIND, hash_observation
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,13 +71,6 @@ def _replay(seed: int, steps: int, show_mode: ShowMode, observer: Seat):
             belief.update(state, new_state, result)
         state = new_state
     return state, belief
-
-
-def _hash_obs(obs: ObservationTensor) -> str:
-    h = hashlib.sha256()
-    h.update(obs.spatial.tobytes())
-    h.update(obs.global_.tobytes())
-    return h.hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +123,8 @@ class TestBitIdentity:
             if state.terminated:
                 continue
             obs = builder.build(state, belief, Seat.SOUTH).snapshot()
-            assert _hash_obs(obs) == rec["sha256"], (
+            assert rec.get("hash_kind") == GOLDEN_HASH_KIND
+            assert hash_observation(obs) == rec["sha256"], (
                 f"hash drift on seed={rec['seed']} steps={rec['steps']} "
                 f"mode={rec['show_mode']}"
             )

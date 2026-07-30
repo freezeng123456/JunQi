@@ -4,10 +4,11 @@ Usage::
 
     python3 -m tools.gen_obs_golden   # writes tests/golden/obs_hashes.json
 
-The file is the pin-down artifact for Phase 0.4 M2: the new
-``ObservationBuilder.build()`` must reproduce every (spatial, global_)
-pair BYTE-IDENTICALLY.  Once the migration is done, this tool becomes a
-one-time historical record and is normally unused.
+The file is the pin-down artifact for Phase 0.4 M2. Floating-point belief
+normalisation may differ in the last few bits between Apple Silicon and
+Linux x86, so the portable golden digest quantises values to 1e-6 before
+hashing. The direct builder-vs-wrapper test remains byte-identical within
+each runtime.
 
 Scenarios covered (12 total):
 
@@ -35,6 +36,24 @@ from junqi_core.observation import build_observation
 from junqi_core.rules import Seat, ShowMode
 from junqi_core.setup import generate_random_setup
 from junqi_core.state import GameState
+
+
+GOLDEN_HASH_KIND = "quantized_i32_1e6"
+_GOLDEN_SCALE = 1_000_000.0
+
+
+def hash_observation(obs) -> str:
+    """Return an endian-stable digest at micro-unit numeric precision."""
+    h = hashlib.sha256()
+    for arr in (obs.spatial, obs.global_):
+        if not np.isfinite(arr).all():
+            raise ValueError("observation contains non-finite values")
+        quantized = np.rint(
+            arr.astype(np.float64, copy=False) * _GOLDEN_SCALE
+        ).astype("<i4")
+        h.update(np.asarray(arr.shape, dtype="<i4").tobytes())
+        h.update(quantized.tobytes())
+    return h.hexdigest()
 
 
 def _advance(state: GameState, belief: BeliefTensor, steps: int, rng: random.Random):
@@ -79,10 +98,7 @@ def main() -> None:
 
         obs = build_observation(state, belief, Seat.SOUTH)
 
-        h = hashlib.sha256()
-        h.update(obs.spatial.tobytes())
-        h.update(obs.global_.tobytes())
-        digest = h.hexdigest()
+        digest = hash_observation(obs)
 
         # Also stash a tiny fingerprint (sum + max per channel group) for
         # human-readable drift diagnosis.
@@ -105,6 +121,7 @@ def main() -> None:
             "steps": steps,
             "show_mode": show_mode.name,
             "observer": "SOUTH",
+            "hash_kind": GOLDEN_HASH_KIND,
             "sha256": digest,
             "spatial_sums": spatial_sums,
             "global_sums": global_sums,
