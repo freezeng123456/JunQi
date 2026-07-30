@@ -28,7 +28,7 @@ jobs:
       - name: Build Windows engine and GTK client
         run: |
           export PATH="/ucrt64/bin:$PATH"
-          make windows
+          mingw32-make windows
       - name: Protocol smoke test
         run: |
           export PATH="/ucrt64/bin:$PATH"

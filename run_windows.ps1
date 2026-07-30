@@ -7,12 +7,16 @@ $engineBin = Join-Path $engineDir "JunQiEngine.exe"
 $guiBin = Join-Path $guiDir "JunQiGUI.exe"
 
 if (-not (Test-Path $engineBin) -or -not (Test-Path $guiBin)) {
-    if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
-        throw "Windows binaries are missing. Install MSYS2 UCRT64 and run 'make windows' from its terminal first."
+    $makeCommand = Get-Command mingw32-make -ErrorAction SilentlyContinue
+    if ($null -eq $makeCommand) {
+        $makeCommand = Get-Command make -ErrorAction SilentlyContinue
+    }
+    if ($null -eq $makeCommand) {
+        throw "Windows binaries are missing. Install MSYS2 UCRT64 and run 'mingw32-make windows' from its terminal first."
     }
     Push-Location $scriptDir
     try {
-        & make windows
+        & $makeCommand.Source windows
         if ($LASTEXITCODE -ne 0) { throw "Windows build failed with exit code $LASTEXITCODE." }
     } finally {
         Pop-Location

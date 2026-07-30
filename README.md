@@ -42,7 +42,7 @@ pacman -Syu
 pacman -S --needed mingw-w64-ucrt-x86_64-toolchain \
   mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-pkgconf
 cd /path/to/JunQi
-make windows
+mingw32-make windows
 ```
 
 构建结果位于 `legacy_engine/bin/windows/` 和
