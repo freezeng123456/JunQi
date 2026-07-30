@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <gtk/gtk.h>
 #include <assert.h>
+#include <pthread.h>
 #include "comm.h"
 #include "type.h"
 
