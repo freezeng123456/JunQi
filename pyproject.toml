@@ -25,7 +25,8 @@ classifiers = [
 ]
 dependencies = [
   # Core numerics (no torch needed for junqi_core itself).
-  "numpy>=1.26,<3",
+  # NumPy 2.5 type stubs use Python 3.12-only syntax, while JunQi supports 3.10.
+  "numpy>=1.26,<2.5",
   "pydantic>=2.5,<3",
 ]
 
