@@ -80,6 +80,71 @@ int OsWrite(
   return total;
 }
 
+static const char *const kChessColorDirs[] = {
+	"orange", "purple", "green", "blue"
+};
+
+static const char *const kChessTypeFiles[] = {
+	[NONE] = NULL,
+	[DARK] = "dark",
+	[JUNQI] = "junqi",
+	[DILEI] = "dilei",
+	[ZHADAN] = "zhadan",
+	[SILING] = "siling",
+	[JUNZH] = "junzh",
+	[SHIZH] = "shizh",
+	[LVZH] = "lvzh",
+	[TUANZH] = "tuanzh",
+	[YINGZH] = "yingzh",
+	[LIANZH] = "lianzh",
+	[PAIZH] = "paizh",
+	[GONGB] = "gongb"
+};
+
+static void ClearChessPieces(Junqi *pJunqi, enum ChessColor color)
+{
+	int i;
+
+	pJunqi->Chess[color][NONE] = NULL;
+	for(i = DARK; i <= GONGB; i++)
+	{
+		if(pJunqi->Chess[color][i] != NULL)
+		{
+			g_object_unref(pJunqi->Chess[color][i]);
+			pJunqi->Chess[color][i] = NULL;
+		}
+	}
+}
+
+/* Load each sprite as its own 36x27 image.  This keeps crop boundaries
+ * independent, so a bad tile can never shift every following tile in a
+ * colour strip. */
+static int LoadChessPieces(Junqi *pJunqi, enum ChessColor color)
+{
+	char path[160];
+	GError *error = NULL;
+	int i;
+
+	ClearChessPieces(pJunqi, color);
+	for(i = DARK; i <= GONGB; i++)
+	{
+		g_snprintf(path, sizeof(path), "./res/pieces/%s/%s.bmp",
+			kChessColorDirs[color], kChessTypeFiles[i]);
+		pJunqi->Chess[color][i] = gdk_pixbuf_new_from_file(path, &error);
+		if(pJunqi->Chess[color][i] == NULL)
+		{
+			if(error != NULL)
+			{
+				g_error_free(error);
+				error = NULL;
+			}
+			ClearChessPieces(pJunqi, color);
+			return 0;
+		}
+	}
+	return 1;
+}
+
 void LoadChess(Junqi *pJunqi, enum ChessColor color)
 {
 	int iWidth, iHeight;
@@ -104,14 +169,38 @@ void LoadChess(Junqi *pJunqi, enum ChessColor color)
 
 void LoadChessImage(Junqi *pJunqi)
 {
-	int i=0;
-	pJunqi->ChessImage[ORANGE] = gdk_pixbuf_new_from_file("./res/orange.bmp",NULL);
-	pJunqi->ChessImage[PURPLE] = gdk_pixbuf_new_from_file("./res/purple.bmp",NULL);
-	pJunqi->ChessImage[GREEN] = gdk_pixbuf_new_from_file("./res/green.bmp",NULL);
-	pJunqi->ChessImage[BLUE] = gdk_pixbuf_new_from_file("./res/blue.bmp",NULL);
-	for(i=0; i<4; i++)
+	static const char *const kChessStrips[] = {
+		"./res/orange.bmp", "./res/purple.bmp",
+		"./res/green.bmp", "./res/blue.bmp"
+	};
+	int i;
+	int bLoadedPieces = 1;
+
+	for(i = 0; i < 4; i++)
 	{
-		LoadChess(pJunqi,i);
+		pJunqi->ChessImage[i] = NULL;
+		if(!LoadChessPieces(pJunqi, i))
+		{
+			bLoadedPieces = 0;
+			break;
+		}
+	}
+	if(bLoadedPieces)
+	{
+		return;
+	}
+
+	/* Keep the original strips as a compatibility fallback for older
+	 * packages that do not contain res/pieces. */
+	g_warning("Individual chess sprites unavailable; falling back to color strips");
+	for(i = 0; i < 4; i++)
+	{
+		ClearChessPieces(pJunqi, i);
+		pJunqi->ChessImage[i] = gdk_pixbuf_new_from_file(kChessStrips[i], NULL);
+		if(pJunqi->ChessImage[i] != NULL)
+		{
+			LoadChess(pJunqi, i);
+		}
 	}
 }
 
