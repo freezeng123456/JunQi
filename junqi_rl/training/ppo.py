@@ -60,7 +60,7 @@ except ImportError:
     def _make_grad_scaler() -> "_TorchAmpGradScaler":
         return _TorchAmpGradScaler()
 
-from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig, N_VF_CAT
+from junqi_rl.networks.junqi_net import N_VF_CAT, JunqiNet, JunqiNetConfig
 from junqi_rl.training.rollout import RolloutBatch, RolloutBuffer
 
 
@@ -712,7 +712,9 @@ class PPOTrainer:
                 + cfg.kl_coef * kl_loss
             )
 
-        self.optimizer.zero_grad()
+        # Avoid clearing every gradient buffer with a kernel before backward;
+        # autograd will allocate/write gradients for all used parameters.
+        self.optimizer.zero_grad(set_to_none=True)
         if self._scaler is not None:
             self._scaler.scale(total_loss).backward()
             self._scaler.unscale_(self.optimizer)
@@ -826,31 +828,29 @@ class PPOTrainer:
         all_metrics: list[dict] = []
 
         for _ in range(cfg.num_epochs_per_rollout):
-            # Materialise this epoch's minibatches up front. Required for DDP:
-            # all ranks MUST execute the same number of forward+backward passes
-            # or the gradient all-reduce deadlocks (one rank waits forever for
-            # a peer that already exited the loop). We pick the per-rank
-            # minibatch count, all_reduce(MIN), then truncate.
-            #
-            # Memory cost: each RolloutBatch holds device-side index_select
-            # views over the buffer (~few MB each); a typical PPO epoch has
-            # 30-60 minibatches → tens of MB total, negligible vs the buffer.
-            batches = list(rollout.minibatches(
-                cfg.minibatch_size, shuffle=True, rng=rng,
-            ))
-            if _is_distributed() and len(batches) > 0:
+            batches = rollout.minibatches(
+                cfg.minibatch_size,
+                shuffle=True,
+                rng=rng,
+            )
+            if _is_distributed():
+                # DDP ranks must execute the same number of backward passes.
+                # Materialise only in distributed mode so we can all-reduce
+                # the local batch counts and truncate to the minimum.
+                #
+                # In the common single-GPU path, keeping this as a generator
+                # is important: RolloutBatch fields are index_select copies,
+                # not views. Eagerly retaining 30-60 observation batches can
+                # consume many GiB with the 412-channel observation schema.
+                materialized = list(batches)
                 n_local = torch.tensor(
-                    len(batches), device=self.device, dtype=torch.long,
+                    len(materialized),
+                    device=self.device,
+                    dtype=torch.long,
                 )
                 dist.all_reduce(n_local, op=dist.ReduceOp.MIN)
                 n_to_use = int(n_local.item())
-                batches = batches[:n_to_use]
-            elif _is_distributed():
-                # Some rank has zero batches (degenerate case). Sync zero so
-                # everyone agrees and skip the inner loop.
-                n_local = torch.tensor(0, device=self.device, dtype=torch.long)
-                dist.all_reduce(n_local, op=dist.ReduceOp.MIN)
-                batches = []
+                batches = iter(materialized[:n_to_use])
 
             for batch in batches:
                 metrics = self._update_step(batch)

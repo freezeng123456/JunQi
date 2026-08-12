@@ -13,7 +13,8 @@ produces device tensors (i.e. when running :func:`collect_rollout_gpu`
 with ``device="cuda"``).
 
 The API is identical except ``add(...)`` accepts torch tensors in
-addition to numpy arrays (numpy is auto-uploaded for parity).
+addition to numpy arrays (numpy is auto-uploaded for parity), and
+``obs_storage_dtype`` can match the learner's float16/bfloat16 AMP dtype.
 
 Legal mask storage
 ------------------
@@ -27,7 +28,7 @@ path sees the same tensor shape as before.
 """
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 import numpy as np
 import torch
@@ -40,11 +41,27 @@ from junqi_rl.training.rollout import (
     RolloutBatch,
 )
 
-
 # Upper bound on per-env legal action count.  Empirically the kernel
 # emits < 200 actions; the compact flat action space is 16641 so 256 is
 # a conservative safety margin.  A single fallback path handles overflow.
 CSR_K_MAX = 256
+_OBS_STORAGE_DTYPES = frozenset((torch.float16, torch.bfloat16))
+
+
+def observation_storage_dtype(compute_dtype: torch.dtype) -> torch.dtype:
+    """Choose compact observation storage without per-minibatch AMP casts.
+
+    H20/Ampere-class training uses bfloat16 compute, so storing observations
+    in bfloat16 avoids converting every selected minibatch from float16.
+    Float32 training keeps the historical float16 storage to avoid doubling
+    the already-dominant rollout-buffer memory.
+    """
+
+    if compute_dtype in _OBS_STORAGE_DTYPES:
+        return compute_dtype
+    if compute_dtype == torch.float32:
+        return torch.float16
+    raise ValueError(f"unsupported observation compute dtype: {compute_dtype}")
 
 
 def _to_tensor(x, *, device: torch.device, dtype: torch.dtype) -> Tensor:
@@ -95,12 +112,13 @@ def _dense_mask_to_csr(
                               device=mask.device)
     local_idx = global_idx - row_starts[rows]                  # 0..counts_full[row]-1
 
-    # Truncate rows whose local_idx exceeds K_MAX.
+    # Truncate rows whose local_idx exceeds K_MAX. Always apply the mask:
+    # branching on ``keep.all()`` synchronises the CUDA stream every env step,
+    # while these index tensors contain only the sparse legal entries.
     keep = local_idx < K_MAX
-    if not bool(keep.all()):
-        rows = rows[keep]
-        cols = cols[keep]
-        local_idx = local_idx[keep]
+    rows = rows[keep]
+    cols = cols[keep]
+    local_idx = local_idx[keep]
 
     out_ids[rows, local_idx] = cols
 
@@ -130,8 +148,9 @@ def _csr_to_dense_selected(
     row_offsets = torch.arange(B, device=dev, dtype=torch.int64) * flat_action_dim
     flat_idx = (row_offsets[:, None] + sel_ids.to(torch.int64)).reshape(-1)
     flat_valid = valid.reshape(-1)
-    if flat_valid.any():
-        mask.view(-1)[flat_idx[flat_valid]] = True
+    # Empty advanced-index assignments are safe; avoid a device synchronisation
+    # from ``if flat_valid.any()`` on every PPO minibatch.
+    mask.view(-1)[flat_idx[flat_valid]] = True
     return mask
 
 
@@ -160,6 +179,7 @@ class RolloutBufferGPU:
         csr_k_max: int = CSR_K_MAX,
         random_opponent: bool = True,
         train_value_on_random_seats: bool = False,
+        obs_storage_dtype: torch.dtype = torch.float16,
     ) -> None:
         self.num_envs = num_envs
         self.steps_per_env = steps_per_env
@@ -171,6 +191,12 @@ class RolloutBufferGPU:
         self.device = torch.device(device)
         self.csr_legal_mask = bool(csr_legal_mask)
         self.csr_k_max = int(csr_k_max)
+        if obs_storage_dtype not in _OBS_STORAGE_DTYPES:
+            raise ValueError(
+                "obs_storage_dtype must be torch.float16 or torch.bfloat16; "
+                f"got {obs_storage_dtype}"
+            )
+        self.obs_storage_dtype = obs_storage_dtype
         # ``random_opponent=True`` (vs-random training) causes ``compute_returns``
         # to zero out advantages for seats 1, 3 (WEST, EAST = team 1) since
         # their actions came from a uniform-random policy and contain no
@@ -200,14 +226,17 @@ class RolloutBufferGPU:
         T = steps_per_env
         dev = self.device
 
-        # Observations (canonical frame) — stored in fp16 to halve memory.
-        # The policy's _encode runs under fp16 autocast anyway, so no precision loss.
+        # Observations (canonical frame) use the configured 16-bit AMP dtype.
+        # Matching H20's bfloat16 compute avoids a full observation conversion
+        # for every PPO minibatch while retaining the same memory footprint.
         self.obs_spatial = torch.zeros(
             (T, N, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE),
-            dtype=torch.float16, device=dev,
+            dtype=self.obs_storage_dtype, device=dev,
         )
         self.obs_global = torch.zeros(
-            (T, N, OBS_GLOBAL_DIMS), dtype=torch.float16, device=dev,
+            (T, N, OBS_GLOBAL_DIMS),
+            dtype=self.obs_storage_dtype,
+            device=dev,
         )
 
         # Actions (canonical frame)
@@ -265,14 +294,22 @@ class RolloutBufferGPU:
         actions,         # (N,)
         log_probs,       # (N,)
         values,          # (N,)
-        rewards,         # (N,)
-        dones,           # (N,)
+        rewards,         # (N,) or None when caller patches after env.step()
+        dones,           # (N,) or None when caller patches after env.step()
         seats,           # (N,)
     ) -> None:
         t = self._ptr
         dev = self.device
-        self.obs_spatial[t] = _to_tensor(obs_spatial, device=dev, dtype=torch.float16)
-        self.obs_global[t]  = _to_tensor(obs_global,  device=dev, dtype=torch.float16)
+        self.obs_spatial[t] = _to_tensor(
+            obs_spatial,
+            device=dev,
+            dtype=self.obs_storage_dtype,
+        )
+        self.obs_global[t] = _to_tensor(
+            obs_global,
+            device=dev,
+            dtype=self.obs_storage_dtype,
+        )
 
         # Legal mask: dense bool input from collector, stored as CSR or dense.
         lm = _to_tensor(legal_mask, device=dev, dtype=torch.bool)
@@ -284,8 +321,18 @@ class RolloutBufferGPU:
         self.actions[t]     = _to_tensor(actions,     device=dev, dtype=torch.int32)
         self.log_probs[t]   = _to_tensor(log_probs,   device=dev, dtype=torch.float32)
         self.values[t]      = _to_tensor(values,      device=dev, dtype=torch.float32)
-        self.rewards[t]     = _to_tensor(rewards,     device=dev, dtype=torch.float32)
-        self.dones[t]       = _to_tensor(dones,       device=dev, dtype=torch.bool)
+        if rewards is not None:
+            self.rewards[t] = _to_tensor(
+                rewards,
+                device=dev,
+                dtype=torch.float32,
+            )
+        if dones is not None:
+            self.dones[t] = _to_tensor(
+                dones,
+                device=dev,
+                dtype=torch.bool,
+            )
         self.seats[t]       = _to_tensor(seats,       device=dev, dtype=torch.int8)
         self._ptr += 1
         if self._ptr == self.steps_per_env:
@@ -644,4 +691,4 @@ class RolloutBufferGPU:
         return out
 
 
-__all__ = ["RolloutBufferGPU"]
+__all__ = ["RolloutBufferGPU", "observation_storage_dtype"]

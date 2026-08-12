@@ -24,6 +24,12 @@ def eval_head_to_head(*args: Any, **kwargs: Any) -> Any:
     return implementation(*args, **kwargs)
 
 
+def evaluate_paired_vs_random(*args: Any, **kwargs: Any) -> Any:
+    from .random_eval import evaluate_paired_vs_random as implementation
+
+    return implementation(*args, **kwargs)
+
+
 def record_game_with_policy(*args: Any, **kwargs: Any) -> Any:
     from .record import record_game_with_policy as implementation
 
@@ -36,6 +42,7 @@ __all__ = [
     "LeaguePool",
     "eval_head_to_head",
     "eval_vs_random",
+    "evaluate_paired_vs_random",
     "merge_evaluations",
     "record_game_with_policy",
     "wilson_interval",
