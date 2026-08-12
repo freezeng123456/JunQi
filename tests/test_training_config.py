@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 import pytest
+import yaml
 
 from junqi_rl.training.config import (
     TrainConfig,
@@ -81,3 +82,17 @@ def test_incompatible_setup_modes_are_rejected() -> None:
 
     with pytest.raises(ValueError, match="mutually exclusive"):
         validate_config(cfg)
+
+
+def test_all_tracked_training_configs_remain_compatible() -> None:
+    paths = sorted((ROOT / "configs").glob("*.yaml"))
+    paths += sorted((ROOT / "exps").glob("**/cfg.yaml"))
+
+    for path in paths:
+        values = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        try:
+            cfg = _dict_to_dataclass(TrainConfig, values)
+            cfg.ppo.net = cfg.net
+            validate_config(cfg)
+        except (TypeError, ValueError) as exc:
+            pytest.fail(f"{path.relative_to(ROOT)}: {exc}")
