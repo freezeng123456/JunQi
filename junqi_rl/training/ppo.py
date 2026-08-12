@@ -826,6 +826,14 @@ class PPOTrainer:
         """
         cfg = self.cfg
         all_metrics: list[dict] = []
+        if _is_distributed() and getattr(
+            rollout,
+            "uses_compact_history",
+            False,
+        ):
+            raise RuntimeError(
+                "compact_history currently supports single-GPU PPO only"
+            )
 
         for _ in range(cfg.num_epochs_per_rollout):
             batches = rollout.minibatches(

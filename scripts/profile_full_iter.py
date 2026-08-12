@@ -17,6 +17,11 @@ def main() -> None:
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--compile", action="store_true", default=False)
     ap.add_argument(
+        "--storage-mode",
+        choices=["full_obs", "compact_history"],
+        default="compact_history",
+    )
+    ap.add_argument(
         "--dtype",
         default="bfloat16",
         choices=["float16", "bfloat16", "float32"],
@@ -35,7 +40,8 @@ def main() -> None:
     N, T = args.num_envs, args.steps
     print(
         f"[profile] num_envs={N} steps={T} minibatch={args.minibatch} "
-        f"epochs={args.epochs} dtype={args.dtype}"
+        f"epochs={args.epochs} dtype={args.dtype} "
+        f"storage={args.storage_mode}"
     )
 
     rollout_world = GpuRollout(num_envs=N)
@@ -56,6 +62,11 @@ def main() -> None:
         net=net_cfg,
     )
     trainer = PPOTrainer(policy, ppo_cfg, device=device)
+    history = (
+        rollout_world.create_rollout_history(T)
+        if args.storage_mode == "compact_history"
+        else None
+    )
 
     buffer = RolloutBufferGPU(
         num_envs=N, steps_per_env=T,
@@ -65,7 +76,10 @@ def main() -> None:
         adv_filt_rate=ppo_cfg.adv_filt_rate,
         device=device,
         obs_storage_dtype=observation_storage_dtype(ppo_cfg.get_dtype()),
+        storage_mode=args.storage_mode,
+        history=history,
     )
+    print(f"[profile] rollout storage={buffer.storage_bytes() / 1024**3:.2f} GiB")
 
     rng = np.random.default_rng(42)
 

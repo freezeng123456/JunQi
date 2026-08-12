@@ -66,8 +66,8 @@ from junqi_core.board import (
     NUM_ON_BOARD_CELLS,
 )
 from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
-from junqi_core.rules import ShowMode, CAMP_INDICES, PieceType, SLOTS_PER_SEAT
-from junqi_core.setup import generate_random_setup, generate_random_lineup
+from junqi_core.rules import CAMP_INDICES, SLOTS_PER_SEAT, PieceType, ShowMode
+from junqi_core.setup import generate_random_lineup, generate_random_setup
 from junqi_core.setup_canonical import (
     CANONICAL_LINEUPS,
     generate_canonical_setup,
@@ -75,7 +75,6 @@ from junqi_core.setup_canonical import (
 from junqi_core.state import GameState
 
 from .gpu_world import _upload_zobrist_tables
-
 
 NUM_TRACKED_TYPES = 12
 FLAT_ACTION_DIM = 129 * 129  # 16641 — compact on-board action space
@@ -103,6 +102,119 @@ class _CudaArrayInterfaceView:
             "data":    (int(ptr), False),  # read-write
             "version": 2,
         }
+
+
+class GpuRolloutHistory:
+    """Compact device history with train-time observation reconstruction."""
+
+    def __init__(
+        self,
+        *,
+        num_steps: int,
+        num_envs: int,
+        show_mode: ShowMode,
+    ) -> None:
+        if not hasattr(_cuda, "DeviceRolloutHistory"):
+            raise RuntimeError(
+                "junqi_cuda was built without compact rollout history support; "
+                "rebuild it with `python3 build_cuda.py`"
+            )
+        self.num_steps = int(num_steps)
+        self.num_envs = int(num_envs)
+        self.show_mode = show_mode
+        self._impl = _cuda.DeviceRolloutHistory(
+            self.num_steps,
+            self.num_envs,
+        )
+
+    @property
+    def history_bytes(self) -> int:
+        return int(self._impl.history_bytes)
+
+    def snapshot(
+        self,
+        state,
+        acting_seats: "torch.Tensor",
+        step: int,
+    ) -> None:
+        import torch
+
+        if acting_seats.device.type != "cuda":
+            raise ValueError("acting_seats must be a CUDA tensor")
+        if acting_seats.dtype != torch.int8:
+            acting_seats = acting_seats.to(torch.int8)
+        if not acting_seats.is_contiguous():
+            acting_seats = acting_seats.contiguous()
+        if acting_seats.shape != (self.num_envs,):
+            raise ValueError(
+                f"acting_seats must have shape ({self.num_envs},), "
+                f"got {tuple(acting_seats.shape)}"
+            )
+        self._impl.snapshot(
+            state,
+            acting_seats.data_ptr(),
+            int(step),
+        )
+
+    def reconstruct(
+        self,
+        flat_indices: "torch.Tensor",
+        acting_seats: "torch.Tensor",
+        *,
+        dtype: "torch.dtype",
+    ) -> tuple["torch.Tensor", "torch.Tensor", "torch.Tensor"]:
+        """Rebuild one PPO minibatch entirely from device history."""
+
+        import torch
+
+        if flat_indices.device.type != "cuda" or acting_seats.device.type != "cuda":
+            raise ValueError("history indices and seats must be CUDA tensors")
+        if flat_indices.dtype != torch.int64:
+            flat_indices = flat_indices.to(torch.int64)
+        if acting_seats.dtype != torch.int8:
+            acting_seats = acting_seats.to(torch.int8)
+        flat_indices = flat_indices.contiguous()
+        acting_seats = acting_seats.contiguous()
+        if flat_indices.ndim != 1 or acting_seats.shape != flat_indices.shape:
+            raise ValueError("history indices and seats must be matching 1-D tensors")
+
+        batch_size = int(flat_indices.numel())
+        if batch_size <= 0:
+            raise ValueError("cannot reconstruct an empty history minibatch")
+        pointers = self._impl.reconstruct(
+            flat_indices.data_ptr(),
+            acting_seats.data_ptr(),
+            batch_size,
+            np.int8(self.show_mode.value),
+        )
+        if int(pointers["batch_size"]) != batch_size:
+            raise RuntimeError("CUDA history returned an unexpected batch size")
+
+        spatial = torch.as_tensor(
+            _CudaArrayInterfaceView(
+                pointers["d_spatial_ptr"],
+                (batch_size, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE),
+                "<f4",
+            ),
+            device=flat_indices.device,
+        ).to(dtype=dtype)
+        global_ = torch.as_tensor(
+            _CudaArrayInterfaceView(
+                pointers["d_global_ptr"],
+                (batch_size, OBS_GLOBAL_DIMS),
+                "<f4",
+            ),
+            device=flat_indices.device,
+        ).to(dtype=dtype)
+        legal_mask = torch.as_tensor(
+            _CudaArrayInterfaceView(
+                pointers["d_legal_mask_ptr"],
+                (batch_size, FLAT_ACTION_DIM),
+                "|b1",
+            ),
+            device=flat_indices.device,
+        )
+        return spatial, global_, legal_mask
 
 
 def _build_reset_tables() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -277,11 +389,14 @@ def _build_belief_prior_table() -> np.ndarray:
     Returns shape (30, 12) float32.  Camp slots are all-zero.
     Matches :func:`junqi_core.info_model._per_slot_prior_vector`.
     """
-    from junqi_core.rules import (
-        PIECE_COUNTS, STRONGHOLD_INDICES, FRONT_ROW_INDICES,
-        BACK_TWO_ROWS_INDICES, CAMP_INDICES,
-    )
     from junqi_core.info_model import TRACKED_TYPES
+    from junqi_core.rules import (
+        BACK_TWO_ROWS_INDICES,
+        CAMP_INDICES,
+        FRONT_ROW_INDICES,
+        PIECE_COUNTS,
+        STRONGHOLD_INDICES,
+    )
 
     table = np.zeros((30, 12), dtype=np.float32)
     for slot in range(30):
@@ -311,7 +426,7 @@ def _build_seat_strongholds() -> np.ndarray:
     Returns shape (8,) int16: [seat0_sh0, seat0_sh1, seat1_sh0, ...].
     """
     from junqi_core.board import index_to_pos
-    from junqi_core.rules import Seat, STRONGHOLD_INDICES
+    from junqi_core.rules import STRONGHOLD_INDICES, Seat
 
     sh_indices = sorted(STRONGHOLD_INDICES)  # [26, 28]
     result = np.zeros(8, dtype=np.int16)
@@ -452,6 +567,15 @@ class GpuRollout:
             canonical_styles=canonical_setup_styles,
             mixed_setup=self._mixed_setup,
             mixed_own_team_styles=self._mixed_own_team_styles,
+        )
+
+    def create_rollout_history(self, num_steps: int) -> GpuRolloutHistory:
+        """Allocate compact pre-action state history for one PPO rollout."""
+
+        return GpuRolloutHistory(
+            num_steps=num_steps,
+            num_envs=self.num_envs,
+            show_mode=self.show_mode,
         )
 
     @staticmethod
@@ -879,7 +1003,8 @@ class GpuRollout:
             Number of combined-setup entries in the new pool.
         """
         from junqi_rl.arrangement.pool_upload import (
-            arrangements_to_pool, refresh_gpu_setup_pool,
+            arrangements_to_pool,
+            refresh_gpu_setup_pool,
         )
         pool = arrangements_to_pool(samples, seat_idx)
         refresh_gpu_setup_pool(pool)

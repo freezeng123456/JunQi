@@ -138,6 +138,7 @@ from junqi_rl.training.config import (
     ArrangementTrainConfig,
     BeliefTrainConfig,
     EnvConfig,
+    RolloutTrainConfig,
     TrainConfig,
     _dataclass_to_dict,
     _dict_to_dataclass,
@@ -155,6 +156,7 @@ __all__ = [
     "EnvConfig",
     "JunqiNetConfig",
     "PPOConfig",
+    "RolloutTrainConfig",
     "TrainConfig",
     "_dataclass_to_dict",
     "_dict_to_dataclass",
@@ -230,6 +232,11 @@ def train(cfg: TrainConfig) -> None:
     world_size, global_rank, _local_rank = _init_distributed(cfg)
     is_rank0 = global_rank == 0
     is_distributed = world_size > 1
+    if is_distributed and cfg.rollout.storage_mode == "compact_history":
+        raise ValueError(
+            "rollout.storage_mode=compact_history currently supports "
+            "single-GPU training only"
+        )
 
     # ---- Reproducibility ----
     torch.manual_seed(cfg.seed)
@@ -406,6 +413,11 @@ def train(cfg: TrainConfig) -> None:
     rollout_random_opponent = cfg.random_opponent
     if cfg.env.use_gpu_rollout and device.type == "cuda":
         rollout_obs_dtype = observation_storage_dtype(cfg.ppo.get_dtype())
+        rollout_history = (
+            env.create_rollout_history(cfg.env.steps_per_env)
+            if cfg.rollout.storage_mode == "compact_history"
+            else None
+        )
         rollout = RolloutBufferGPU(
             num_envs=cfg.env.num_envs,
             steps_per_env=cfg.env.steps_per_env,
@@ -415,9 +427,13 @@ def train(cfg: TrainConfig) -> None:
             adv_filt_thresh=cfg.ppo.adv_filt_thresh,
             adv_filt_rate=cfg.ppo.adv_filt_rate,
             device=device,
+            csr_legal_mask=cfg.rollout.csr_legal_mask,
+            csr_k_max=cfg.rollout.csr_k_max,
             random_opponent=rollout_random_opponent,
             train_value_on_random_seats=cfg.train_value_on_random_seats,
             obs_storage_dtype=rollout_obs_dtype,
+            storage_mode=cfg.rollout.storage_mode,
+            history=rollout_history,
         )
         if is_rank0:
             mode = "vs-random" if rollout_random_opponent else "self-play"
@@ -427,8 +443,13 @@ def train(cfg: TrainConfig) -> None:
             shape_tag = "reward-shaping=ON" if shaping else "reward-shaping=OFF (terminal-only)"
             print(
                 "[train] RolloutBufferGPU "
-                f"(zero-CPU collect path, obs={rollout_obs_dtype}, "
+                f"(zero-CPU collect path, storage={cfg.rollout.storage_mode}, "
+                f"obs={rollout_obs_dtype}, "
                 f"mode={mode}, {v_tag}, {shape_tag})"
+            )
+            print(
+                f"[train] Rollout storage: "
+                f"{rollout.storage_bytes() / 1024**3:.2f} GiB"
             )
     else:
         rollout = RolloutBuffer(

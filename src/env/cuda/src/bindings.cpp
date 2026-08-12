@@ -724,6 +724,80 @@ global_ : np.ndarray  shape (N, 4, 28)          float32
             },
             "Raw device pointer. Shape (N, 28) float32, row-major.");
 
+    // --- DeviceRolloutHistory ---
+    py::class_<DeviceRolloutHistory>(m, "DeviceRolloutHistory",
+        "Compact GPU-resident history that reconstructs PPO minibatches on device.")
+        .def(
+            py::init<int, int>(),
+            py::arg("num_steps"),
+            py::arg("num_envs"),
+            "Allocate compact state history for (num_steps, num_envs).")
+        .def_readonly("num_steps", &DeviceRolloutHistory::num_steps)
+        .def_readonly("num_envs", &DeviceRolloutHistory::num_envs)
+        .def_readonly("history_bytes", &DeviceRolloutHistory::history_bytes)
+        .def_readonly("replay_capacity", &DeviceRolloutHistory::replay_capacity)
+        .def(
+            "snapshot",
+            [](DeviceRolloutHistory& history,
+               const DeviceGameStateBatch& state,
+               uintptr_t d_acting_seats_ptr,
+               int step) {
+                GpuScratch& scratch = GpuScratch::instance();
+                if (scratch.d_belief == nullptr ||
+                    scratch.belief_cap < state.num_envs) {
+                    throw std::runtime_error(
+                        "DeviceRolloutHistory.snapshot requires resident beliefs");
+                }
+                const int8_t* d_acting =
+                    reinterpret_cast<const int8_t*>(d_acting_seats_ptr);
+                history.snapshot(
+                    state,
+                    scratch.d_belief,
+                    d_acting,
+                    step);
+            },
+            py::arg("state"),
+            py::arg("d_acting_seats_ptr"),
+            py::arg("step"),
+            R"doc(
+Snapshot the current pre-action state, acting observer's belief, and
+CombatMemory slice into one history step. All copies remain device-to-device.
+)doc")
+        .def(
+            "reconstruct",
+            [](DeviceRolloutHistory& history,
+               uintptr_t d_flat_indices_ptr,
+               uintptr_t d_acting_seats_ptr,
+               int batch_size,
+               int8_t show_mode) {
+                const int64_t* d_indices =
+                    reinterpret_cast<const int64_t*>(d_flat_indices_ptr);
+                const int8_t* d_acting =
+                    reinterpret_cast<const int8_t*>(d_acting_seats_ptr);
+                RolloutHistoryReconstruction result = history.reconstruct(
+                    d_indices,
+                    d_acting,
+                    batch_size,
+                    show_mode);
+                py::dict output;
+                output["d_spatial_ptr"] =
+                    reinterpret_cast<uintptr_t>(result.d_spatial);
+                output["d_global_ptr"] =
+                    reinterpret_cast<uintptr_t>(result.d_global);
+                output["d_legal_mask_ptr"] =
+                    reinterpret_cast<uintptr_t>(result.d_legal_mask);
+                output["batch_size"] = result.batch_size;
+                return output;
+            },
+            py::arg("d_flat_indices_ptr"),
+            py::arg("d_acting_seats_ptr"),
+            py::arg("batch_size"),
+            py::arg("show_mode") = (int8_t)2,
+            R"doc(
+Gather selected compact states, rebuild acting-seat observations and legal
+masks on device, and return raw device pointers to reusable output buffers.
+)doc");
+
     // --- build_observation_single_seat ---
     m.def("build_observation_single_seat",
         [](const DeviceGameStateBatch& state,

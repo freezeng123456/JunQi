@@ -25,6 +25,13 @@ average of ~27 legal actions per env, this is a ~40x memory reduction
 for the mask.  The dense mask is reconstructed lazily in
 :meth:`minibatches` only for the selected transitions, so the gradient
 path sees the same tensor shape as before.
+
+Compact history
+---------------
+With ``storage_mode="compact_history"``, observations and legal masks are not
+stored per transition.  A :class:`~junqi_rl.gpu_rollout.GpuRolloutHistory`
+keeps compact simulator state on-device and reconstructs only selected PPO
+minibatches.  ``full_obs`` remains the compatibility default.
 """
 from __future__ import annotations
 
@@ -180,6 +187,8 @@ class RolloutBufferGPU:
         random_opponent: bool = True,
         train_value_on_random_seats: bool = False,
         obs_storage_dtype: torch.dtype = torch.float16,
+        storage_mode: str = "full_obs",
+        history=None,
     ) -> None:
         self.num_envs = num_envs
         self.steps_per_env = steps_per_env
@@ -191,6 +200,16 @@ class RolloutBufferGPU:
         self.device = torch.device(device)
         self.csr_legal_mask = bool(csr_legal_mask)
         self.csr_k_max = int(csr_k_max)
+        if storage_mode not in {"full_obs", "compact_history"}:
+            raise ValueError(
+                "storage_mode must be 'full_obs' or 'compact_history'; "
+                f"got {storage_mode!r}"
+            )
+        self.storage_mode = storage_mode
+        self.uses_compact_history = storage_mode == "compact_history"
+        if self.uses_compact_history and history is None:
+            raise ValueError("compact_history storage requires a history object")
+        self.history = history
         if obs_storage_dtype not in _OBS_STORAGE_DTYPES:
             raise ValueError(
                 "obs_storage_dtype must be torch.float16 or torch.bfloat16; "
@@ -226,26 +245,36 @@ class RolloutBufferGPU:
         T = steps_per_env
         dev = self.device
 
-        # Observations (canonical frame) use the configured 16-bit AMP dtype.
-        # Matching H20's bfloat16 compute avoids a full observation conversion
-        # for every PPO minibatch while retaining the same memory footprint.
-        self.obs_spatial = torch.zeros(
-            (T, N, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE),
-            dtype=self.obs_storage_dtype, device=dev,
-        )
-        self.obs_global = torch.zeros(
-            (T, N, OBS_GLOBAL_DIMS),
-            dtype=self.obs_storage_dtype,
-            device=dev,
-        )
+        if self.uses_compact_history:
+            # Observation/legal tensors are rebuilt from device state history
+            # only for the selected PPO minibatch.
+            self.obs_spatial = None
+            self.obs_global = None
+        else:
+            # Observations (canonical frame) use the configured 16-bit AMP
+            # dtype. Matching H20's bfloat16 compute avoids a full observation
+            # conversion for every PPO minibatch.
+            self.obs_spatial = torch.zeros(
+                (T, N, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE),
+                dtype=self.obs_storage_dtype,
+                device=dev,
+            )
+            self.obs_global = torch.zeros(
+                (T, N, OBS_GLOBAL_DIMS),
+                dtype=self.obs_storage_dtype,
+                device=dev,
+            )
 
         # Actions (canonical frame)
         self.actions = torch.zeros((T, N), dtype=torch.int32, device=dev)
 
-        # Legal mask.  Two storage modes:
-        #   csr_legal_mask=True  (default): (T, N, K_MAX) int32 ids + (T, N) counts
-        #   csr_legal_mask=False (legacy):  (T, N, FLAT) bool dense
-        if self.csr_legal_mask:
+        # Compact history rebuilds legal masks from restored state.
+        if self.uses_compact_history:
+            self.legal_mask = None
+            self.legal_ids = None
+            self.legal_counts = None
+        elif self.csr_legal_mask:
+            # Full-observation CSR mode: (T,N,K_MAX) ids + (T,N) counts.
             self.legal_ids = torch.zeros(
                 (T, N, self.csr_k_max), dtype=torch.int32, device=dev,
             )
@@ -281,6 +310,48 @@ class RolloutBufferGPU:
         self._ptr: int = 0
         self._full: bool = False
 
+    def snapshot_history(
+        self,
+        rollout_world,
+        acting_seats: Tensor,
+        step: int,
+    ) -> None:
+        """Save current pre-action state when compact history is enabled."""
+
+        if self.uses_compact_history:
+            self.history.snapshot(
+                rollout_world.state,
+                acting_seats,
+                step,
+            )
+
+    def storage_bytes(self) -> int:
+        """Return persistent rollout/history tensor bytes (excluding scratch)."""
+
+        tensor_names = (
+            "obs_spatial",
+            "obs_global",
+            "actions",
+            "legal_mask",
+            "legal_ids",
+            "legal_counts",
+            "log_probs",
+            "values",
+            "rewards",
+            "dones",
+            "seats",
+            "returns_",
+            "advantages_",
+        )
+        total = 0
+        for name in tensor_names:
+            value = getattr(self, name, None)
+            if isinstance(value, Tensor):
+                total += value.numel() * value.element_size()
+        if self.uses_compact_history:
+            total += int(self.history.history_bytes)
+        return total
+
     # -------------------------------------------------------------------------
     # Data insertion
     # -------------------------------------------------------------------------
@@ -300,23 +371,28 @@ class RolloutBufferGPU:
     ) -> None:
         t = self._ptr
         dev = self.device
-        self.obs_spatial[t] = _to_tensor(
-            obs_spatial,
-            device=dev,
-            dtype=self.obs_storage_dtype,
-        )
-        self.obs_global[t] = _to_tensor(
-            obs_global,
-            device=dev,
-            dtype=self.obs_storage_dtype,
-        )
+        if not self.uses_compact_history:
+            self.obs_spatial[t] = _to_tensor(
+                obs_spatial,
+                device=dev,
+                dtype=self.obs_storage_dtype,
+            )
+            self.obs_global[t] = _to_tensor(
+                obs_global,
+                device=dev,
+                dtype=self.obs_storage_dtype,
+            )
 
-        # Legal mask: dense bool input from collector, stored as CSR or dense.
-        lm = _to_tensor(legal_mask, device=dev, dtype=torch.bool)
-        if self.csr_legal_mask:
-            _dense_mask_to_csr(lm, self.legal_ids[t], self.legal_counts[t])
-        else:
-            self.legal_mask[t] = lm
+            # Dense input mask is retained as CSR or dense in full-obs mode.
+            lm = _to_tensor(legal_mask, device=dev, dtype=torch.bool)
+            if self.csr_legal_mask:
+                _dense_mask_to_csr(
+                    lm,
+                    self.legal_ids[t],
+                    self.legal_counts[t],
+                )
+            else:
+                self.legal_mask[t] = lm
 
         self.actions[t]     = _to_tensor(actions,     device=dev, dtype=torch.int32)
         self.log_probs[t]   = _to_tensor(log_probs,   device=dev, dtype=torch.float32)
@@ -486,18 +562,31 @@ class RolloutBufferGPU:
         total = T * N
         dev = self.device
 
-        # Flatten (T, N, ...) → (T*N, ...) via ``.view``: zero-copy.
-        obs_sp = self.obs_spatial.view(
-            total, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE,
-        )
-        obs_gl = self.obs_global.view(total, OBS_GLOBAL_DIMS)
+        # Flatten persistent scalar data. Full-observation mode also exposes
+        # zero-copy observation views; compact mode reconstructs them below.
+        if self.uses_compact_history:
+            obs_sp = None
+            obs_gl = None
+        else:
+            obs_sp = self.obs_spatial.view(
+                total,
+                OBS_CHANNELS,
+                BOARD_SIZE,
+                BOARD_SIZE,
+            )
+            obs_gl = self.obs_global.view(total, OBS_GLOBAL_DIMS)
         act    = self.actions.view(total)
         lp     = self.log_probs.view(total)
         adv    = self.advantages_.view(total)
         ret    = self.returns_.view(total)
         val    = self.values.view(total)
-        # Legal mask: flattened view onto CSR or dense storage.
-        if self.csr_legal_mask:
+        # Legal mask: compact mode rebuilds from state; full mode uses stored
+        # CSR/dense data.
+        if self.uses_compact_history:
+            flat_ids = None
+            flat_cnt = None
+            lm = None
+        elif self.csr_legal_mask:
             flat_ids = self.legal_ids.view(total, self.csr_k_max)
             flat_cnt = self.legal_counts.view(total)
             lm = None  # reconstructed per-minibatch below
@@ -625,18 +714,29 @@ class RolloutBufferGPU:
             vo  = vo_flags[start : start + batch_size]
             if idx.numel() == 0:
                 continue
-            if self.csr_legal_mask:
+            seats_batch = seats_flat.index_select(0, idx)
+            if self.uses_compact_history:
+                obs_sp_batch, obs_gl_batch, lm_batch = self.history.reconstruct(
+                    idx,
+                    seats_batch,
+                    dtype=self.obs_storage_dtype,
+                )
+            elif self.csr_legal_mask:
                 lm_batch = _csr_to_dense_selected(
                     flat_ids, flat_cnt, idx, FLAT_ACTION_DIM,
                 )
+                obs_sp_batch = obs_sp.index_select(0, idx)
+                obs_gl_batch = obs_gl.index_select(0, idx)
             else:
                 lm_batch = lm.index_select(0, idx)
+                obs_sp_batch = obs_sp.index_select(0, idx)
+                obs_gl_batch = obs_gl.index_select(0, idx)
             # advantages: value-only samples carry adv=0 (already zeroed by
             # compute_returns) which is also harmless after normalisation —
             # the PPO trainer additionally masks them out.
             yield RolloutBatch(
-                obs_spatial=obs_sp.index_select(0, idx),
-                obs_global=obs_gl.index_select(0, idx),
+                obs_spatial=obs_sp_batch,
+                obs_global=obs_gl_batch,
                 legal_mask=lm_batch,
                 actions=act.index_select(0, idx).to(torch.int64),
                 old_log_probs=lp.index_select(0, idx),
@@ -676,6 +776,9 @@ class RolloutBufferGPU:
             "rollout/mean_advantage": float(stacked[2]),
             "rollout/std_advantage":  float(stacked[3]),
             "rollout/num_valid":      float(stacked[4]),
+            "rollout/storage_gib": (
+                float(self.storage_bytes()) / float(1024**3)
+            ),
         }
         # F-5: filter pipeline diagnostics. Surfaced in per-rollout logs so
         # "loss_p=0.0" is debuggable: was it the adv filter killing every

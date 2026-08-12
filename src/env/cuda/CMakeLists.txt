@@ -60,6 +60,7 @@ set(JUNQI_CUDA_KERNELS
   src/observation.cu
   src/belief.cu
   src/combat_memory.cu
+  src/rollout_history.cu
 )
 
 set(JUNQI_CUDA_HEADERS
