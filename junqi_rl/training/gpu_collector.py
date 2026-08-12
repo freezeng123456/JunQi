@@ -309,6 +309,10 @@ def collect_rollout_gpu(
             f"num_envs mismatch: GpuRollout={rollout_world.num_envs} "
             f"buffer={buffer.num_envs}"
         )
+    if getattr(buffer, "uses_compact_history", False):
+        raise RuntimeError(
+            "compact_history requires collect_rollout_gpu_v2"
+        )
 
     N = rollout_world.num_envs
     T = buffer.steps_per_env
@@ -815,6 +819,7 @@ def collect_rollout_gpu_v2(
         # was removed to keep the hot path simple. ``buffer.dones[t]`` is
         # set to ``fired_t`` (just-terminated this step) below, which is
         # exactly what GAE needs to truncate bootstrap.
+        buffer.snapshot_history(rollout_world, acting_t, t)
         buffer.add(
             obs_spatial=obs_sp_t,
             obs_global=obs_gl_t,

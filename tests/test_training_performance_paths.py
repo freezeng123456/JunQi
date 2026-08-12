@@ -110,6 +110,23 @@ def test_distributed_ppo_still_aligns_minibatch_count(monkeypatch) -> None:
     assert metrics["train/num_updates"] == 2.0
 
 
+def test_compact_history_rejects_ddp_until_index_plans_are_shared(
+    monkeypatch,
+) -> None:
+    trainer = object.__new__(PPOTrainer)
+    trainer.cfg = SimpleNamespace(
+        num_epochs_per_rollout=1,
+        minibatch_size=2,
+    )
+    trainer._nan_skip_count = 0
+    trainer._grad_nan_skip_count = 0
+    rollout = SimpleNamespace(uses_compact_history=True)
+    monkeypatch.setattr(ppo_module, "_is_distributed", lambda: True)
+
+    with pytest.raises(RuntimeError, match="single-GPU"):
+        trainer.train_epoch(rollout)
+
+
 def test_h20_observation_storage_matches_bfloat16_compute() -> None:
     assert observation_storage_dtype(torch.bfloat16) == torch.bfloat16
     assert observation_storage_dtype(torch.float16) == torch.float16

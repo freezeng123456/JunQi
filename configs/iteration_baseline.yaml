@@ -38,6 +38,13 @@ arr:
 belief:
   enabled: false
 
+# Ataraxos-style zero-retrieval path: save compact device state and rebuild
+# selected observations/legal masks on the GPU during PPO updates.
+rollout:
+  storage_mode: compact_history
+  csr_legal_mask: true
+  csr_k_max: 256
+
 save_dir: exps/iteration_baseline
 total_rollouts: 100
 save_every: 25

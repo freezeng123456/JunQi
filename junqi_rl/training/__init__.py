@@ -23,6 +23,7 @@ from .config import (
     ArrangementTrainConfig,
     BeliefTrainConfig,
     EnvConfig,
+    RolloutTrainConfig,
     TrainConfig,
     load_config,
     validate_config,
@@ -35,6 +36,7 @@ from .gpu_collector import (
 from .ppo import EMAPolicy, PPOConfig, PPOTrainer, power_schedule
 from .rollout import RolloutBatch, RolloutBuffer
 from .rollout_gpu import RolloutBufferGPU
+from .rollout_storage import RolloutStorageEstimate, estimate_rollout_storage
 
 __all__ = [
     "ArrangementTrainConfig",
@@ -46,11 +48,14 @@ __all__ = [
     "RolloutBatch",
     "RolloutBuffer",
     "RolloutBufferGPU",
+    "RolloutStorageEstimate",
+    "RolloutTrainConfig",
     "TrainConfig",
     "build_legal_mask_batch_gpu",
     "collect_rollout",
     "collect_rollout_gpu",
     "collect_rollout_gpu_v2",
+    "estimate_rollout_storage",
     "load_config",
     "power_schedule",
     "validate_config",

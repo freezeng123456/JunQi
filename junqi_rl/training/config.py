@@ -62,6 +62,15 @@ class BeliefTrainConfig:
 
 
 @dataclass
+class RolloutTrainConfig:
+    """GPU rollout storage strategy."""
+
+    storage_mode: str = "full_obs"
+    csr_legal_mask: bool = True
+    csr_k_max: int = 256
+
+
+@dataclass
 class TrainConfig:
     """Complete training configuration."""
 
@@ -70,6 +79,7 @@ class TrainConfig:
     ppo: PPOConfig = field(default_factory=PPOConfig)
     arr: ArrangementTrainConfig = field(default_factory=ArrangementTrainConfig)
     belief: BeliefTrainConfig = field(default_factory=BeliefTrainConfig)
+    rollout: RolloutTrainConfig = field(default_factory=RolloutTrainConfig)
 
     save_dir: str = "exps/default"
     total_rollouts: int = 10_000
@@ -229,6 +239,7 @@ def validate_config(cfg: TrainConfig) -> None:
         "belief.refresh_every": cfg.belief.refresh_every,
         "belief.buffer_capacity": cfg.belief.buffer_capacity,
         "belief.infer_chunk_size": cfg.belief.infer_chunk_size,
+        "rollout.csr_k_max": cfg.rollout.csr_k_max,
     }
     invalid = [name for name, value in positive.items() if value <= 0]
     if invalid:
@@ -242,6 +253,14 @@ def validate_config(cfg: TrainConfig) -> None:
             "ppo.lr_schedule_unit must be 'grad_step' or 'rollout'"
         )
     cfg.ppo.get_dtype()
+    if cfg.rollout.storage_mode not in {"full_obs", "compact_history"}:
+        raise ValueError(
+            "rollout.storage_mode must be 'full_obs' or 'compact_history'"
+        )
+    if cfg.rollout.storage_mode == "compact_history" and not cfg.env.use_gpu_rollout:
+        raise ValueError(
+            "compact_history requires env.use_gpu_rollout=true"
+        )
     if cfg.mixed_setup and cfg.fixed_setup_styles:
         raise ValueError(
             "mixed_setup and fixed_setup_styles are mutually exclusive"
@@ -301,6 +320,7 @@ __all__ = [
     "ArrangementTrainConfig",
     "BeliefTrainConfig",
     "EnvConfig",
+    "RolloutTrainConfig",
     "TrainConfig",
     "_dataclass_to_dict",
     "_dict_to_dataclass",

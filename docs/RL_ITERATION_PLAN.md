@@ -32,6 +32,23 @@ checkpoint 的单次胜率。
 
 ## 1. 四级实验漏斗
 
+### Rollout 存储模式
+
+H20 单卡基线使用：
+
+```yaml
+rollout:
+  storage_mode: compact_history
+```
+
+该模式不再为每个 transition 保存完整 `412×17×17` 观测和 legal mask。
+Collect 阶段只在 GPU 保存重建所需的棋局 SoA、move-history、acting observer 的
+belief/CombatMemory 切片；PPO 选出 minibatch 后，再由 CUDA 恢复状态并重建观测。
+`N=128,T=512` 的持久 rollout 存储估算由约 14.6 GiB 降至约 1.48 GiB。
+
+兼容模式 `full_obs` 保留原实现。`compact_history` 当前仅支持单 GPU，启用前必须
+重新执行 `python3 build_cuda.py` 并通过 `tests/test_compact_rollout_history.py`。
+
 ### L0：配置检查
 
 只解析配置，不分配模型和环境：

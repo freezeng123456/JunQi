@@ -45,7 +45,7 @@ from .env import (
 # prevent the rest of the package from loading.  The import will raise
 # ImportError at instantiation time if the CUDA extension is absent.
 from .env_gpu import VectorJunqiEnvGPU  # noqa: E402
-from .gpu_rollout import GpuRollout  # noqa: E402
+from .gpu_rollout import GpuRollout, GpuRolloutHistory  # noqa: E402
 from .gpu_world import GpuWorld  # noqa: E402
 
 __all__ = [
@@ -59,6 +59,7 @@ __all__ = [
     # env
     "ExperienceBuffer",
     "GpuRollout",
+    "GpuRolloutHistory",
     "GpuWorld",
     "JunqiEnv",
     "JunqiStepInfo",

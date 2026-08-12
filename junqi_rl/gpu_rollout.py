@@ -105,6 +105,119 @@ class _CudaArrayInterfaceView:
         }
 
 
+class GpuRolloutHistory:
+    """Compact device history with train-time observation reconstruction."""
+
+    def __init__(
+        self,
+        *,
+        num_steps: int,
+        num_envs: int,
+        show_mode: ShowMode,
+    ) -> None:
+        if not hasattr(_cuda, "DeviceRolloutHistory"):
+            raise RuntimeError(
+                "junqi_cuda was built without compact rollout history support; "
+                "rebuild it with `python3 build_cuda.py`"
+            )
+        self.num_steps = int(num_steps)
+        self.num_envs = int(num_envs)
+        self.show_mode = show_mode
+        self._impl = _cuda.DeviceRolloutHistory(
+            self.num_steps,
+            self.num_envs,
+        )
+
+    @property
+    def history_bytes(self) -> int:
+        return int(self._impl.history_bytes)
+
+    def snapshot(
+        self,
+        state,
+        acting_seats: "torch.Tensor",
+        step: int,
+    ) -> None:
+        import torch
+
+        if acting_seats.device.type != "cuda":
+            raise ValueError("acting_seats must be a CUDA tensor")
+        if acting_seats.dtype != torch.int8:
+            acting_seats = acting_seats.to(torch.int8)
+        if not acting_seats.is_contiguous():
+            acting_seats = acting_seats.contiguous()
+        if acting_seats.shape != (self.num_envs,):
+            raise ValueError(
+                f"acting_seats must have shape ({self.num_envs},), "
+                f"got {tuple(acting_seats.shape)}"
+            )
+        self._impl.snapshot(
+            state,
+            acting_seats.data_ptr(),
+            int(step),
+        )
+
+    def reconstruct(
+        self,
+        flat_indices: "torch.Tensor",
+        acting_seats: "torch.Tensor",
+        *,
+        dtype: "torch.dtype",
+    ) -> tuple["torch.Tensor", "torch.Tensor", "torch.Tensor"]:
+        """Rebuild one PPO minibatch entirely from device history."""
+
+        import torch
+
+        if flat_indices.device.type != "cuda" or acting_seats.device.type != "cuda":
+            raise ValueError("history indices and seats must be CUDA tensors")
+        if flat_indices.dtype != torch.int64:
+            flat_indices = flat_indices.to(torch.int64)
+        if acting_seats.dtype != torch.int8:
+            acting_seats = acting_seats.to(torch.int8)
+        flat_indices = flat_indices.contiguous()
+        acting_seats = acting_seats.contiguous()
+        if flat_indices.ndim != 1 or acting_seats.shape != flat_indices.shape:
+            raise ValueError("history indices and seats must be matching 1-D tensors")
+
+        batch_size = int(flat_indices.numel())
+        if batch_size <= 0:
+            raise ValueError("cannot reconstruct an empty history minibatch")
+        pointers = self._impl.reconstruct(
+            flat_indices.data_ptr(),
+            acting_seats.data_ptr(),
+            batch_size,
+            np.int8(self.show_mode.value),
+        )
+        if int(pointers["batch_size"]) != batch_size:
+            raise RuntimeError("CUDA history returned an unexpected batch size")
+
+        spatial = torch.as_tensor(
+            _CudaArrayInterfaceView(
+                pointers["d_spatial_ptr"],
+                (batch_size, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE),
+                "<f4",
+            ),
+            device=flat_indices.device,
+        ).to(dtype=dtype)
+        global_ = torch.as_tensor(
+            _CudaArrayInterfaceView(
+                pointers["d_global_ptr"],
+                (batch_size, OBS_GLOBAL_DIMS),
+                "<f4",
+            ),
+            device=flat_indices.device,
+        ).to(dtype=dtype)
+        legal_mask = torch.as_tensor(
+            _CudaArrayInterfaceView(
+                pointers["d_legal_mask_ptr"],
+                (batch_size, FLAT_ACTION_DIM),
+                "|b1",
+            ),
+            device=flat_indices.device,
+        )
+        return spatial, global_, legal_mask
+
+
 def _build_reset_tables() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Build the constant tables for device-side reset.
 
@@ -452,6 +565,15 @@ class GpuRollout:
             canonical_styles=canonical_setup_styles,
             mixed_setup=self._mixed_setup,
             mixed_own_team_styles=self._mixed_own_team_styles,
+        )
+
+    def create_rollout_history(self, num_steps: int) -> GpuRolloutHistory:
+        """Allocate compact pre-action state history for one PPO rollout."""
+
+        return GpuRolloutHistory(
+            num_steps=num_steps,
+            num_envs=self.num_envs,
+            show_mode=self.show_mode,
         )
 
     @staticmethod

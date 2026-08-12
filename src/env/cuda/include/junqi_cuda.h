@@ -182,6 +182,100 @@ struct DeviceObservationSingleBatch {
 };
 
 // ---------------------------------------------------------------------------
+// DeviceRolloutHistory — compact GPU-resident training history.
+//
+// Stores only state required to reconstruct the acting seat's observation and
+// legal-action mask. Belief and CombatMemory are saved for the acting observer
+// only (rather than all four observers), reducing history storage by 4x for
+// those dominant fields. A gathered minibatch is restored into temporary
+// DeviceGameStateBatch/DeviceObservationSingleBatch buffers on device.
+// ---------------------------------------------------------------------------
+struct RolloutHistoryReconstruction {
+  const float* d_spatial = nullptr;  // (B, NUM_OBS_CHANNELS, 17, 17)
+  const float* d_global = nullptr;   // (B, NUM_GLOBAL_DIMS)
+  const bool* d_legal_mask = nullptr;  // (B, FLAT_ACTION_SPACE)
+  int batch_size = 0;
+};
+
+struct DeviceRolloutHistory {
+  int num_steps = 0;
+  int num_envs = 0;
+  int replay_capacity = 0;
+  uint64_t history_bytes = 0;
+
+  // State fields read by observation/legal kernels. Layout is
+  // (num_steps, num_envs, stride), flattened with env as the inner row.
+  int8_t* d_piece_seat_arr = nullptr;
+  int8_t* d_piece_type_arr = nullptr;
+  bool* d_alive = nullptr;
+  int8_t* d_pos_x = nullptr;
+  int8_t* d_pos_y = nullptr;
+  int8_t* d_zero_x = nullptr;
+  int8_t* d_zero_y = nullptr;
+  int16_t* d_move_count_arr = nullptr;
+  int16_t* d_active_eat_arr = nullptr;
+  int16_t* d_passive_surv_arr = nullptr;
+  int8_t* d_death_reason_arr = nullptr;
+  int16_t* d_death_loc_flat_arr = nullptr;
+  int16_t* d_cell_piece_id = nullptr;
+  bool* d_seat_dead_arr = nullptr;
+  bool* d_seat_flag_revealed_arr = nullptr;
+  int8_t* d_turn = nullptr;
+  int32_t* d_move_counter = nullptr;
+  int32_t* d_moves_since_last_combat = nullptr;
+  int16_t* d_move_history = nullptr;
+  int32_t* d_history_write_idx = nullptr;
+  int32_t* d_history_count = nullptr;
+
+  // Acting-observer slice only: (T, N, 12, 289).
+  float* d_observer_belief = nullptr;
+
+  // Acting-observer CombatMemory slice only: (T, N, 120).
+  uint64_t* d_cm_direct_lo = nullptr;
+  uint64_t* d_cm_direct_hi = nullptr;
+  uint16_t* d_cm_direct_type = nullptr;
+  int16_t* d_cm_last_direct_step = nullptr;
+  int16_t* d_cm_direct_other_count = nullptr;
+  uint64_t* d_cm_chain_lo = nullptr;
+  uint64_t* d_cm_chain_hi = nullptr;
+  uint16_t* d_cm_chain_type = nullptr;
+  int16_t* d_cm_last_chain_step = nullptr;
+  uint64_t* d_cm_eaten_by_pid_lo = nullptr;
+  uint64_t* d_cm_eaten_by_pid_hi = nullptr;
+  int8_t* d_cm_rank_floor = nullptr;
+  int16_t* d_cm_rank_floor_step = nullptr;
+  bool* d_cm_is_gongb = nullptr;
+  bool* d_cm_not_gongb = nullptr;
+  bool* d_cm_attacked_by_known_gongb = nullptr;
+
+  // Reusable reconstruction scratch, grown to the largest PPO minibatch.
+  DeviceGameStateBatch* replay_state = nullptr;
+  DeviceObservationSingleBatch* replay_obs = nullptr;
+  float* d_replay_belief = nullptr;
+
+  DeviceRolloutHistory(int num_steps, int num_envs);
+  ~DeviceRolloutHistory();
+  DeviceRolloutHistory(const DeviceRolloutHistory&) = delete;
+  DeviceRolloutHistory& operator=(const DeviceRolloutHistory&) = delete;
+
+  void snapshot(
+    const DeviceGameStateBatch& state,
+    const float* d_belief,
+    const int8_t* d_acting_seats,
+    int step,
+    int stream_id = 0
+  );
+
+  RolloutHistoryReconstruction reconstruct(
+    const int64_t* d_flat_indices,
+    const int8_t* d_acting_seats,
+    int batch_size,
+    int8_t show_mode = 2,
+    int stream_id = 0
+  );
+};
+
+// ---------------------------------------------------------------------------
 // GpuScratch — per-process singleton holding all transient device / pinned
 // buffers that previously went through cudaMalloc/cudaFree on every call.
 //

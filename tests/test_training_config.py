@@ -35,6 +35,7 @@ def test_iteration_baseline_is_sparse_and_valid() -> None:
     assert cfg.arr.enabled is False
     assert cfg.belief.enabled is False
     assert cfg.mixed_setup is True
+    assert cfg.rollout.storage_mode == "compact_history"
 
 
 def test_nested_cli_overrides_are_typed_yaml_values() -> None:
@@ -81,6 +82,15 @@ def test_incompatible_setup_modes_are_rejected() -> None:
     )
 
     with pytest.raises(ValueError, match="mutually exclusive"):
+        validate_config(cfg)
+
+
+def test_compact_history_requires_gpu_rollout() -> None:
+    cfg = TrainConfig()
+    cfg.rollout.storage_mode = "compact_history"
+    cfg.env.use_gpu_rollout = False
+
+    with pytest.raises(ValueError, match="use_gpu_rollout"):
         validate_config(cfg)
 
 
