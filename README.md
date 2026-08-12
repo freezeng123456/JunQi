@@ -148,6 +148,7 @@ python scripts/train.py --config configs/default.yaml
 - `docs/CUDA_ARCHITECTURE.md`：CUDA 状态和内核布局。
 - `docs/DECISIONS.md`：架构决策记录。
 - `docs/REPLAY.md`：复盘格式和工具。
+- `docs/RL_ITERATION_PLAN.md`：分级门禁、实验漏斗与模型晋级标准。
 - `docs/MAINTENANCE_2026-07-28.md`：本轮修复、验证边界与后续建议。
 - `docs/PROGRESS_2026Q2_CURRICULUM.md`：当前训练实验状态。
 

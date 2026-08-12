@@ -15,8 +15,6 @@ Example::
 from __future__ import annotations
 
 import argparse
-import math
-import os
 import sys
 from pathlib import Path
 
@@ -28,19 +26,6 @@ _JUNQI_RL = ROOT / "junqi_rl"
 for _p in (str(ROOT), str(_JUNQI_RL)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
-
-
-def _wilson_ci(wins: int, n: int, z: float = 1.96) -> tuple[float, float]:
-    """Wilson score interval for binomial proportion."""
-    if n == 0:
-        return float("nan"), float("nan")
-    p = wins / n
-    denom = 1.0 + z * z / n
-    centre = p + z * z / (2 * n)
-    margin = z * math.sqrt((p * (1 - p) + z * z / (4 * n)) / n)
-    lo = (centre - margin) / denom
-    hi = (centre + margin) / denom
-    return max(0.0, lo), min(1.0, hi)
 
 
 def main() -> None:
@@ -58,7 +43,7 @@ def main() -> None:
     if not torch.cuda.is_available():
         raise SystemExit("CUDA required for eval_random_dense")
 
-    from junqi_rl.analysis.evaluate import eval_vs_random
+    from junqi_rl.analysis.random_eval import evaluate_vs_random_gpu
     from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
 
     with open(args.config, encoding="utf-8") as f:
@@ -84,32 +69,34 @@ def main() -> None:
         policy.load_state_dict(sd)
     policy.eval()
 
-    stats = eval_vs_random(
+    stats = evaluate_vs_random_gpu(
         policy,
+        num_envs=min(64, args.num_games),
         num_games=args.num_games,
         trained_team=args.trained_team,
-        max_steps=args.max_steps,
+        max_moves=args.max_steps,
         device=args.device,
-        seed_base=args.seed_base,
+        seed=args.seed_base,
         greedy=args.greedy,
     )
 
-    n = stats["num_games"]
-    wins = int(round(stats["trained_win_rate"] * n))
-    lo, hi = _wilson_ci(wins, n)
+    requested = int(stats["eval/requested_games"])
+    completed = int(stats["eval/num_games"])
+    low = stats["eval/win_rate_ci95_low"]
+    high = stats["eval/win_rate_ci95_high"]
 
     print(f"ckpt:     {args.ckpt}")
-    print(f"games:    {n}")
-    print(f"win:      {stats['trained_win_rate']:.4f}")
-    print(f"loss:     {stats['trained_loss_rate']:.4f}")
-    print(f"draw:     {stats['draw_rate']:.4f}")
-    print(f"ongoing:  {stats['ongoing_rate']:.4f}")
-    print(f"avg_len:  {stats['mean_length']:.1f}")
-    print(f"Wilson95: [{lo:.4f}, {hi:.4f}]")
-    if hi >= 0.90:
-        print("=> 90% bar: CI upper bound >= 0.90 (strong evidence)")
-    elif lo >= 0.90:
+    print(f"games:    {completed}/{requested}")
+    print(f"win:      {stats['eval/win_rate']:.4f}")
+    print(f"loss:     {stats['eval/loss_rate']:.4f}")
+    print(f"draw:     {stats['eval/draw_rate']:.4f}")
+    print(f"ongoing:  {stats['eval/ongoing_rate']:.4f}")
+    print(f"avg_len:  {stats['eval/avg_game_len']:.1f}")
+    print(f"Wilson95: [{low:.4f}, {high:.4f}]")
+    if low >= 0.90:
         print("=> 90% bar: CI lower bound >= 0.90 (passed)")
+    elif high >= 0.90:
+        print("=> 90% bar: CI includes 0.90 (more games required)")
     else:
         print("=> 90% bar: not yet established at 95% confidence")
 

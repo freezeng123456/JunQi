@@ -40,7 +40,6 @@ for _p in (_PROJECT_ROOT, _JUNQI_RL_PKG):
         sys.path.insert(0, _p)
 import time
 import traceback
-from typing import Any
 
 import numpy as np
 import torch
