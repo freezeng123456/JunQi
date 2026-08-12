@@ -60,7 +60,7 @@ except ImportError:
     def _make_grad_scaler() -> "_TorchAmpGradScaler":
         return _TorchAmpGradScaler()
 
-from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig, N_VF_CAT
+from junqi_rl.networks.junqi_net import N_VF_CAT, JunqiNet, JunqiNetConfig
 from junqi_rl.training.rollout import RolloutBatch, RolloutBuffer
 
 

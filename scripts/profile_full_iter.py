@@ -25,10 +25,9 @@ def main() -> None:
 
     from junqi_rl.gpu_rollout import GpuRollout
     from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
-    from junqi_rl.training.rollout_gpu import RolloutBufferGPU
-    from junqi_rl.training.rollout_gpu import observation_storage_dtype
     from junqi_rl.training.gpu_collector import collect_rollout_gpu_v2
-    from junqi_rl.training.ppo import PPOTrainer, PPOConfig
+    from junqi_rl.training.ppo import PPOConfig, PPOTrainer
+    from junqi_rl.training.rollout_gpu import RolloutBufferGPU, observation_storage_dtype
 
     device = torch.device("cuda")
     torch.cuda.set_device(0)
