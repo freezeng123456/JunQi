@@ -145,6 +145,7 @@ from junqi_rl.training.config import (
     load_config,
 )
 from junqi_rl.training.logger import MultiCounter, TrainingLogger
+from junqi_rl.training.rollout_gpu import observation_storage_dtype
 
 __all__ = [
     "ArrangementNetConfig",
@@ -404,6 +405,7 @@ def train(cfg: TrainConfig) -> None:
     # This is the v33c fix for the "half-self-play" bug observed in v33b.
     rollout_random_opponent = cfg.random_opponent
     if cfg.env.use_gpu_rollout and device.type == "cuda":
+        rollout_obs_dtype = observation_storage_dtype(cfg.ppo.get_dtype())
         rollout = RolloutBufferGPU(
             num_envs=cfg.env.num_envs,
             steps_per_env=cfg.env.steps_per_env,
@@ -415,6 +417,7 @@ def train(cfg: TrainConfig) -> None:
             device=device,
             random_opponent=rollout_random_opponent,
             train_value_on_random_seats=cfg.train_value_on_random_seats,
+            obs_storage_dtype=rollout_obs_dtype,
         )
         if is_rank0:
             mode = "vs-random" if rollout_random_opponent else "self-play"
@@ -422,7 +425,11 @@ def train(cfg: TrainConfig) -> None:
             v_tag = "value-also-on-random-seats" if v_only else "legacy-no-value-on-random"
             shaping = cfg.reward_shaping
             shape_tag = "reward-shaping=ON" if shaping else "reward-shaping=OFF (terminal-only)"
-            print(f"[train] RolloutBufferGPU (zero-CPU collect path, mode={mode}, {v_tag}, {shape_tag})")
+            print(
+                "[train] RolloutBufferGPU "
+                f"(zero-CPU collect path, obs={rollout_obs_dtype}, "
+                f"mode={mode}, {v_tag}, {shape_tag})"
+            )
     else:
         rollout = RolloutBuffer(
             num_envs=cfg.env.num_envs,

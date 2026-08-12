@@ -14,13 +14,19 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=512)
     ap.add_argument("--iters", type=int, default=3)
     ap.add_argument("--minibatch", type=int, default=512)
+    ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--compile", action="store_true", default=False)
-    ap.add_argument("--dtype", default="float16", choices=["float16", "bfloat16", "float32"])
+    ap.add_argument(
+        "--dtype",
+        default="bfloat16",
+        choices=["float16", "bfloat16", "float32"],
+    )
     args = ap.parse_args()
 
     from junqi_rl.gpu_rollout import GpuRollout
     from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
     from junqi_rl.training.rollout_gpu import RolloutBufferGPU
+    from junqi_rl.training.rollout_gpu import observation_storage_dtype
     from junqi_rl.training.gpu_collector import collect_rollout_gpu_v2
     from junqi_rl.training.ppo import PPOTrainer, PPOConfig
 
@@ -28,7 +34,10 @@ def main() -> None:
     torch.cuda.set_device(0)
 
     N, T = args.num_envs, args.steps
-    print(f"[profile] num_envs={N} steps={T} minibatch={args.minibatch}")
+    print(
+        f"[profile] num_envs={N} steps={T} minibatch={args.minibatch} "
+        f"epochs={args.epochs} dtype={args.dtype}"
+    )
 
     rollout_world = GpuRollout(num_envs=N)
     net_cfg = JunqiNetConfig(
@@ -43,7 +52,7 @@ def main() -> None:
         clip_range=0.2, gamma=1.0, gae_lambda=0.5, td_lambda=0.8,
         vf_coef=1.0, policy_coef=1.0, temperature_coef=0.05,
         kl_coef=0.1, lr_ceil=1e-4, lr_coef=0.5,
-        minibatch_size=args.minibatch, num_epochs_per_rollout=4,
+        minibatch_size=args.minibatch, num_epochs_per_rollout=args.epochs,
         dtype=args.dtype, torch_compile=args.compile,
         net=net_cfg,
     )
@@ -56,6 +65,7 @@ def main() -> None:
         adv_filt_thresh=ppo_cfg.adv_filt_thresh,
         adv_filt_rate=ppo_cfg.adv_filt_rate,
         device=device,
+        obs_storage_dtype=observation_storage_dtype(ppo_cfg.get_dtype()),
     )
 
     rng = np.random.default_rng(42)
@@ -66,11 +76,14 @@ def main() -> None:
         rollout_world, trainer.ema.model, buffer,
         device="cuda", seed_base=0, reset_at_start=True,
         random_opponent=True,
+        use_compile=args.compile,
+        autocast_dtype=ppo_cfg.get_dtype(),
     )
     trainer.train_epoch(buffer, rng=rng)
     torch.cuda.synchronize()
     peak_mb = torch.cuda.max_memory_allocated() / 1024**2
     print(f"[profile] warmup done. peak_mem={peak_mb:.0f} MB")
+    torch.cuda.reset_peak_memory_stats()
 
     # Measure
     collect_s = []
@@ -82,6 +95,8 @@ def main() -> None:
             rollout_world, trainer.ema.model, buffer,
             device="cuda", seed_base=1000 + i, reset_at_start=False,
             random_opponent=True,
+            use_compile=args.compile,
+            autocast_dtype=ppo_cfg.get_dtype(),
         )
         torch.cuda.synchronize()
         t_c = time.time() - t0

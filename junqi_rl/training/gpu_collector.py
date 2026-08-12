@@ -181,6 +181,26 @@ def _per_seat_terminal_rewards(
     return out
 
 
+def _categorical_value_to_scalar(values):
+    """Convert categorical log-prob values to their scalar expectation."""
+
+    if values.dim() <= 1:
+        return values
+    probs = values.exp()
+    if values.size(-1) == 3:
+        # The fixed Junqi categorical value bins are [-1, 0, +1].
+        # Avoid constructing and multiplying a bins tensor on every env step.
+        return probs[..., 2] - probs[..., 0]
+    bins = torch.linspace(
+        -1.0,
+        1.0,
+        values.size(-1),
+        device=values.device,
+        dtype=probs.dtype,
+    )
+    return (probs * bins).sum(dim=-1)
+
+
 # ---------------------------------------------------------------------------
 # Legal-mask construction for GpuRollout
 # ---------------------------------------------------------------------------
@@ -696,6 +716,7 @@ def collect_rollout_gpu_v2(
 
     # Track done flags on GPU
     done_t = rollout_world.terminated_torch().clone()
+    callbacks_enabled = on_termination is not None or on_reset is not None
 
     step_counter = 0
 
@@ -718,13 +739,7 @@ def collect_rollout_gpu_v2(
             actions_can, log_probs, values = policy.act(obs_sp_t, obs_gl_t, lm_t)
         log_probs_t = log_probs.detach().to(torch.float32)
         values_t = values.detach().to(torch.float32)
-        if values_t.dim() > 1:
-            # Categorical VF: values are log_softmax (B, N_VF_CAT).
-            # Convert to scalar expected value for GAE.
-            n_bins = values_t.size(-1)
-            bins = torch.linspace(-1.0, 1.0, n_bins, device=values_t.device)
-            probs = values_t.exp()  # (B, N_VF_CAT)
-            values_t = (probs * bins).sum(dim=-1)  # (B,) expected value
+        values_t = _categorical_value_to_scalar(values_t)
 
         # ---- Random opponent: replace actions for enemy seats (1, 3) ---------
         if random_opponent:
@@ -807,8 +822,10 @@ def collect_rollout_gpu_v2(
             actions=actions_can.detach().to(torch.int32),
             log_probs=log_probs_t,
             values=values_t,
-            rewards=torch.zeros(N, dtype=torch.float32, device=_device),
-            dones=done_t.clone(),
+            # Both fields are patched from the step result immediately below;
+            # skip a redundant allocation/copy on every environment step.
+            rewards=None,
+            dones=None,
             seats=acting_t,
         )
 
@@ -875,7 +892,9 @@ def collect_rollout_gpu_v2(
         # ---- Arrangement-net termination hook ----------------------------
         # Fires BEFORE reset_terminated_device so the callback can snapshot
         # the just-ended games' arrangements.
-        fired_any = bool(fired_t.any())
+        # ``bool(cuda_tensor.any())`` synchronises the stream. The common
+        # move-policy-only path has no callbacks, so avoid that sync entirely.
+        fired_any = bool(fired_t.any()) if callbacks_enabled else False
         if on_termination is not None and fired_any:
             on_termination(
                 fired_t=fired_t,
@@ -914,11 +933,7 @@ def collect_rollout_gpu_v2(
 
     # Keep everything on-device; compute_returns accepts torch tensors.
     lv = last_values.detach().to(torch.float32)
-    if lv.dim() > 1:
-        # Categorical value head: map log_softmax distribution to scalar.
-        n_bins = lv.size(-1)
-        bins = torch.linspace(-1.0, 1.0, n_bins, device=lv.device)
-        lv = (lv.exp() * bins).sum(dim=-1)
+    lv = _categorical_value_to_scalar(lv)
     lv = lv * (~done_t).to(torch.float32)
 
     # Pass the seat that would act next (the "T" boundary's seat) so the
