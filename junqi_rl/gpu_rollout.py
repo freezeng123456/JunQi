@@ -66,8 +66,8 @@ from junqi_core.board import (
     NUM_ON_BOARD_CELLS,
 )
 from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
-from junqi_core.rules import ShowMode, CAMP_INDICES, PieceType, SLOTS_PER_SEAT
-from junqi_core.setup import generate_random_setup, generate_random_lineup
+from junqi_core.rules import CAMP_INDICES, SLOTS_PER_SEAT, PieceType, ShowMode
+from junqi_core.setup import generate_random_lineup, generate_random_setup
 from junqi_core.setup_canonical import (
     CANONICAL_LINEUPS,
     generate_canonical_setup,
@@ -75,7 +75,6 @@ from junqi_core.setup_canonical import (
 from junqi_core.state import GameState
 
 from .gpu_world import _upload_zobrist_tables
-
 
 NUM_TRACKED_TYPES = 12
 FLAT_ACTION_DIM = 129 * 129  # 16641 — compact on-board action space
@@ -390,11 +389,14 @@ def _build_belief_prior_table() -> np.ndarray:
     Returns shape (30, 12) float32.  Camp slots are all-zero.
     Matches :func:`junqi_core.info_model._per_slot_prior_vector`.
     """
-    from junqi_core.rules import (
-        PIECE_COUNTS, STRONGHOLD_INDICES, FRONT_ROW_INDICES,
-        BACK_TWO_ROWS_INDICES, CAMP_INDICES,
-    )
     from junqi_core.info_model import TRACKED_TYPES
+    from junqi_core.rules import (
+        BACK_TWO_ROWS_INDICES,
+        CAMP_INDICES,
+        FRONT_ROW_INDICES,
+        PIECE_COUNTS,
+        STRONGHOLD_INDICES,
+    )
 
     table = np.zeros((30, 12), dtype=np.float32)
     for slot in range(30):
@@ -424,7 +426,7 @@ def _build_seat_strongholds() -> np.ndarray:
     Returns shape (8,) int16: [seat0_sh0, seat0_sh1, seat1_sh0, ...].
     """
     from junqi_core.board import index_to_pos
-    from junqi_core.rules import Seat, STRONGHOLD_INDICES
+    from junqi_core.rules import STRONGHOLD_INDICES, Seat
 
     sh_indices = sorted(STRONGHOLD_INDICES)  # [26, 28]
     result = np.zeros(8, dtype=np.int16)
@@ -1001,7 +1003,8 @@ class GpuRollout:
             Number of combined-setup entries in the new pool.
         """
         from junqi_rl.arrangement.pool_upload import (
-            arrangements_to_pool, refresh_gpu_setup_pool,
+            arrangements_to_pool,
+            refresh_gpu_setup_pool,
         )
         pool = arrangements_to_pool(samples, seat_idx)
         refresh_gpu_setup_pool(pool)

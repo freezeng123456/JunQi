@@ -17,7 +17,7 @@ def test_full_observation_storage_matches_tensor_schema() -> None:
 
     assert estimate.observation_bytes == (412 * 17 * 17 + 28) * 2
     assert estimate.legal_bytes == 256 * 4 + 4
-    assert estimate.bytes_per_transition == 239_278
+    assert estimate.bytes_per_transition == 239_246
 
 
 def test_compact_history_accounts_for_observer_slices_only() -> None:

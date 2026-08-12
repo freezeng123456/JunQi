@@ -4,10 +4,16 @@
  */
 
 #include "junqi_cuda.h"
-#include "common.cuh"
+
+#include <cstdlib>
+#ifdef __noinline__
+#undef __noinline__
+#endif
+#include <stdexcept>
 
 #include <cuda_runtime.h>
-#include <stdexcept>
+
+#include "common.cuh"
 
 namespace junqi_cuda {
 
