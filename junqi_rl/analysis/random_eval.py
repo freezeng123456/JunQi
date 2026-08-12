@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from junqi_rl.networks.junqi_net import JunqiNet
 
 
-_GPU_ROLLOUT_CACHE: dict[tuple[int, int], "GpuRollout"] = {}
+_GPU_ROLLOUT_CACHE: dict[tuple[int, int], GpuRollout] = {}
 
 
 def _autocast_context(
@@ -29,7 +29,7 @@ def _autocast_context(
 
 @torch.no_grad()
 def evaluate_vs_random_gpu(
-    policy: "JunqiNet",
+    policy: JunqiNet,
     *,
     num_envs: int = 64,
     num_games: int = 128,
@@ -142,7 +142,7 @@ def evaluate_vs_random_gpu(
 
 @torch.no_grad()
 def evaluate_vs_random_cpu(
-    policy: "JunqiNet",
+    policy: JunqiNet,
     *,
     num_envs: int = 16,
     num_games: int = 32,
@@ -257,7 +257,7 @@ def evaluate_vs_random_cpu(
 
 
 def evaluate_paired_vs_random(
-    policy: "JunqiNet",
+    policy: JunqiNet,
     *,
     num_games: int,
     num_envs: int,

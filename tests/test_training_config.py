@@ -13,7 +13,6 @@ from junqi_rl.training.config import (
     validate_config,
 )
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
