@@ -19,6 +19,14 @@ power_schedule
 """
 
 from .collector import collect_rollout
+from .config import (
+    ArrangementTrainConfig,
+    BeliefTrainConfig,
+    EnvConfig,
+    TrainConfig,
+    load_config,
+    validate_config,
+)
 from .gpu_collector import (
     build_legal_mask_batch_gpu,
     collect_rollout_gpu,
@@ -29,15 +37,21 @@ from .rollout import RolloutBatch, RolloutBuffer
 from .rollout_gpu import RolloutBufferGPU
 
 __all__ = [
+    "ArrangementTrainConfig",
+    "BeliefTrainConfig",
     "build_legal_mask_batch_gpu",
     "collect_rollout",
     "collect_rollout_gpu",
     "collect_rollout_gpu_v2",
     "EMAPolicy",
+    "EnvConfig",
+    "load_config",
     "PPOConfig",
     "PPOTrainer",
     "power_schedule",
     "RolloutBatch",
     "RolloutBuffer",
     "RolloutBufferGPU",
+    "TrainConfig",
+    "validate_config",
 ]
