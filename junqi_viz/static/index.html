@@ -44,19 +44,63 @@
           <article><span>动作来源</span><strong id="action-source">—</strong></article>
         </div>
 
+        <section class="panel-block action-panel">
+          <div class="section-title">
+            <h3>当前动作</h3>
+            <span id="action-team">—</span>
+          </div>
+          <div id="action-summary" class="action-summary">初始局面</div>
+          <div class="piece-compare">
+            <article>
+              <span>起点棋子</span>
+              <strong id="src-piece">—</strong>
+            </article>
+            <article>
+              <span>目标棋子</span>
+              <strong id="dst-piece">—</strong>
+            </article>
+          </div>
+          <p id="event-note" class="event-note">—</p>
+        </section>
+
+        <section class="panel-block state-panel">
+          <div class="section-title">
+            <h3>局面状态</h3>
+            <span id="belief-state">—</span>
+          </div>
+          <div class="state-grid">
+            <article><span>总步数</span><strong id="move-counter">0</strong></article>
+            <article><span>距上次战斗</span><strong id="moves-since-combat">0</strong></article>
+            <article><span>Team 0 存活</span><strong id="team0-alive">50</strong></article>
+            <article><span>Team 1 存活</span><strong id="team1-alive">50</strong></article>
+          </div>
+          <div id="seat-state" class="seat-state"></div>
+        </section>
+
         <section class="panel-block">
           <div class="section-title">
             <h3>策略候选</h3>
-            <span>Top‑K</span>
+            <span id="policy-source">Top‑K</span>
           </div>
+          <div id="policy-summary" class="policy-summary">当前回合没有策略数据</div>
           <ol id="policy-list" class="policy-list">
             <li class="empty">普通对局没有策略数据</li>
           </ol>
         </section>
 
-        <section class="panel-block">
-          <div class="section-title"><h3>存活棋子</h3></div>
-          <div id="alive-list" class="alive-list"></div>
+        <section class="panel-block event-panel">
+          <div class="section-title">
+            <h3>关键节点</h3>
+            <span id="event-count">0</span>
+          </div>
+          <div id="event-list" class="event-list">
+            <div class="empty">没有关键战斗节点</div>
+          </div>
+        </section>
+
+        <section class="panel-block source-panel">
+          <div class="section-title"><h3>复盘来源</h3><span id="belief-shape">—</span></div>
+          <div id="run-meta" class="run-meta">—</div>
         </section>
 
         <label class="toggle">
@@ -81,6 +125,6 @@
       </select>
     </footer>
 
-    <script src="/assets/app.js" defer></script>
+    <script src="/assets/app.js?v=20260816-right-panel-2" defer></script>
   </body>
 </html>

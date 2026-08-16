@@ -18,8 +18,11 @@ def test_manual_replay_payload_is_json_safe(tmp_path) -> None:
     assert meta["kind"] == "manual"
     assert meta["length"] == trajectory.num_steps
     assert len(meta["cells"]) == 129
+    assert "key_events" in meta
     assert frame["length"] == trajectory.num_steps
     assert frame["pieces"]
+    assert set(frame["seat_info"]) == {"SOUTH", "WEST", "NORTH", "EAST"}
+    assert "move_counter" in frame["state"]
     json.dumps(meta, ensure_ascii=False)
     json.dumps(frame, ensure_ascii=False)
 
@@ -42,8 +45,12 @@ def test_policy_replay_payload_exposes_action_source_and_top_moves(tmp_path) -> 
     )
     policy.save(path)
     data = ReplayData(path)
-    assert data.metadata()["kind"] == "policy"
+    meta = data.metadata()
+    assert meta["kind"] == "policy"
+    assert "key_events" in meta
     if t:
         frame = data.frame(1)
         assert frame["policy"]["action_source"] == "policy_sample"
+        assert frame["policy"]["source_label"] == "策略采样"
         assert len(frame["policy"]["top_actions"]) == 2
+        assert frame["policy"]["top_actions"][0]["rank"] == 1
