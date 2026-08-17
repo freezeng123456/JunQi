@@ -6,7 +6,7 @@ Implements Proximal Policy Optimisation (PPO) with:
   - Entropy bonus (magnet loss in Ataraxos terminology)
   - KL divergence penalty (to stabilise training)
   - Generalised Advantage Estimation (GAE)
-  - EMA (Exponential Moving Average) policy for evaluation
+  - EMA (Exponential Moving Average) shadow for diagnostics/checkpoints
   - Mixed-precision training (bfloat16 / float32 autocast)
   - Gradient clipping
   - Power-schedule learning rate and temperature annealing
@@ -23,10 +23,9 @@ See ``scripts/train.py`` for the full training entry point.
     ...
     for epoch in range(total_epochs):
         rollout.reset()
-        collect_rollout(env, policy_ema, rollout)
+        collect_rollout(env, policy, rollout)
         rollout.compute_returns(last_values)
         metrics = ppo.train_epoch(rollout)
-        policy_ema.update()
 """
 
 from __future__ import annotations
@@ -109,8 +108,10 @@ def power_schedule(
 class EMAPolicy:
     """Maintains an exponential moving average of model weights.
 
-    After each gradient update call :meth:`update`.  Use :attr:`model` for
-    evaluation / checkpointing (rather than the learner model).
+    After each gradient update call :meth:`update`. The shadow is useful for
+    smoothing diagnostics and checkpoint metadata, but it is deliberately
+    *not* the PPO behaviour policy: rollout actions and old log-probabilities
+    must come from the same policy that is subsequently optimised.
 
     Parameters
     ----------
@@ -136,6 +137,15 @@ class EMAPolicy:
             self.shadow.parameters(), model.parameters()
         ):
             s_param.data.mul_(d).add_(m_param.data, alpha=1.0 - d)
+        # BatchNorm running statistics and counters are buffers, not
+        # parameters. Leaving them at their initial values turns the EMA
+        # shadow into a different function from the learner. Copy buffers
+        # exactly rather than averaging them: they describe the learner's
+        # current normalization state and must stay functionally aligned.
+        shadow_buffers = dict(self.shadow.named_buffers())
+        for name, model_buffer in model.named_buffers():
+            shadow_buffers[name].copy_(model_buffer)
+        self.shadow.eval()
 
     @property
     def model(self) -> JunqiNet:
@@ -271,7 +281,7 @@ class PPOConfig:
 
     # --- EMA ---
     ema_decay: float = 0.999
-    """EMA decay for evaluation/checkpoint policy."""
+    """EMA decay for the diagnostic/checkpoint shadow policy."""
 
     # --- Training schedule ---
     num_epochs_per_rollout: int = 4
@@ -318,7 +328,7 @@ class PPOTrainer:
     Attributes
     ----------
     ema
-        EMA shadow model.  Use ``trainer.ema.model`` for evaluation.
+        EMA shadow model retained for diagnostics and checkpoint metadata.
     num_train_step
         Total number of gradient update steps taken.
     """
@@ -622,9 +632,13 @@ class PPOTrainer:
         from the rollout policy, preventing the runaway negative-KL failure
         that previously dominated the loss.
         """
+        # Keep the optimisation term bounded even if a numerical/mask error
+        # produces an extreme diagnostic log-ratio. The unclipped value is
+        # still logged separately, so such events remain observable.
+        bounded_log_ratio = log_ratio.clamp(-20.0, 20.0)
         per_sample = F.smooth_l1_loss(
-            log_ratio,
-            torch.zeros_like(log_ratio),
+            bounded_log_ratio,
+            torch.zeros_like(bounded_log_ratio),
             beta=float(self.cfg.kl_proxy_beta),
             reduction="none",
         )
@@ -632,6 +646,32 @@ class PPOTrainer:
             return per_sample.mean()
         w_sum = weight_per.sum().clamp_min(1.0)
         return (per_sample * weight_per).sum() / w_sum
+
+    @staticmethod
+    def _assert_policy_active_actions_legal(
+        legal_mask: Tensor,
+        actions: Tensor,
+        active: Tensor,
+    ) -> None:
+        """Fail fast when a stored policy action is illegal after rebuild.
+
+        PPO assumes that every policy-active action in the rollout was sampled
+        from the exact distribution reconstructed during the update. Checking
+        the selected mask entry directly is stronger than inferring legality
+        from a gathered log-probability, especially when a mask implementation
+        uses a finite sentinel for illegal logits.
+        """
+        selected_legal = legal_mask.gather(
+            1, actions.to(torch.long).unsqueeze(1)
+        ).squeeze(1)
+        invalid = (~selected_legal) & active
+        if bool(invalid.any()):
+            count = int(invalid.sum().item())
+            examples = torch.nonzero(invalid, as_tuple=False).flatten()[:8].tolist()
+            raise RuntimeError(
+                "policy-active stored action is illegal under the reconstructed "
+                f"legal mask: count={count}, examples={examples}"
+            )
 
     # -------------------------------------------------------------------------
     # One gradient update step
@@ -645,7 +685,12 @@ class PPOTrainer:
         cfg = self.cfg
         temp = self._get_temperature()
 
-        self._policy_for_train.train()
+        # PPO compares the learner against rollout log-probabilities collected
+        # in eval mode. Keeping the update forward in eval mode freezes
+        # BatchNorm statistics and makes the two distributions comparable.
+        # Gradients remain fully enabled; only train/eval-only behaviour such
+        # as BatchNorm running-stat updates and dropout is disabled.
+        self._policy_for_train.eval()
 
         ctx_device = self.device.type if hasattr(self.device, "type") else str(self.device).split(":")[0]
 
@@ -663,11 +708,13 @@ class PPOTrainer:
             obs_sp_in = batch.obs_spatial
             obs_gl_in = batch.obs_global
 
+        legal_mask = batch.legal_mask.to(self.device)
+
         with autocast(device_type=ctx_device, dtype=self._amp_dtype, enabled=self._use_amp):
             out = self._policy_for_train(
                 obs_sp_in,
                 obs_gl_in,
-                batch.legal_mask,
+                legal_mask,
             )
             new_log_probs_all = out["log_probs"]       # (B, FLAT_ACTION_DIM)
             value = out["value"]                        # (B,) or (B, N_VF_CAT)
@@ -751,6 +798,9 @@ class PPOTrainer:
                 if policy_weight_per is not None
                 else torch.ones_like(new_log_prob, dtype=torch.bool)
             )
+            self._assert_policy_active_actions_legal(
+                legal_mask, batch.actions.to(self.device), active
+            )
             if ((~torch.isfinite(new_log_prob)) & active).any():
                 raise RuntimeError(
                     "non-finite new_log_prob for a policy-active action; "
@@ -764,7 +814,7 @@ class PPOTrainer:
             )
             value_loss = self._value_loss(value, ret)
             entropy_loss = self._entropy_loss(
-                new_log_probs_all, batch.legal_mask,
+                new_log_probs_all, legal_mask,
                 weight_per=policy_weight_per,
             )
 

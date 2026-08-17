@@ -643,6 +643,23 @@ class GpuRollout:
             _cuda.upload_seat_strongholds(strongholds)
         _reset_pool_uploaded = True
 
+    def upload_fixed_evaluation_setup_pool(
+        self,
+        *,
+        seed: int,
+        pool_size: int = DEFAULT_POOL_SIZE,
+    ) -> int:
+        """Install a deterministic uniform setup pool for a primary eval.
+
+        The CUDA setup pool is process-global and the training ArrangementNet
+        refreshes it every rollout. Evaluation must explicitly overwrite it
+        with a fixed distribution; the next training rollout refreshes the
+        learned pool before collection resumes.
+        """
+        pool = _build_setup_pool(pool_size, seed=int(seed))
+        _cuda.upload_setup_pool(pool)
+        return int(pool.shape[0])
+
     # ------------------------------------------------------------------
     # Episode lifecycle
     # ------------------------------------------------------------------

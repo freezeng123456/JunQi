@@ -751,9 +751,15 @@ def train(cfg: TrainConfig) -> None:
         if cfg.env.use_gpu_rollout:
             # Use v2 (zero-CPU hot path) when GPU buffer is available
             _collect = collect_rollout_gpu_v2 if isinstance(rollout, RolloutBufferGPU) else collect_rollout_gpu
+            # The behaviour policy must be the learner itself in eval mode.
+            # EMA is intentionally kept out of the PPO collection path: its
+            # parameter lag and separate BatchNorm buffers otherwise make the
+            # stored old log-probs off-policy before the first update starts.
+            behavior_policy = trainer.policy
+            behavior_policy.eval()
             kwargs = dict(
                 rollout_world=env,
-                policy=trainer.ema.model,
+                policy=behavior_policy,
                 buffer=rollout,
                 device=device,
                 seed_base=cfg.env.seed + rollout_idx,
@@ -761,7 +767,7 @@ def train(cfg: TrainConfig) -> None:
             )
             # Pass random_opponent from config to v2 collector. When
             # cfg.random_opponent=False, the collector will use the
-            # current EMA policy for the non-training team (self-play).
+            # current behaviour policy for the non-training team (self-play).
             if _collect is collect_rollout_gpu_v2:
                 kwargs["random_opponent"] = cfg.random_opponent
                 # Plumb the cfg.ppo.torch_compile flag through. Without this
@@ -806,9 +812,11 @@ def train(cfg: TrainConfig) -> None:
                 kwargs["on_reset"] = _refresh_arr_snapshot_after_reset
             _collect(**kwargs)
         else:
+            behavior_policy = trainer.policy
+            behavior_policy.eval()
             collect_rollout(
                 env=env,
-                policy=trainer.ema.model,   # use EMA policy for data collection
+                policy=behavior_policy,
                 rollout=rollout,
                 device=device,
                 seed_base=cfg.env.seed + rollout_idx,
@@ -990,11 +998,9 @@ def train(cfg: TrainConfig) -> None:
                 dist.barrier()
 
         # ---- Periodic evaluation (rank-0 only; others wait) ----
-        # Eval is single-process by design (uses trainer.ema.model, which is
-        # identical on every rank because gradients are all-reduced and EMA
-        # is applied identically per rank). Doing it once on rank 0 and
-        # broadcasting the early-stop verdict is far cheaper than running
-        # 8 redundant eval loops in parallel.
+        # Evaluate the actual learner policy used for collection. EMA remains
+        # checkpoint metadata rather than a second, lagging definition of what
+        # the main win-rate means.
         if (rollout_idx + 1) % cfg.eval_every == 0:
             eval_should_stop = torch.zeros(1, dtype=torch.long,
                                            device=device if device.type == "cuda" else "cpu")
@@ -1002,8 +1008,20 @@ def train(cfg: TrainConfig) -> None:
                 print(f"[train] Evaluating (rollout {rollout_idx + 1})…")
                 try:
                     eval_seed = cfg.env.seed + rollout_idx + 1_000_000
+                    if (
+                        cfg.eval_fixed_setup_pool
+                        and cfg.env.use_gpu_rollout
+                        and hasattr(env, "upload_fixed_evaluation_setup_pool")
+                    ):
+                        pool_size = env.upload_fixed_evaluation_setup_pool(
+                            seed=cfg.eval_setup_seed,
+                        )
+                    else:
+                        pool_size = 0
+                    eval_policy = trainer.policy
+                    eval_policy.eval()
                     eval_metrics = evaluate_paired_vs_random(
-                        trainer.ema.model,
+                        eval_policy,
                         num_games=cfg.eval_num_games,
                         num_envs=cfg.env.num_envs,
                         use_gpu=cfg.env.use_gpu_rollout,
@@ -1013,6 +1031,9 @@ def train(cfg: TrainConfig) -> None:
                         autocast_dtype=cfg.ppo.get_dtype(),
                         greedy=True,
                     )
+                    if pool_size:
+                        eval_metrics["eval/fixed_setup_pool_size"] = float(pool_size)
+                        eval_metrics["eval/fixed_setup_seed"] = float(cfg.eval_setup_seed)
                     logger.log(eval_metrics, step=rollout_idx)
                     win_rate = eval_metrics.get("eval/win_rate", 0.0)
                     loss_rate = eval_metrics.get("eval/loss_rate", 0.0)
@@ -1041,7 +1062,7 @@ def train(cfg: TrainConfig) -> None:
                                 policy_team = replay_idx & 1
                                 replay_seed = eval_seed + replay_idx
                                 trajectory = record_game_with_policy(
-                                    trainer.ema.model,
+                                    eval_policy,
                                     rng_seed=replay_seed,
                                     device=device,
                                     max_steps=cfg.env.max_num_moves,
@@ -1052,7 +1073,7 @@ def train(cfg: TrainConfig) -> None:
                                     meta={
                                         "rollout": rollout_idx + 1,
                                         "policy_team": policy_team,
-                                        "checkpoint_kind": "ema",
+                                        "checkpoint_kind": "policy",
                                         **eval_metrics,
                                     },
                                 )
@@ -1096,14 +1117,22 @@ def train(cfg: TrainConfig) -> None:
                                 map_location=device,
                                 weights_only=False,
                             )
-                            ema_state = opponent_state.get("ema", {})
-                            weights = (
-                                ema_state.get("shadow")
-                                if isinstance(ema_state, dict)
-                                else None
-                            )
+                            # League comparisons use the same raw learner
+                            # definition as the primary score and collection.
+                            # Keep EMA only as a backwards-compatible fallback
+                            # for a checkpoint that lacks raw policy weights.
+                            weights = opponent_state.get("policy")
                             if weights is None:
-                                weights = opponent_state["policy"]
+                                ema_state = opponent_state.get("ema", {})
+                                weights = (
+                                    ema_state.get("shadow")
+                                    if isinstance(ema_state, dict)
+                                    else None
+                                )
+                            if weights is None:
+                                raise KeyError(
+                                    "league checkpoint has neither policy nor EMA weights"
+                                )
                             opponent.load_state_dict(weights)
                             opponent.eval()
 
@@ -1113,7 +1142,7 @@ def train(cfg: TrainConfig) -> None:
                             )
                             league_shards = [
                                 eval_head_to_head(
-                                    trainer.ema.model,
+                                    eval_policy,
                                     opponent,
                                     num_games=league_team0_games,
                                     first_team=0,
@@ -1126,7 +1155,7 @@ def train(cfg: TrainConfig) -> None:
                             if league_team1_games > 0:
                                 league_shards.append(
                                     eval_head_to_head(
-                                        trainer.ema.model,
+                                        eval_policy,
                                         opponent,
                                         num_games=league_team1_games,
                                         first_team=1,

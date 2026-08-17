@@ -384,7 +384,10 @@ class JunqiNet(nn.Module):
         Score for (src → dst) = q[src] · k[dst]^T / sqrt(Kd).
         Both src and dst range over 129 on-board cells, producing a
         (B, 129, 129) attention map flattened to (B, 16641).
-        Illegal actions are masked to -inf before returning.
+        Illegal actions are masked to a very negative finite sentinel before
+        returning.  The finite form is important for the compiled full-
+        distribution entropy/KL computation; action legality is checked
+        explicitly by PPO before an update.
         """
         Kd = self.cfg.action_key_dim
         q = self.q_proj(cells)   # (B, 129, Kd)
@@ -396,8 +399,11 @@ class JunqiNet(nn.Module):
         attn = torch.bmm(q_f, k_f.transpose(1, 2)) / math.sqrt(Kd)
         # Flatten to (B, 16641)
         logits = attn.reshape(-1, FLAT_ACTION_DIM)
-        # Mask illegal actions (logits is fp32 here; use a constant that
-        # dynamo can trace without hitting fp16 scalar_tensor overflow).
+        # Retain a finite sentinel here.  Under torch.compile, exact -inf in
+        # the normal action distribution makes entropy/KL terms hit 0 * -inf
+        # and can poison every PPO gradient.  A direct selected-action mask
+        # assertion in PPO makes the sentinel unable to conceal a legality
+        # reconstruction error.
         _NEG_INF = torch.tensor(-1e9, dtype=torch.float32, device=logits.device)
         logits = torch.where(legal_mask, logits, _NEG_INF)
         return logits
