@@ -926,6 +926,14 @@ def train(cfg: TrainConfig) -> None:
                 mean_ret = summary.get("rollout/mean_return", float("nan"))
                 lr = summary.get("train/lr", float("nan"))
                 elapsed = summary.get("time/elapsed_s", 0.0)
+                kl_loss = summary.get("train/kl_loss", float("nan"))
+                approx_kl = summary.get("train/approx_kl", float("nan"))
+                kl_log_ratio_max = summary.get(
+                    "train/kl_log_ratio_abs_max", float("nan")
+                )
+                nan_skips = summary.get("train/nan_skip_total", 0.0)
+                grad_skips = summary.get("train/grad_skip_total", 0.0)
+                policy_kept = summary.get("rollout/n_policy_kept", 0.0)
                 # In DDP mode this prints PER-RANK fps; cluster-wide
                 # throughput is approximately (fps × world_size).
                 fps = (cfg.env.num_envs * cfg.env.steps_per_env * cfg.log_every
@@ -949,7 +957,10 @@ def train(cfg: TrainConfig) -> None:
                     f"[{rollout_idx:6d}] "
                     f"loss_p={policy_loss:+.4f}  loss_v={value_loss:.4f}  "
                     f"ret={mean_ret:+.4f}  lr={lr:.2e}  "
-                    f"fps={fps:.0f}  elapsed={elapsed:.0f}s"
+                    f"fps={fps:.0f}  elapsed={elapsed:.0f}s  "
+                    f"kl_loss={kl_loss:+.4f}  approx_kl={approx_kl:+.4f}  "
+                    f"kl_max={kl_log_ratio_max:.3f}  kept={policy_kept:.0f}  "
+                    f"nan_skip={nan_skips:.0f}  grad_skip={grad_skips:.0f}"
                     f"{arr_suffix}"
                 )
             t_rollout_start = time.time()
@@ -1017,36 +1028,44 @@ def train(cfg: TrainConfig) -> None:
                           f"{eval_metrics.get('eval/win_rate_ci95_high', 1.0):.3f}]")
 
                     if cfg.eval_record_games > 0:
-                        from junqi_rl.analysis.record import record_game_with_policy
+                        # A replay is useful evidence, but it must not prevent
+                        # league evaluation, best-checkpoint selection, or
+                        # early-stop decisions. Keep this optional artifact
+                        # path isolated from the main evaluation transaction.
+                        try:
+                            from junqi_rl.analysis.record import record_game_with_policy
 
-                        replay_dir = os.path.join(cfg.save_dir, "replays")
-                        os.makedirs(replay_dir, exist_ok=True)
-                        for replay_idx in range(cfg.eval_record_games):
-                            policy_team = replay_idx & 1
-                            replay_seed = eval_seed + replay_idx
-                            trajectory = record_game_with_policy(
-                                trainer.ema.model,
-                                rng_seed=replay_seed,
-                                device=device,
-                                max_steps=cfg.env.max_num_moves,
-                                greedy=True,
-                                random_opponent=True,
-                                policy_team=policy_team,
-                                record_beliefs=cfg.eval_record_beliefs,
-                                meta={
-                                    "rollout": rollout_idx + 1,
-                                    "policy_team": policy_team,
-                                    "checkpoint_kind": "ema",
-                                    **eval_metrics,
-                                },
-                            )
-                            replay_path = os.path.join(
-                                replay_dir,
-                                f"eval_{rollout_idx + 1:06d}_"
-                                f"{replay_idx:02d}_team{policy_team}.npz",
-                            )
-                            trajectory.save(replay_path)
-                            print(f"[eval] Replay saved: {replay_path}")
+                            replay_dir = os.path.join(cfg.save_dir, "replays")
+                            os.makedirs(replay_dir, exist_ok=True)
+                            for replay_idx in range(cfg.eval_record_games):
+                                policy_team = replay_idx & 1
+                                replay_seed = eval_seed + replay_idx
+                                trajectory = record_game_with_policy(
+                                    trainer.ema.model,
+                                    rng_seed=replay_seed,
+                                    device=device,
+                                    max_steps=cfg.env.max_num_moves,
+                                    greedy=True,
+                                    random_opponent=True,
+                                    policy_team=policy_team,
+                                    record_beliefs=cfg.eval_record_beliefs,
+                                    meta={
+                                        "rollout": rollout_idx + 1,
+                                        "policy_team": policy_team,
+                                        "checkpoint_kind": "ema",
+                                        **eval_metrics,
+                                    },
+                                )
+                                replay_path = os.path.join(
+                                    replay_dir,
+                                    f"eval_{rollout_idx + 1:06d}_"
+                                    f"{replay_idx:02d}_team{policy_team}.npz",
+                                )
+                                trajectory.save(replay_path)
+                                print(f"[eval] Replay saved: {replay_path}")
+                        except Exception:
+                            print("[eval] Replay recording failed; continuing evaluation:")
+                            traceback.print_exc()
 
                     if cfg.league_eval_games > 0:
                         from junqi_rl.analysis.evaluate import eval_head_to_head

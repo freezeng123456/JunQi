@@ -33,6 +33,34 @@ if TYPE_CHECKING:
     from junqi_rl.networks.junqi_net import JunqiNet
 
 
+def _value_to_scalar(value: torch.Tensor) -> float:
+    """Convert a JunqiNet value output to the scalar used by replays.
+
+    ``JunqiNet(use_cat_vf=True)`` returns log-probabilities over the fixed
+    value bins ``[-1, 0, +1]``.  The training collector already converts that
+    representation before storing it, but the CPU replay recorder previously
+    called ``.item()`` directly and crashed on the ``(1, 3)`` output.
+    """
+    values = value.detach()
+    if values.numel() == 1:
+        return float(values.reshape(-1)[0].item())
+    if values.ndim == 0:
+        return float(values.item())
+    probs = values.float().exp()
+    if values.size(-1) == 3:
+        scalar = probs[..., 2] - probs[..., 0]
+    else:
+        bins = torch.linspace(
+            -1.0,
+            1.0,
+            values.size(-1),
+            device=values.device,
+            dtype=probs.dtype,
+        )
+        scalar = (probs * bins).sum(dim=-1)
+    return float(scalar.reshape(-1)[0].item())
+
+
 @torch.no_grad()
 def record_game_with_policy(
     policy: JunqiNet,
@@ -205,7 +233,7 @@ def record_game_with_policy(
         top_ids_buf.append(top_world_ids.astype(np.int32))
         top_probs_buf.append(top_can_probs.astype(np.float32))
 
-        value = float(out["value"].item())
+        value = _value_to_scalar(out["value"])
         values_buf.append(value)
         acting_buf.append(int(seat.value))
         action_sources_buf.append(action_source)

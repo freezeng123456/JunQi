@@ -197,7 +197,17 @@ class PPOConfig:
 
     # --- KL divergence ---
     kl_coef: float = 0.1
-    """Weight for KL(π_new ‖ π_old) regularisation term."""
+    """Weight for the sampled KL trust-region penalty.
+
+    The full action distribution is intentionally not stored in the rollout
+    buffer (the action space is 83,521 entries).  The trainer therefore uses
+    a bounded Huber penalty on the sampled action log-ratio as a stable proxy
+    for ``KL(π_old || π_new)``.  ``train/approx_kl`` remains a separate
+    diagnostic based on the correctly signed sampled estimator.
+    """
+
+    kl_proxy_beta: float = 1.0
+    """Huber transition for the sampled KL proxy in log-probability units."""
 
     # --- GAE ---
     gamma: float = 1.0
@@ -454,7 +464,11 @@ class PPOTrainer:
         by F-4 to silence the policy gradient on value-only samples
         (enemy-seat transitions in vs-random mode).
         """
-        ratio = torch.exp(new_log_probs - old_log_probs)
+        # Clamp before exp so an invalid/very stale action log-ratio cannot
+        # overflow the PPO ratio computation. Values outside this range are
+        # already far beyond the clip region and would be clipped anyway.
+        log_ratio = (new_log_probs - old_log_probs).clamp(-20.0, 20.0)
+        ratio = torch.exp(log_ratio)
         eps = self.cfg.clip_range
         surr1 = ratio * advantages
         surr2 = ratio.clamp(1.0 - eps, 1.0 + eps) * advantages
@@ -570,9 +584,54 @@ class PPOTrainer:
         new_log_probs: Tensor,   # (B, FLAT_ACTION_DIM)
         old_log_probs: Tensor,   # (B, FLAT_ACTION_DIM)
     ) -> Tensor:
-        """Forward KL: KL(π_old ‖ π_new) = Σ π_old · (log π_old − log π_new)."""
-        old_probs = old_log_probs.exp()
-        return (old_probs * (old_log_probs - new_log_probs)).sum(dim=-1).mean()
+        """Full-distribution ``KL(π_old || π_new)`` for finite log-probs.
+
+        This helper is kept for callers that already have both full
+        distributions. Illegal actions are ``-inf`` in both tensors; using
+        ``0 * -inf`` directly would create NaNs, so those entries are masked
+        before the reduction. The main PPO path uses
+        :meth:`_sampled_kl_penalty` because storing the full old distribution
+        for every transition is prohibitively expensive.
+        """
+        finite = torch.isfinite(old_log_probs) & torch.isfinite(new_log_probs)
+        old_probs = torch.where(
+            finite,
+            old_log_probs.exp(),
+            torch.zeros_like(old_log_probs),
+        )
+        per_action = torch.where(
+            finite,
+            old_probs * (old_log_probs - new_log_probs),
+            torch.zeros_like(old_probs),
+        )
+        return per_action.sum(dim=-1).mean()
+
+    def _sampled_kl_penalty(
+        self,
+        log_ratio: Tensor,
+        *,
+        weight_per: Tensor | None = None,
+    ) -> Tensor:
+        """Return a bounded sampled trust-region penalty.
+
+        For actions sampled from ``π_old``, ``old_log_prob - new_log_prob``
+        has the correct sign for a forward-KL estimator. A raw linear sample
+        estimate has high variance and can be negative on an individual
+        minibatch, so the optimization term uses a Huber penalty centred at
+        zero. Its gradient is bounded when a policy has already drifted far
+        from the rollout policy, preventing the runaway negative-KL failure
+        that previously dominated the loss.
+        """
+        per_sample = F.smooth_l1_loss(
+            log_ratio,
+            torch.zeros_like(log_ratio),
+            beta=float(self.cfg.kl_proxy_beta),
+            reduction="none",
+        )
+        if weight_per is None:
+            return per_sample.mean()
+        w_sum = weight_per.sum().clamp_min(1.0)
+        return (per_sample * weight_per).sum() / w_sum
 
     # -------------------------------------------------------------------------
     # One gradient update step
@@ -644,6 +703,8 @@ class PPOTrainer:
                     "train/value_loss": zero.detach(),
                     "train/entropy_loss": zero.detach(),
                     "train/kl_loss": zero.detach(),
+                    "train/approx_kl": zero.detach(),
+                    "train/kl_log_ratio_abs_max": zero.detach(),
                     "train/total_loss": zero.detach(),
                     "train/temperature": temp,
                     "train/lr": lr,
@@ -680,6 +741,22 @@ class PPOTrainer:
                 # 1 = include in policy/entropy/kl loss; 0 = skip.
                 policy_weight_per = (~value_only_mask).to(torch.float32)
 
+            # A policy-active action must remain legal under the exact mask
+            # reconstructed for its stored transition. If it is not, the
+            # gathered log-prob is -inf and any KL/PPO diagnostic becomes
+            # meaningless. Fail fast so a legal-mask/compact-history
+            # regression cannot silently masquerade as learning.
+            active = (
+                policy_weight_per > 0
+                if policy_weight_per is not None
+                else torch.ones_like(new_log_prob, dtype=torch.bool)
+            )
+            if ((~torch.isfinite(new_log_prob)) & active).any():
+                raise RuntimeError(
+                    "non-finite new_log_prob for a policy-active action; "
+                    "stored action and reconstructed legal_mask are inconsistent"
+                )
+
             # --- Losses ---
             policy_loss = self._policy_loss(
                 new_log_prob, old_log_prob, adv,
@@ -691,19 +768,29 @@ class PPOTrainer:
                 weight_per=policy_weight_per,
             )
 
-            # Approximate KL against old policy.
-            # Full-distribution KL requires storing the old log_probs
-            # distribution (16641 dims) which is prohibitive on T4.
-            # Use π_new-weighted point estimate: Σ π_new · (log π_new − log π_old_action)
-            # This is a cheap proxy that penalises large deviations.
-            kl_per = (new_log_prob - old_log_prob.detach())
+            # Sampled KL / trust-region diagnostics.
+            #
+            # The old implementation used ``new_log_prob - old_log_prob`` as
+            # a positive KL penalty. Since actions are sampled from π_old,
+            # that expectation is actually ``-KL(π_old || π_new)``; minimizing
+            # it encouraged the policy to move *away* from the rollout policy.
+            # Keep the correctly signed estimator for diagnostics and use the
+            # bounded Huber proxy for the optimization term.
+            log_ratio = new_log_prob - old_log_prob.detach()
+            kl_loss = self._sampled_kl_penalty(
+                log_ratio,
+                weight_per=policy_weight_per,
+            )
+            signed_approx_kl = -log_ratio
             if policy_weight_per is not None:
-                # Mean only over policy-active samples; if all samples are
-                # value-only (unlikely), fall back to plain mean (= 0 dist).
                 w_sum = policy_weight_per.sum().clamp_min(1.0)
-                kl_loss = (kl_per * policy_weight_per).sum() / w_sum
+                approx_kl = (signed_approx_kl * policy_weight_per).sum() / w_sum
+                log_ratio_abs_max = (
+                    log_ratio.abs() * policy_weight_per
+                ).max()
             else:
-                kl_loss = kl_per.mean()  # ≈ E[log(π_new/π_old)] at sampled actions
+                approx_kl = signed_approx_kl.mean()
+                log_ratio_abs_max = log_ratio.abs().max()
 
             total_loss = (
                 cfg.policy_coef * policy_loss
@@ -767,6 +854,8 @@ class PPOTrainer:
                 "train/value_loss": zero.detach(),
                 "train/entropy_loss": zero.detach(),
                 "train/kl_loss": zero.detach(),
+                "train/approx_kl": zero.detach(),
+                "train/kl_log_ratio_abs_max": zero.detach(),
                 "train/total_loss": zero.detach(),
                 "train/temperature": temp,
                 "train/lr": lr,
@@ -795,6 +884,8 @@ class PPOTrainer:
             "train/value_loss": value_loss.detach(),
             "train/entropy_loss": entropy_loss.detach(),
             "train/kl_loss": kl_loss.detach(),
+            "train/approx_kl": approx_kl.detach(),
+            "train/kl_log_ratio_abs_max": log_ratio_abs_max.detach(),
             "train/total_loss": total_loss.detach(),
             "train/temperature": temp,
             "train/lr": lr,

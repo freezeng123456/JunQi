@@ -1,0 +1,134 @@
+# H20 repaired long run — fresh self-play after the KL/evaluation fixes.
+#
+# This is deliberately a new experiment, not a continuation of the stopped
+# random-opponent baseline. The main policy uses the corrected bounded sampled
+# KL proxy, true four-seat self-play, the existing cross-team GAE fix, and the
+# neural belief path. The first smoke must pass before this 30k run is started.
+arr:
+  ema_decay: 0.999
+  enabled: true
+  n_arr: 1024
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 0.0003
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+  refresh_every: 1
+  reg_norm: 10.0
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_temp_init: 0.1
+  storage_duration: 300
+
+belief:
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  enabled: true
+  infer_chunk_size: 256
+  net: null
+  ppo: null
+  refresh_every: 5
+  warmup_rollouts: 100
+
+device: cuda
+early_stop_min_rollout: 1000
+early_stop_patience: 3
+early_stop_win_rate: 1.0
+
+env:
+  max_num_moves: 4000
+  num_envs: 256
+  seed: 170818
+  steps_per_env: 1024
+  use_gpu_rollout: true
+
+eval_num_games: 256
+eval_record_games: 1
+eval_record_beliefs: true
+league_eval_games: 16
+eval_every: 100
+log_every: 10
+
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.15
+  dtype: bfloat16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.2
+  kl_proxy_beta: 1.0
+  lr_ceil: 5.0e-05
+  lr_coef: 0.5
+  lr_decay: 0.6
+  lr_floor: 5.0e-06
+  max_grad_norm: 0.2
+  minibatch_size: 2048
+  net:
+    action_key_dim: 32
+    cnn_channels: 64
+    cnn_layers: 2
+    depth: 4
+    dropout: 0.0
+    embed_dim: 128
+    ff_factor: 4
+    n_head: 4
+    pos_emb_std: 0.02
+    use_cat_vf: true
+  num_epochs_per_rollout: 1
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: false
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+
+random_opponent: false
+resume: ''
+reward_shaping: true
+rollout:
+  csr_k_max: 256
+  csr_legal_mask: true
+  storage_mode: full_obs
+save_dir: exps/h20_repaired_selfplay_30k_20260817
+save_every: 100
+seed: 170818
+torch_deterministic: false
+total_rollouts: 30000
+train_value_on_random_seats: false
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: h20_repaired_selfplay_30k_20260817
