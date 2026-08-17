@@ -30,13 +30,13 @@ ppo:
   max_grad_norm: 0.267
   adv_filt_rate: 0.75
 
-# Start from one learning system. Add belief and arrangement learning in
-# separate candidates only after the move-policy baseline passes its gates.
+# BeliefNet on by default. Arrangement stays off until the joint
+# move/belief baseline is stable.
 arr:
   enabled: false
 
 belief:
-  enabled: false
+  enabled: true
 
 # Ataraxos-style zero-retrieval path: save compact device state and rebuild
 # selected observations/legal masks on the GPU during PPO updates.

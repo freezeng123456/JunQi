@@ -49,9 +49,9 @@ class ArrangementTrainConfig:
 
 @dataclass
 class BeliefTrainConfig:
-    """Optional supervised belief-network training and inference."""
+    """Belief-network training and inference (default on)."""
 
-    enabled: bool = False
+    enabled: bool = True
     refresh_every: int = 1
     buffer_capacity: int = 12_000
     warmup_rollouts: int = 20

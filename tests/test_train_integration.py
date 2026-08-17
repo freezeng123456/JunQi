@@ -72,14 +72,11 @@ def test_arrangement_train_config_defaults():
 
 
 def test_belief_train_config_defaults():
-    """BeliefTrainConfig should be OFF by default (legacy-compat) and expose
-    the expected fields with sane defaults."""
+    """BeliefTrainConfig is ON by default after the vs-random 200R ablation."""
     mod = _load_train_module()
     cfg = mod.TrainConfig()
     assert hasattr(cfg, "belief")
-    # Off by default for legacy-compat: v16/v20 runs must be bit-identical
-    # to before this landed.
-    assert cfg.belief.enabled is False
+    assert cfg.belief.enabled is True
     assert cfg.belief.refresh_every == 1
     assert cfg.belief.buffer_capacity == 12_000
     assert cfg.belief.warmup_rollouts == 20
