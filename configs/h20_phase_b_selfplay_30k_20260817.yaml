@@ -1,0 +1,126 @@
+# Phase B — long self-play from the independently verified Phase-A policy.
+#
+# Resume from h20_phase_a_stability_20260817/ckpt_stable.pt.  Relative to the
+# verified Phase-A configuration, the only learning-distribution changes are:
+#   1. random_opponent: false  (all four seats use the current policy), and
+#   2. ppo.torch_compile: false (the previously verified self-play-safe path).
+# Belief remains disabled.  Primary vs-random evaluations keep using the
+# original fixed pool so self-play cannot silently regress the proven baseline.
+
+device: cuda
+total_rollouts: 30000
+save_every: 100
+eval_every: 50
+eval_num_games: 256
+eval_record_games: 1
+eval_record_beliefs: false
+eval_fixed_setup_pool: true
+eval_setup_seed: 20260817
+league_eval_games: 0
+early_stop_win_rate: 0.0
+early_stop_patience: 3
+early_stop_min_rollout: 300
+log_every: 10
+seed: 101
+torch_deterministic: false
+random_opponent: false
+train_value_on_random_seats: false
+reward_shaping: true
+use_wandb: false
+wandb_project: junqi-rl
+wandb_run_name: h20_phase_b_selfplay_30k_20260817
+save_dir: exps/h20_phase_b_selfplay_30k_20260817
+resume: ''
+
+env:
+  num_envs: 256
+  steps_per_env: 1024
+  max_num_moves: 4000
+  seed: 101
+  use_gpu_rollout: true
+
+net:
+  action_key_dim: 32
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  dropout: 0.0
+  embed_dim: 128
+  ff_factor: 4
+  n_head: 4
+  pos_emb_std: 0.02
+  use_cat_vf: true
+
+ppo:
+  adv_filt_rate: 0.75
+  adv_filt_thresh: 0.01
+  clip_range: 0.2
+  dtype: bfloat16
+  ema_decay: 0.999
+  gae_lambda: 0.5
+  gamma: 1.0
+  kl_coef: 0.1
+  kl_proxy_beta: 1.0
+  lr_ceil: 1.0e-04
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_floor: 5.0e-06
+  lr_schedule_unit: grad_step
+  max_grad_norm: 0.267
+  minibatch_size: 2048
+  num_epochs_per_rollout: 1
+  policy_coef: 1.0
+  td_lambda: 0.8
+  temperature_ceil: 0.1
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001
+  torch_compile: false
+  uniform_magnet: true
+  vf_coef: 1.0
+  weight_decay: 0.0
+
+rollout:
+  storage_mode: full_obs
+  csr_legal_mask: true
+  csr_k_max: 256
+
+arr:
+  enabled: true
+  refresh_every: 1
+  n_arr: 1024
+  storage_duration: 300
+  ema_decay: 0.999
+  reg_temp_init: 0.1
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_norm: 10.0
+  net:
+    depth: 4
+    dropout: 0.0
+    embed_dim: 512
+    ff_factor: 4
+    n_head: 8
+    n_vf_cat: 3
+    pos_emb_std: 0.1
+    use_cat_vf: true
+  ppo:
+    autocast_dtype: bfloat16
+    batch_size: 256
+    clip_range: 0.2
+    ent_pred_coef: 0.5
+    kl_coef: 0.1
+    lr: 3.0e-04
+    max_grad_norm: 0.5
+    num_epoch_per_train: 4
+    policy_coef: 1.0
+    vf_coef: 0.5
+    weight_decay: 0.0
+
+belief:
+  enabled: false
+  buffer_capacity: 50000
+  ema_decay: 0.999
+  infer_chunk_size: 256
+  refresh_every: 5
+  warmup_rollouts: 100
