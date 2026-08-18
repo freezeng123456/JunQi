@@ -87,6 +87,8 @@ class TrainConfig:
     eval_every: int = 50
     eval_num_games: int = 128
     eval_record_games: int = 1
+    eval_baseline_ckpt: str = ""
+    eval_baseline_games: int = 0
     eval_record_beliefs: bool = False
     # GPU setup pools are process-global. Re-upload this fixed pool before
     # every primary evaluation so ArrangementNet refreshes cannot silently

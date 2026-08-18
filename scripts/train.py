@@ -106,6 +106,7 @@ def _cleanup_distributed() -> None:
 
 from junqi_rl.analysis.random_eval import (
     evaluate_paired_vs_random,
+    evaluate_paired_head_to_head,
     evaluate_vs_random_cpu as evaluate_vs_random,
     evaluate_vs_random_gpu,
 )
@@ -623,6 +624,22 @@ def train(cfg: TrainConfig) -> None:
     # Only consulted when cfg.early_stop_win_rate > 0 and rollout >= min.
     _early_stop_low_streak = 0
     _best_eval_win_rate = -1.0
+    _eval_baseline_policy = None
+    if is_rank0 and cfg.eval_baseline_ckpt:
+        ckpt_path = cfg.eval_baseline_ckpt
+        if not os.path.isfile(ckpt_path):
+            raise FileNotFoundError(f"eval_baseline_ckpt not found: {ckpt_path}")
+        baseline_state = torch.load(
+            ckpt_path, map_location=device, weights_only=False
+        )
+        baseline_net_cfg = baseline_state["cfg"].net
+        _eval_baseline_policy = JunqiNet(baseline_net_cfg).to(device)
+        _eval_baseline_policy.load_state_dict(baseline_state["policy"])
+        _eval_baseline_policy.eval()
+        print(
+            f"[train] Frozen baseline for h2h: {ckpt_path} "
+            f"(embed={baseline_net_cfg.embed_dim}, depth={baseline_net_cfg.depth})"
+        )
 
     for rollout_idx in range(start_rollout, cfg.total_rollouts):
         mc.step = rollout_idx
@@ -1047,6 +1064,31 @@ def train(cfg: TrainConfig) -> None:
                           f"avg_len={avg_len:.0f}  done={done_games}/{requested_games}  "
                           f"ci95=[{eval_metrics.get('eval/win_rate_ci95_low', 0.0):.3f}, "
                           f"{eval_metrics.get('eval/win_rate_ci95_high', 1.0):.3f}]")
+
+                    if cfg.eval_baseline_ckpt:
+                        baseline_games = cfg.eval_baseline_games or cfg.eval_num_games
+                        h2h = evaluate_paired_head_to_head(
+                            eval_policy,
+                            _eval_baseline_policy,
+                            num_games=baseline_games,
+                            num_envs=cfg.env.num_envs,
+                            device=device,
+                            seed=eval_seed + 17,
+                            max_moves=cfg.env.max_num_moves,
+                            autocast_dtype=cfg.ppo.get_dtype(),
+                            greedy=False,
+                        )
+                        logger.log(h2h, step=rollout_idx)
+                        print(
+                            f"[h2h]   vs_baseline  win={h2h.get('h2h/win_rate', 0.0):.3f}  "
+                            f"loss={h2h.get('h2h/loss_rate', 0.0):.3f}  "
+                            f"draw={h2h.get('h2h/draw_rate', 0.0):.3f}  "
+                            f"avg_len={h2h.get('h2h/avg_game_len', 0.0):.0f}  "
+                            f"done={int(h2h.get('h2h/num_games', 0.0))}/"
+                            f"{int(h2h.get('h2h/requested_games', 0.0))}  "
+                            f"ci95=[{h2h.get('h2h/win_rate_ci95_low', 0.0):.3f}, "
+                            f"{h2h.get('h2h/win_rate_ci95_high', 1.0):.3f}]"
+                        )
 
                     if cfg.eval_record_games > 0:
                         # A replay is useful evidence, but it must not prevent
