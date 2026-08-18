@@ -133,7 +133,7 @@ JunQi currently relies on raw move_history channels (32-step ring) and whatever 
 | Steps per env between train iters | 202 (= 101 per player) | 512 (env steps per rollout) | 🟡 (different cadence) |
 | Transitions per training iter | ~310k / GPU × 16 GPU = 5M | ~65k / T4 | 🟡 |
 | Pool-of-setups mixing | 1,000 setups per player per GPU, **regenerated after each training iteration** | n_arr=1024, refresh_every=1 rollout | ✅ matches |
-| **Advantage filtering** (quantile+magnitude) | **top 25% by \|δ\|** AND \|δ\| ≥ 0.01 | adv_filt_rate=0.75, adv_filt_thresh=0.01 | ✅ exact match |
+| **Advantage filtering** (quantile+magnitude) | **top 25% by \|δ\|** AND \|δ\| ≥ 0.01 | `adv_filt_rate` is the *kept* fraction, so 0.75 trained on the top **75%** — the inverse. `ataraxos_selfplay.yaml` now sets 0.25 | ❌ was inverted (found 2026-08-18) |
 | Epochs per iter (move net) | **1** | 4 (v16 `num_epochs_per_rollout`) | 🟡 — we're over-training per rollout |
 | Epochs per iter (setup net) | 5 (over completed-game setups only) | 4 | ✅ close |
 | Data batch for move net | 202 batches of ~1536 (pre-filter) → ~380 / batch (post-filter) | minibatch_size=512 | 🟡 |
@@ -307,7 +307,7 @@ The paper runs single-seed ablations on a single H100:
 **What we have after P0**:
 - ✅ ArrangementNet with cat-VF + entropy prediction + AR piece placement head.
 - ✅ Arrangement pool upload, per-iter refresh, hash-dedup buffer.
-- ✅ Advantage filtering matched to paper (quantile 0.75, thresh 0.01).
+- ❌ Advantage filtering was **inverted**: `adv_filt_rate=0.75` keeps the top 75%, where the paper keeps the top 25%. Corrected 2026-08-18.
 - ✅ λ-returns with λ=0.5 advantage, λ=0.8 outcome.
 - ✅ EMA 0.999 on both setup and move nets.
 - ✅ Uniform magnet policy wired for move net.

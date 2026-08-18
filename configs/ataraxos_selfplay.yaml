@@ -41,7 +41,10 @@ ppo:
   torch_compile: false
   lr_schedule_unit: rollout
   max_grad_norm: 0.267
-  adv_filt_rate: 0.75
+  # Ataraxos trains on the top 25% of transitions by |advantage|. This
+  # field is the fraction KEPT, so the previous 0.75 trained on the top
+  # 75% -- the inverse -- diluting every update with low-signal samples.
+  adv_filt_rate: 0.25
 
 arr:
   enabled: true
@@ -63,7 +66,10 @@ eval_record_games: 0
 league_eval_games: 0
 log_every: 10
 
-eval_baseline_ckpt: /jizhicfs/freezeng123456/JunQi-runs/feat_ablate_200r_20260817/f_noshape/ckpt_000200.pt
+# The vs-random checkpoint saturated at ~1.0 by R150 and stopped ranking
+# anything. The yardstick is now the inverted-filter run's final state, so
+# h2h answers directly whether the corrected filter is an improvement.
+eval_baseline_ckpt: /jizhicfs/freezeng123456/JunQi-runs/ataraxos_selfplay_20260818/ckpt_000850.pt
 eval_baseline_games: 128
 
 device: cuda

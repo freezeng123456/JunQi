@@ -313,20 +313,16 @@ class RolloutBuffer:
         adv_std = adv.std() + 1e-8
         adv_norm = (adv - adv.mean()) / adv_std
 
-        # Advantage magnitude filter — keep large-|A| transitions only
+        # Advantage magnitude filter — train on the largest-|A|
+        # transitions. ``adv_filt_rate`` is the fraction kept, matching
+        # RolloutBufferGPU; this buffer used to read it as a floor on how
+        # many survive ``adv_filt_thresh``, i.e. the opposite knob.
         abs_adv = np.abs(adv_norm)
         thresh = self.adv_filt_thresh
+        if self.adv_filt_rate < 1.0:
+            q_thresh = float(np.quantile(abs_adv, 1.0 - self.adv_filt_rate))
+            thresh = max(thresh, q_thresh)
         adv_mask = abs_adv >= thresh
-        # Safety: don't filter more than adv_filt_rate fraction
-        n_total = T * N
-        n_kept = adv_mask.sum()
-        min_kept = int(n_total * (1.0 - self.adv_filt_rate))
-        if n_kept < min_kept:
-            # Lower threshold until we keep enough
-            sorted_abs = np.sort(abs_adv)[::-1]
-            if min_kept < n_total:
-                thresh = float(sorted_abs[min_kept - 1])
-            adv_mask = abs_adv >= thresh
 
         # Build index array
         indices = np.where(adv_mask)[0]

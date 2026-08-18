@@ -233,7 +233,13 @@ class PPOConfig:
     """Minimum normalised |advantage| to train on."""
 
     adv_filt_rate: float = 0.75
-    """Maximum fraction of transitions to filter out."""
+    """Fraction of transitions kept, ranked by |advantage|.
+
+    The buffers threshold at the ``1 - adv_filt_rate`` quantile, so 0.75
+    trains on the top 75%. Ataraxos trains on the top 25%
+    (``adv_filt_rate: 0.25``); the default is kept at 0.75 so the
+    vs-random screening baselines stay comparable.
+    """
 
     # --- Optimiser ---
     lr_coef: float = 0.5
