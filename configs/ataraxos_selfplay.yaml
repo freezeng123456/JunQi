@@ -15,7 +15,13 @@
 # strongest opponent we have that actually fights.
 
 env:
-  num_envs: 128
+  # The paper's top-25% filter needs a batch to cut from. At 128 envs it
+  # left 16,384 transitions per update and ran ~80 Elo behind the top-75%
+  # filter at equal rollouts. Measured on one H20 (fps / post-filter batch):
+  # 128 -> 12.1k / 16k, 512 -> 25.6k / 66k, 2048 -> 30.8k / 262k at 39.5 GiB
+  # of 97.8. Throughput saturates around 512, but the post-filter batch is
+  # what was binding, so take the 2048 rung.
+  num_envs: 2048
   steps_per_env: 512
   max_num_moves: 4000
   seed: 241
