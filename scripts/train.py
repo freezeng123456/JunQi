@@ -106,6 +106,7 @@ def _cleanup_distributed() -> None:
 
 from junqi_rl.analysis.random_eval import (
     evaluate_paired_vs_random,
+    evaluate_paired_head_to_head,
     evaluate_vs_random_cpu as evaluate_vs_random,
     evaluate_vs_random_gpu,
 )
@@ -623,6 +624,22 @@ def train(cfg: TrainConfig) -> None:
     # Only consulted when cfg.early_stop_win_rate > 0 and rollout >= min.
     _early_stop_low_streak = 0
     _best_eval_win_rate = -1.0
+    _eval_baseline_policy = None
+    if is_rank0 and cfg.eval_baseline_ckpt:
+        ckpt_path = cfg.eval_baseline_ckpt
+        if not os.path.isfile(ckpt_path):
+            raise FileNotFoundError(f"eval_baseline_ckpt not found: {ckpt_path}")
+        baseline_state = torch.load(
+            ckpt_path, map_location=device, weights_only=False
+        )
+        baseline_net_cfg = baseline_state["cfg"].net
+        _eval_baseline_policy = JunqiNet(baseline_net_cfg).to(device)
+        _eval_baseline_policy.load_state_dict(baseline_state["policy"])
+        _eval_baseline_policy.eval()
+        print(
+            f"[train] Frozen baseline for h2h: {ckpt_path} "
+            f"(embed={baseline_net_cfg.embed_dim}, depth={baseline_net_cfg.depth})"
+        )
 
     for rollout_idx in range(start_rollout, cfg.total_rollouts):
         mc.step = rollout_idx
@@ -751,9 +768,15 @@ def train(cfg: TrainConfig) -> None:
         if cfg.env.use_gpu_rollout:
             # Use v2 (zero-CPU hot path) when GPU buffer is available
             _collect = collect_rollout_gpu_v2 if isinstance(rollout, RolloutBufferGPU) else collect_rollout_gpu
+            # The behaviour policy must be the learner itself in eval mode.
+            # EMA is intentionally kept out of the PPO collection path: its
+            # parameter lag and separate BatchNorm buffers otherwise make the
+            # stored old log-probs off-policy before the first update starts.
+            behavior_policy = trainer.policy
+            behavior_policy.eval()
             kwargs = dict(
                 rollout_world=env,
-                policy=trainer.ema.model,
+                policy=behavior_policy,
                 buffer=rollout,
                 device=device,
                 seed_base=cfg.env.seed + rollout_idx,
@@ -761,7 +784,7 @@ def train(cfg: TrainConfig) -> None:
             )
             # Pass random_opponent from config to v2 collector. When
             # cfg.random_opponent=False, the collector will use the
-            # current EMA policy for the non-training team (self-play).
+            # current behaviour policy for the non-training team (self-play).
             if _collect is collect_rollout_gpu_v2:
                 kwargs["random_opponent"] = cfg.random_opponent
                 # Plumb the cfg.ppo.torch_compile flag through. Without this
@@ -806,9 +829,11 @@ def train(cfg: TrainConfig) -> None:
                 kwargs["on_reset"] = _refresh_arr_snapshot_after_reset
             _collect(**kwargs)
         else:
+            behavior_policy = trainer.policy
+            behavior_policy.eval()
             collect_rollout(
                 env=env,
-                policy=trainer.ema.model,   # use EMA policy for data collection
+                policy=behavior_policy,
                 rollout=rollout,
                 device=device,
                 seed_base=cfg.env.seed + rollout_idx,
@@ -926,6 +951,14 @@ def train(cfg: TrainConfig) -> None:
                 mean_ret = summary.get("rollout/mean_return", float("nan"))
                 lr = summary.get("train/lr", float("nan"))
                 elapsed = summary.get("time/elapsed_s", 0.0)
+                kl_loss = summary.get("train/kl_loss", float("nan"))
+                approx_kl = summary.get("train/approx_kl", float("nan"))
+                kl_log_ratio_max = summary.get(
+                    "train/kl_log_ratio_abs_max", float("nan")
+                )
+                nan_skips = summary.get("train/nan_skip_total", 0.0)
+                grad_skips = summary.get("train/grad_skip_total", 0.0)
+                policy_kept = summary.get("rollout/n_policy_kept", 0.0)
                 # In DDP mode this prints PER-RANK fps; cluster-wide
                 # throughput is approximately (fps × world_size).
                 fps = (cfg.env.num_envs * cfg.env.steps_per_env * cfg.log_every
@@ -949,7 +982,10 @@ def train(cfg: TrainConfig) -> None:
                     f"[{rollout_idx:6d}] "
                     f"loss_p={policy_loss:+.4f}  loss_v={value_loss:.4f}  "
                     f"ret={mean_ret:+.4f}  lr={lr:.2e}  "
-                    f"fps={fps:.0f}  elapsed={elapsed:.0f}s"
+                    f"fps={fps:.0f}  elapsed={elapsed:.0f}s  "
+                    f"kl_loss={kl_loss:+.4f}  approx_kl={approx_kl:+.4f}  "
+                    f"kl_max={kl_log_ratio_max:.3f}  kept={policy_kept:.0f}  "
+                    f"nan_skip={nan_skips:.0f}  grad_skip={grad_skips:.0f}"
                     f"{arr_suffix}"
                 )
             t_rollout_start = time.time()
@@ -979,20 +1015,31 @@ def train(cfg: TrainConfig) -> None:
                 dist.barrier()
 
         # ---- Periodic evaluation (rank-0 only; others wait) ----
-        # Eval is single-process by design (uses trainer.ema.model, which is
-        # identical on every rank because gradients are all-reduced and EMA
-        # is applied identically per rank). Doing it once on rank 0 and
-        # broadcasting the early-stop verdict is far cheaper than running
-        # 8 redundant eval loops in parallel.
+        # Evaluate the actual learner policy used for collection. EMA remains
+        # checkpoint metadata rather than a second, lagging definition of what
+        # the main win-rate means.
         if (rollout_idx + 1) % cfg.eval_every == 0:
             eval_should_stop = torch.zeros(1, dtype=torch.long,
                                            device=device if device.type == "cuda" else "cpu")
             if is_rank0:
                 print(f"[train] Evaluating (rollout {rollout_idx + 1})…")
+                pool_size = 0
                 try:
                     eval_seed = cfg.env.seed + rollout_idx + 1_000_000
+                    if (
+                        cfg.eval_fixed_setup_pool
+                        and cfg.env.use_gpu_rollout
+                        and hasattr(env, "upload_fixed_evaluation_setup_pool")
+                    ):
+                        pool_size = env.upload_fixed_evaluation_setup_pool(
+                            seed=cfg.eval_setup_seed,
+                        )
+                    else:
+                        pool_size = 0
+                    eval_policy = trainer.policy
+                    eval_policy.eval()
                     eval_metrics = evaluate_paired_vs_random(
-                        trainer.ema.model,
+                        eval_policy,
                         num_games=cfg.eval_num_games,
                         num_envs=cfg.env.num_envs,
                         use_gpu=cfg.env.use_gpu_rollout,
@@ -1002,6 +1049,9 @@ def train(cfg: TrainConfig) -> None:
                         autocast_dtype=cfg.ppo.get_dtype(),
                         greedy=True,
                     )
+                    if pool_size:
+                        eval_metrics["eval/fixed_setup_pool_size"] = float(pool_size)
+                        eval_metrics["eval/fixed_setup_seed"] = float(cfg.eval_setup_seed)
                     logger.log(eval_metrics, step=rollout_idx)
                     win_rate = eval_metrics.get("eval/win_rate", 0.0)
                     loss_rate = eval_metrics.get("eval/loss_rate", 0.0)
@@ -1016,37 +1066,70 @@ def train(cfg: TrainConfig) -> None:
                           f"ci95=[{eval_metrics.get('eval/win_rate_ci95_low', 0.0):.3f}, "
                           f"{eval_metrics.get('eval/win_rate_ci95_high', 1.0):.3f}]")
 
-                    if cfg.eval_record_games > 0:
-                        from junqi_rl.analysis.record import record_game_with_policy
+                    if cfg.eval_baseline_ckpt:
+                        baseline_games = cfg.eval_baseline_games or cfg.eval_num_games
+                        h2h = evaluate_paired_head_to_head(
+                            eval_policy,
+                            _eval_baseline_policy,
+                            num_games=baseline_games,
+                            num_envs=cfg.env.num_envs,
+                            device=device,
+                            seed=eval_seed + 17,
+                            max_moves=cfg.env.max_num_moves,
+                            autocast_dtype=cfg.ppo.get_dtype(),
+                            greedy=False,
+                        )
+                        logger.log(h2h, step=rollout_idx)
+                        print(
+                            f"[h2h]   vs_baseline  win={h2h.get('h2h/win_rate', 0.0):.3f}  "
+                            f"loss={h2h.get('h2h/loss_rate', 0.0):.3f}  "
+                            f"draw={h2h.get('h2h/draw_rate', 0.0):.3f}  "
+                            f"avg_len={h2h.get('h2h/avg_game_len', 0.0):.0f}  "
+                            f"done={int(h2h.get('h2h/num_games', 0.0))}/"
+                            f"{int(h2h.get('h2h/requested_games', 0.0))}  "
+                            f"ci95=[{h2h.get('h2h/win_rate_ci95_low', 0.0):.3f}, "
+                            f"{h2h.get('h2h/win_rate_ci95_high', 1.0):.3f}]"
+                        )
 
-                        replay_dir = os.path.join(cfg.save_dir, "replays")
-                        os.makedirs(replay_dir, exist_ok=True)
-                        for replay_idx in range(cfg.eval_record_games):
-                            policy_team = replay_idx & 1
-                            replay_seed = eval_seed + replay_idx
-                            trajectory = record_game_with_policy(
-                                trainer.ema.model,
-                                rng_seed=replay_seed,
-                                device=device,
-                                max_steps=cfg.env.max_num_moves,
-                                greedy=True,
-                                random_opponent=True,
-                                policy_team=policy_team,
-                                record_beliefs=cfg.eval_record_beliefs,
-                                meta={
-                                    "rollout": rollout_idx + 1,
-                                    "policy_team": policy_team,
-                                    "checkpoint_kind": "ema",
-                                    **eval_metrics,
-                                },
-                            )
-                            replay_path = os.path.join(
-                                replay_dir,
-                                f"eval_{rollout_idx + 1:06d}_"
-                                f"{replay_idx:02d}_team{policy_team}.npz",
-                            )
-                            trajectory.save(replay_path)
-                            print(f"[eval] Replay saved: {replay_path}")
+                    if cfg.eval_record_games > 0:
+                        # A replay is useful evidence, but it must not prevent
+                        # league evaluation, best-checkpoint selection, or
+                        # early-stop decisions. Keep this optional artifact
+                        # path isolated from the main evaluation transaction.
+                        try:
+                            from junqi_rl.analysis.record import record_game_with_policy
+
+                            replay_dir = os.path.join(cfg.save_dir, "replays")
+                            os.makedirs(replay_dir, exist_ok=True)
+                            for replay_idx in range(cfg.eval_record_games):
+                                policy_team = replay_idx & 1
+                                replay_seed = eval_seed + replay_idx
+                                trajectory = record_game_with_policy(
+                                    eval_policy,
+                                    rng_seed=replay_seed,
+                                    device=device,
+                                    max_steps=cfg.env.max_num_moves,
+                                    greedy=True,
+                                    random_opponent=True,
+                                    policy_team=policy_team,
+                                    record_beliefs=cfg.eval_record_beliefs,
+                                    meta={
+                                        "rollout": rollout_idx + 1,
+                                        "policy_team": policy_team,
+                                        "checkpoint_kind": "policy",
+                                        **eval_metrics,
+                                    },
+                                )
+                                replay_path = os.path.join(
+                                    replay_dir,
+                                    f"eval_{rollout_idx + 1:06d}_"
+                                    f"{replay_idx:02d}_team{policy_team}.npz",
+                                )
+                                trajectory.save(replay_path)
+                                print(f"[eval] Replay saved: {replay_path}")
+                        except Exception:
+                            print("[eval] Replay recording failed; continuing evaluation:")
+                            traceback.print_exc()
 
                     if cfg.league_eval_games > 0:
                         from junqi_rl.analysis.evaluate import eval_head_to_head
@@ -1077,14 +1160,22 @@ def train(cfg: TrainConfig) -> None:
                                 map_location=device,
                                 weights_only=False,
                             )
-                            ema_state = opponent_state.get("ema", {})
-                            weights = (
-                                ema_state.get("shadow")
-                                if isinstance(ema_state, dict)
-                                else None
-                            )
+                            # League comparisons use the same raw learner
+                            # definition as the primary score and collection.
+                            # Keep EMA only as a backwards-compatible fallback
+                            # for a checkpoint that lacks raw policy weights.
+                            weights = opponent_state.get("policy")
                             if weights is None:
-                                weights = opponent_state["policy"]
+                                ema_state = opponent_state.get("ema", {})
+                                weights = (
+                                    ema_state.get("shadow")
+                                    if isinstance(ema_state, dict)
+                                    else None
+                                )
+                            if weights is None:
+                                raise KeyError(
+                                    "league checkpoint has neither policy nor EMA weights"
+                                )
                             opponent.load_state_dict(weights)
                             opponent.eval()
 
@@ -1094,7 +1185,7 @@ def train(cfg: TrainConfig) -> None:
                             )
                             league_shards = [
                                 eval_head_to_head(
-                                    trainer.ema.model,
+                                    eval_policy,
                                     opponent,
                                     num_games=league_team0_games,
                                     first_team=0,
@@ -1107,7 +1198,7 @@ def train(cfg: TrainConfig) -> None:
                             if league_team1_games > 0:
                                 league_shards.append(
                                     eval_head_to_head(
-                                        trainer.ema.model,
+                                        eval_policy,
                                         opponent,
                                         num_games=league_team1_games,
                                         first_team=1,
@@ -1200,6 +1291,9 @@ def train(cfg: TrainConfig) -> None:
                 except Exception:
                     print("[train] Evaluation failed:")
                     traceback.print_exc()
+                finally:
+                    if pool_size and hasattr(env, "restore_training_setup_pool"):
+                        env.restore_training_setup_pool()
             # Broadcast the should-stop flag to every rank so they all exit
             # the loop together. Without this, only rank 0 would see the
             # verdict and the others would deadlock at the next all-reduce.

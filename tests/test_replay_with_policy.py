@@ -92,6 +92,15 @@ def test_probs_to_top_k():
     assert ids[2] == 30 and abs(ps[2] - 0.2) < 1e-6
 
 
+def test_categorical_value_to_scalar():
+    """Replay recording must accept JunqiNet's three-bin value head."""
+    torch = pytest.importorskip("torch")
+    from junqi_rl.analysis.record import _value_to_scalar
+
+    log_probs = torch.log(torch.tensor([[0.2, 0.3, 0.5]], dtype=torch.float32))
+    assert abs(_value_to_scalar(log_probs) - 0.3) < 1e-6
+
+
 @pytest.mark.skipif(not _HAS_TORCH, reason="torch+cuda not available")
 def test_record_game_with_policy_smoke():
     """Run a random untrained net for <=20 steps, save + reload."""
@@ -101,6 +110,7 @@ def test_record_game_with_policy_smoke():
     cfg = JunqiNetConfig(
         cnn_channels=16, cnn_layers=2, depth=1,
         embed_dim=32, n_head=2, ff_factor=2, dropout=0.0,
+        use_cat_vf=True,
     )
     policy = JunqiNet(cfg).to("cuda").eval()
     traj = record_game_with_policy(

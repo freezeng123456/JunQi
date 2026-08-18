@@ -52,6 +52,24 @@ def test_forward_on_clean_inputs_does_not_increment_counter():
     assert not torch.isnan(out["log_probs"]).any()
 
 
+def test_forward_uses_stable_sentinel_and_samples_only_legal_actions():
+    """The compiled-safe mask must still make an illegal sample impossible."""
+    torch.manual_seed(7)
+    net = _tiny_net()
+    net.eval()
+    obs_sp = torch.randn(1, OBS_CHANNELS, 17, 17)
+    obs_gl = torch.randn(1, 28)
+    legal = torch.zeros(1, 16641, dtype=torch.bool)
+    legal[0, :4] = True
+    with torch.no_grad():
+        out = net(obs_sp, obs_gl, legal)
+    illegal_log_probs = out["log_probs"][0, ~legal[0]]
+    assert torch.isfinite(illegal_log_probs).all()
+    assert illegal_log_probs.max() < -1e8
+    assert torch.isfinite(out["log_probs"][0, legal[0]]).all()
+    assert legal[0, out["action"][0].long()]
+
+
 def _legal_log_probs_finite(lp_row, legal_row):
     """log_probs must be finite at LEGAL positions; illegals can be -inf."""
     return torch.isfinite(lp_row[legal_row]).all() and not torch.isnan(lp_row).any()

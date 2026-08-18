@@ -80,71 +80,6 @@ int OsWrite(
   return total;
 }
 
-static const char *const kChessColorDirs[] = {
-	"orange", "purple", "green", "blue"
-};
-
-static const char *const kChessTypeFiles[] = {
-	[NONE] = NULL,
-	[DARK] = "dark",
-	[JUNQI] = "junqi",
-	[DILEI] = "dilei",
-	[ZHADAN] = "zhadan",
-	[SILING] = "siling",
-	[JUNZH] = "junzh",
-	[SHIZH] = "shizh",
-	[LVZH] = "lvzh",
-	[TUANZH] = "tuanzh",
-	[YINGZH] = "yingzh",
-	[LIANZH] = "lianzh",
-	[PAIZH] = "paizh",
-	[GONGB] = "gongb"
-};
-
-static void ClearChessPieces(Junqi *pJunqi, enum ChessColor color)
-{
-	int i;
-
-	pJunqi->Chess[color][NONE] = NULL;
-	for(i = DARK; i <= GONGB; i++)
-	{
-		if(pJunqi->Chess[color][i] != NULL)
-		{
-			g_object_unref(pJunqi->Chess[color][i]);
-			pJunqi->Chess[color][i] = NULL;
-		}
-	}
-}
-
-/* Load each sprite as its own 36x27 image.  This keeps crop boundaries
- * independent, so a bad tile can never shift every following tile in a
- * colour strip. */
-static int LoadChessPieces(Junqi *pJunqi, enum ChessColor color)
-{
-	char path[160];
-	GError *error = NULL;
-	int i;
-
-	ClearChessPieces(pJunqi, color);
-	for(i = DARK; i <= GONGB; i++)
-	{
-		g_snprintf(path, sizeof(path), "./res/pieces/%s/%s.bmp",
-			kChessColorDirs[color], kChessTypeFiles[i]);
-		pJunqi->Chess[color][i] = gdk_pixbuf_new_from_file(path, &error);
-		if(pJunqi->Chess[color][i] == NULL)
-		{
-			if(error != NULL)
-			{
-				g_error_free(error);
-				error = NULL;
-			}
-			ClearChessPieces(pJunqi, color);
-			return 0;
-		}
-	}
-	return 1;
-}
-
 void LoadChess(Junqi *pJunqi, enum ChessColor color)
 {
 	int iWidth, iHeight;
@@ -169,39 +104,36 @@ void LoadChess(Junqi *pJunqi, enum ChessColor color)
 
 void LoadChessImage(Junqi *pJunqi)
 {
-	static const char *const kChessStrips[] = {
+	static const char *const kChessStrips[4] = {
 		"./res/orange.bmp", "./res/purple.bmp",
 		"./res/green.bmp", "./res/blue.bmp"
 	};
 	int i;
-	int bLoadedPieces = 1;
 
 	for(i = 0; i < 4; i++)
 	{
-		pJunqi->ChessImage[i] = NULL;
-		if(!LoadChessPieces(pJunqi, i))
-		{
-			bLoadedPieces = 0;
-			break;
-		}
-	}
-	if(bLoadedPieces)
-	{
-		return;
-	}
-
-	/* Keep the original strips as a compatibility fallback for older
-	 * packages that do not contain res/pieces. */
-	g_warning("Individual chess sprites unavailable; falling back to color strips");
-	for(i = 0; i < 4; i++)
-	{
-		ClearChessPieces(pJunqi, i);
 		pJunqi->ChessImage[i] = gdk_pixbuf_new_from_file(kChessStrips[i], NULL);
-		if(pJunqi->ChessImage[i] != NULL)
+		if(pJunqi->ChessImage[i] == NULL)
 		{
-			LoadChess(pJunqi, i);
+			g_warning("Unable to load native chess strip: %s", kChessStrips[i]);
+			continue;
 		}
+		LoadChess(pJunqi, i);
 	}
+}
+
+/* The replay file stores the four sides in the original board order.  Keep
+ * that order explicit so a stale player-colour setting can never paint all
+ * four sides with the same strip. */
+static enum ChessColor ChessColorForDir(const Junqi *pJunqi, int dir)
+{
+	static const enum ChessColor kReplayColors[4] = {
+		ORANGE, PURPLE, GREEN, BLUE
+	};
+
+	if(pJunqi != NULL && (pJunqi->bReplay || pJunqi->bAnalyse))
+		return kReplayColors[dir & 3];
+	return (enum ChessColor)((dir + pJunqi->eColor) & 3);
 }
 
 void InitLineup(Junqi *pJunqi, enum ChessColor color)
@@ -228,7 +160,7 @@ void SetChessImageType(Junqi *pJunqi, int dir, int i, int iType)
 	GdkPixbuf *pRotate90;
 	GdkPixbuf *pRotate270;
 
-	pPixbuf = pJunqi->Chess[(dir+pJunqi->eColor)%4][iType];
+	pPixbuf = pJunqi->Chess[ChessColorForDir(pJunqi, dir)][iType];
 	if (pPixbuf == NULL) return;
 	pRotate90 = gdk_pixbuf_rotate_simple(
 			pPixbuf, GDK_PIXBUF_ROTATE_COUNTERCLOCKWISE);
@@ -1578,6 +1510,51 @@ void LoadReplayLineup(Junqi *pJunqi)
 
 }
 
+int LoadReplayPath(Junqi *pJunqi, const char *path)
+{
+	int fd;
+	u8 aBuf[PAGE_SIZE];
+	int bytes_read;
+	int max_step = 0;
+	int lineup_dir;
+
+	if(pJunqi == NULL || path == NULL || path[0] == '\0')
+		return 0;
+	fd = open(path, O_RDONLY);
+	if(fd < 0)
+		return 0;
+	bytes_read = OsRead(fd, aBuf, PAGE_SIZE, 0);
+	junqi_file_close(fd);
+	if(bytes_read < MOVE_OFFSET || memcmp(aBuf, aMagic, 4) != 0)
+		return 0;
+
+	memcpy(&max_step, &aBuf[4], sizeof(max_step));
+	if(max_step < 0 || max_step > (bytes_read - MOVE_OFFSET) / 4 ||
+			max_step > (PAGE_SIZE - MOVE_OFFSET) / 4)
+		return 0;
+	for(lineup_dir = 0; lineup_dir < 4; lineup_dir++)
+	{
+		if(!ValidateLineupBytes(&aBuf[8 + 30 * lineup_dir]))
+			return 0;
+	}
+
+	memset(pJunqi->aReplay, 0, sizeof(pJunqi->aReplay));
+	memcpy(pJunqi->aReplay, aBuf, (size_t)bytes_read);
+	pJunqi->iReOfst = MOVE_OFFSET + max_step * 4;
+	pJunqi->bReplay = 1;
+	LoadReplayLineup(pJunqi);
+	ReSetChessBoard(pJunqi);
+	ShowReplaySlider(pJunqi);
+	gtk_adjustment_set_upper(pJunqi->slider_adj, max_step);
+	gtk_adjustment_set_value(pJunqi->slider_adj, 0);
+	pJunqi->bStart = 1;
+	pJunqi->bStop = 1;
+	pJunqi->iRpStep = 0;
+	pJunqi->bResetFlag = 1;
+	ResetReplayInfo(pJunqi);
+	return 1;
+}
+
 void OpenReplay(GtkNativeDialog *dialog,
         gint             response_id,
         gpointer         user_data)
@@ -1672,6 +1649,7 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
     {
     	preStep = 0;
     	pJunqi->bResetFlag = 0;
+	ResetReplayInfo(pJunqi);
     	ReSetChessBoard(pJunqi);
     }
 
@@ -1692,6 +1670,14 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 				return;
 			}
 			pJunqi->eTurn = iDir;
+			pJunqi->replay_last_dir = iDir;
+			pJunqi->replay_last_src_x = -1;
+			pJunqi->replay_last_src_y = -1;
+			pJunqi->replay_last_dst_x = -1;
+			pJunqi->replay_last_dst_y = -1;
+			pJunqi->replay_last_src_type = NONE;
+			pJunqi->replay_last_dst_type = NONE;
+			pJunqi->replay_last_event = event;
 			if( event==SURRENDER_EVENT )
 			{
 				DestroyAllChess(pJunqi, iDir);
@@ -1753,6 +1739,13 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 		}
 		//设置当前下棋方
 		pJunqi->eTurn = pSrc->pLineup->iDir;
+		pJunqi->replay_last_dir = pSrc->pLineup->iDir;
+		pJunqi->replay_last_src_x = p1.x;
+		pJunqi->replay_last_src_y = p1.y;
+		pJunqi->replay_last_dst_x = p2.x;
+		pJunqi->replay_last_dst_y = p2.y;
+		pJunqi->replay_last_src_type = pSrc->type;
+		pJunqi->replay_last_dst_type = pDst->type;
 
 		if( IsEnableMove(pJunqi, pSrc, pDst, 1) )
 		{
@@ -1760,6 +1753,7 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 			gtk_widget_hide(pJunqi->redRectangle[1]);
 			int type;
 			type = CompareChess(pSrc, pDst);
+			pJunqi->replay_last_event = type;
 			PlayResult(pJunqi, pSrc, pDst, type);
 			ChessTurn(pJunqi);
 			if( i==pJunqi->iRpStep-1 )
@@ -1779,6 +1773,7 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 		}
 	}
 	preStep = pJunqi->iRpStep;
+	UpdateReplayInfo(pJunqi, pJunqi->iRpStep, max_step);
 
 }
 
@@ -1921,7 +1916,7 @@ void RefreshChessBoardDisplay(Junqi *pJunqi)
             }
 
             // 获取基础图片
-            basePixbuf = pJunqi->Chess[(i+pJunqi->eColor)%4][iType];
+            basePixbuf = pJunqi->Chess[ChessColorForDir(pJunqi, i)][iType];
             
             // 更新 HOME/OPPS 两个独立控件（两者可能在不同帧显示）。
             if(pLineup->pImage[0])

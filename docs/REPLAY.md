@@ -40,6 +40,37 @@ supports play/pause, first/previous/next/last, timeline scrubbing, keyboard
 arrows, playback speed, piece labels, event summaries, alive counts and RL
 Top-K/value inspection.
 
+## Original GTK native client
+
+The repository's original native client is `legacy_gui`, not the web page. It
+keeps the original 733×688 four-player board, background, menu layout and the
+original four color-specific sprite strips (`orange.bmp`, `purple.bmp`,
+`green.bmp`, and `blue.bmp`) under `legacy_gui/res`. The right-hand area is used
+for the replay inspector: current step, action
+coordinates and piece names, combat event, per-seat alive counts, and team
+totals.
+
+Build it on a machine with GTK3 development files installed:
+
+```bash
+make -C legacy_gui PROFILE=release
+```
+
+The legacy client reads compact `.jql` files. Convert a modern RL `.npz`
+recording first:
+
+```bash
+python scripts/export_legacy_jql.py \
+  runs/victory.npz \
+  runs/victory.jql \
+  --metadata runs/victory.native.json
+```
+
+Then launch `legacy_gui/bin/JunQiGUI runs/victory.jql`, or use the native
+client's 「文件」→「打开复盘」 menu. The exporter validates the modern
+trajectory before writing the legacy header, four 30-piece lineups, and
+coordinate action log.
+
 ## RL policy replay
 
 `junqi_rl.analysis.record_game_with_policy(..., record_beliefs=True)` writes a

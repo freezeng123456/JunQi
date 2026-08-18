@@ -1,0 +1,31 @@
+{
+  "source": "/Users/zenghang/Documents/Codex/2026-08-15/new-chat-2/replay_analysis_20260815/victory_team0_seed2026081500.npz",
+  "legacy_file": "/Users/zenghang/Documents/Codex/2026-08-15/new-chat-2/native_recovery/victory_team0_seed2026081500.jql",
+  "steps": 603,
+  "rules_version": "1.1.0",
+  "state_version": "2.0",
+  "winner_team": 0,
+  "draw": false,
+  "meta": {
+    "run_id": "h20_long_300_256x1024_20260815",
+    "checkpoint": "/root/JunQi/exps/h20_long_300_256x1024_20260815/ckpt_000300.pt",
+    "commit": "2c238c9cd01dccb136b59bfe249559a7b4214648",
+    "record_protocol": "cpu_GameState_vs_random_opponent",
+    "policy_team": 0,
+    "value_adapter": "categorical_logprob_to_expectation_bins_-1_0_1",
+    "seed_trial": 0,
+    "source": "junqi_rl.analysis.record_game_with_policy",
+    "policy_type": "ScalarValueReplayPolicy",
+    "device": "cuda",
+    "greedy": true,
+    "random_opponent": true,
+    "top_k": 16,
+    "record_beliefs": true
+  },
+  "belief_shape": [
+    603,
+    4,
+    12,
+    289
+  ]
+}

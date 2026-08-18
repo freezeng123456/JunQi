@@ -302,3 +302,162 @@ __all__ = [
     "evaluate_vs_random_cpu",
     "evaluate_vs_random_gpu",
 ]
+
+@torch.no_grad()
+def evaluate_head_to_head_gpu(
+    first_policy: "JunqiNet",
+    second_policy: "JunqiNet",
+    *,
+    num_envs: int = 64,
+    num_games: int = 128,
+    device: str | torch.device = "cuda",
+    seed: int = 0,
+    max_moves: int = 4000,
+    autocast_dtype: torch.dtype | None = None,
+    first_team: int = 0,
+    greedy: bool = True,
+) -> dict[str, float]:
+    """Evaluate two (possibly different-sized) policies on GPU.
+
+    ``first_team`` is the team assignment for ``first_policy`` (0=RED, 1=BLUE).
+    Metrics are from first_policy's point of view.
+    """
+
+    from junqi_rl.gpu_rollout import GpuRollout
+
+    if first_team not in (0, 1):
+        raise ValueError(f"first_team must be 0 or 1, got {first_team}")
+    if num_games <= 0 or num_envs <= 0:
+        raise ValueError("num_games and num_envs must be positive")
+
+    dev = torch.device(device)
+    first_policy.eval()
+    second_policy.eval()
+    batch_size = min(num_envs, num_games)
+    device_id = dev.index or 0
+    cache_key = (batch_size, device_id)
+    if cache_key not in _GPU_ROLLOUT_CACHE:
+        _GPU_ROLLOUT_CACHE[cache_key] = GpuRollout(
+            num_envs=batch_size,
+            device_id=device_id,
+        )
+    rollout = _GPU_ROLLOUT_CACHE[cache_key]
+    rollout.reset(seed_base=seed)
+
+    wins = losses = draws = total_games = total_steps = 0
+
+    while total_games < num_games:
+        acting = rollout.turn_torch().clone()
+        obs_spatial, obs_global = rollout.build_acting_seat_observation_torch(
+            acting
+        )
+        legal_mask = rollout.legal_mask_canonical_torch_device(acting)
+
+        with _autocast_context(dev, autocast_dtype):
+            if greedy:
+                actions_first = first_policy.act_greedy(
+                    obs_spatial, obs_global, legal_mask
+                )
+                actions_second = second_policy.act_greedy(
+                    obs_spatial, obs_global, legal_mask
+                )
+            else:
+                act_f = getattr(first_policy, "_orig_act", first_policy.act)
+                act_s = getattr(second_policy, "_orig_act", second_policy.act)
+                actions_first, _, _ = act_f(obs_spatial, obs_global, legal_mask)
+                actions_second, _, _ = act_s(obs_spatial, obs_global, legal_mask)
+        actions_first = actions_first.to(torch.int32)
+        actions_second = actions_second.to(torch.int32)
+        is_second = (acting.to(torch.int64) & 1) != first_team
+        actions = torch.where(is_second, actions_second, actions_first)
+
+        result = rollout.step_device_torch(actions, acting)
+        terminated = result["terminated"]
+        total_steps += batch_size
+
+        if terminated.any():
+            term_np = terminated.cpu().numpy()
+            winner_np = result["winner_team"].cpu().numpy()
+            draw_np = result["draw"].cpu().numpy()
+            for env_idx in range(batch_size):
+                if not term_np[env_idx] or total_games >= num_games:
+                    continue
+                total_games += 1
+                if draw_np[env_idx]:
+                    draws += 1
+                elif winner_np[env_idx] == first_team:
+                    wins += 1
+                else:
+                    losses += 1
+            rollout.reset_terminated_device(seed=seed + total_games)
+
+        if total_steps > num_games * max_moves:
+            break
+
+    completed = min(total_games, num_games)
+    requested = max(1, num_games)
+    completed_denom = max(1, completed)
+    metrics = EvaluationCounts(
+        wins=wins,
+        losses=losses,
+        draws=draws,
+        ongoing=max(0, num_games - completed),
+    ).as_metrics(prefix="h2h")
+    metrics.update(
+        {
+            "h2h/avg_game_len": total_steps / completed_denom,
+            "h2h/avg_game_len_all": total_steps / requested,
+            "h2h/first_team": float(first_team),
+        }
+    )
+    return metrics
+
+
+def evaluate_paired_head_to_head(
+    first_policy: "JunqiNet",
+    second_policy: "JunqiNet",
+    *,
+    num_games: int,
+    num_envs: int,
+    device: str | torch.device,
+    seed: int,
+    max_moves: int,
+    autocast_dtype: torch.dtype | None = None,
+    greedy: bool = True,
+) -> dict[str, float]:
+    """Both team assignments on paired seeds; metrics from first_policy."""
+
+    if num_games <= 0:
+        raise ValueError("num_games must be positive")
+    team_zero_games = (num_games + 1) // 2
+    team_one_games = num_games - team_zero_games
+    shards = [
+        evaluate_head_to_head_gpu(
+            first_policy,
+            second_policy,
+            num_envs=num_envs,
+            num_games=team_zero_games,
+            device=device,
+            seed=seed,
+            max_moves=max_moves,
+            autocast_dtype=autocast_dtype,
+            first_team=0,
+            greedy=greedy,
+        )
+    ]
+    if team_one_games > 0:
+        shards.append(
+            evaluate_head_to_head_gpu(
+                first_policy,
+                second_policy,
+                num_envs=num_envs,
+                num_games=team_one_games,
+                device=device,
+                seed=seed,
+                max_moves=max_moves,
+                autocast_dtype=autocast_dtype,
+                first_team=1,
+                greedy=greedy,
+            )
+        )
+    return merge_evaluations(*shards, prefix="h2h")

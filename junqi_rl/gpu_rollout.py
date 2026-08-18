@@ -440,6 +440,9 @@ def _build_seat_strongholds() -> np.ndarray:
 
 # Module-level flag: have we uploaded the reset pool?
 _reset_pool_uploaded = False
+# Host copy of the pool training draws from. Evaluation overwrites the
+# device pool with a fixed distribution, so training needs a way back.
+_training_setup_pool: np.ndarray | None = None
 
 
 def _pack_from_batched(b: BatchedGameState) -> dict[str, np.ndarray]:
@@ -596,7 +599,7 @@ class GpuRollout:
            canonical lineup per game; see :func:`_build_canonical_pool`).
         3. neither — legacy uniform-random for all seats.
         """
-        global _reset_pool_uploaded
+        global _reset_pool_uploaded, _training_setup_pool
         if _reset_pool_uploaded:
             return
 
@@ -635,6 +638,7 @@ class GpuRollout:
         else:
             pool = _build_setup_pool(pool_size, seed=42)
         _cuda.upload_setup_pool(pool)
+        _training_setup_pool = pool
         # Phase 1 belief: upload prior table and stronghold positions
         if hasattr(_cuda, "upload_belief_prior_table"):
             prior_table = _build_belief_prior_table()
@@ -642,6 +646,38 @@ class GpuRollout:
             strongholds = _build_seat_strongholds()
             _cuda.upload_seat_strongholds(strongholds)
         _reset_pool_uploaded = True
+
+    def upload_fixed_evaluation_setup_pool(
+        self,
+        *,
+        seed: int,
+        pool_size: int = DEFAULT_POOL_SIZE,
+    ) -> int:
+        """Install a deterministic uniform setup pool for a primary eval.
+
+        The CUDA setup pool is process-global, so evaluation has to
+        overwrite it to score against a fixed distribution. The caller is
+        responsible for calling :meth:`restore_training_setup_pool`
+        afterwards.
+        """
+        pool = _build_setup_pool(pool_size, seed=int(seed))
+        _cuda.upload_setup_pool(pool)
+        return int(pool.shape[0])
+
+    def restore_training_setup_pool(self) -> int:
+        """Re-install the pool training was drawing from before an eval.
+
+        Only ArrangementNet re-uploads a pool per rollout, so without this
+        an arrangement-free run silently inherits the uniform evaluation
+        distribution after its first eval and ignores ``mixed_setup`` /
+        ``fixed_setup_styles`` for the rest of training.
+
+        Returns the restored pool size, or 0 if nothing was cached.
+        """
+        if _training_setup_pool is None:
+            return 0
+        _cuda.upload_setup_pool(_training_setup_pool)
+        return int(_training_setup_pool.shape[0])
 
     # ------------------------------------------------------------------
     # Episode lifecycle
@@ -1002,12 +1038,14 @@ class GpuRollout:
         pool_size : int
             Number of combined-setup entries in the new pool.
         """
+        global _training_setup_pool
         from junqi_rl.arrangement.pool_upload import (
             arrangements_to_pool,
             refresh_gpu_setup_pool,
         )
         pool = arrangements_to_pool(samples, seat_idx)
         refresh_gpu_setup_pool(pool)
+        _training_setup_pool = pool
         return int(pool.shape[0])
 
     def snapshot_env_arrangements(self) -> "np.ndarray":

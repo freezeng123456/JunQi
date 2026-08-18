@@ -87,7 +87,14 @@ class TrainConfig:
     eval_every: int = 50
     eval_num_games: int = 128
     eval_record_games: int = 1
+    eval_baseline_ckpt: str = ""
+    eval_baseline_games: int = 0
     eval_record_beliefs: bool = False
+    # GPU setup pools are process-global. Re-upload this fixed pool before
+    # every primary evaluation so ArrangementNet refreshes cannot silently
+    # change the test distribution from checkpoint to checkpoint.
+    eval_fixed_setup_pool: bool = True
+    eval_setup_seed: int = 20_260_817
     league_max_checkpoints: int = 12
     league_eval_games: int = 16
 
