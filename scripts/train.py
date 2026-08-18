@@ -1023,6 +1023,7 @@ def train(cfg: TrainConfig) -> None:
                                            device=device if device.type == "cuda" else "cpu")
             if is_rank0:
                 print(f"[train] Evaluating (rollout {rollout_idx + 1})…")
+                pool_size = 0
                 try:
                     eval_seed = cfg.env.seed + rollout_idx + 1_000_000
                     if (
@@ -1290,6 +1291,9 @@ def train(cfg: TrainConfig) -> None:
                 except Exception:
                     print("[train] Evaluation failed:")
                     traceback.print_exc()
+                finally:
+                    if pool_size and hasattr(env, "restore_training_setup_pool"):
+                        env.restore_training_setup_pool()
             # Broadcast the should-stop flag to every rank so they all exit
             # the loop together. Without this, only rank 0 would see the
             # verdict and the others would deadlock at the next all-reduce.

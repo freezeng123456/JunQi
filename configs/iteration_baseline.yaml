@@ -60,6 +60,7 @@ random_opponent: true
 train_value_on_random_seats: false
 reward_shaping: true
 
-# Plan B: stable own-team setup, independent random enemy setups.
-mixed_setup: true
-mixed_own_team_styles: ["T"]
+# Independent uniform-random setups for all four seats. A fixed own-team
+# lineup leaks the teammate's piece types (hidden under DARK) and does not
+# match evaluation, which samples every seat uniformly.
+mixed_setup: false

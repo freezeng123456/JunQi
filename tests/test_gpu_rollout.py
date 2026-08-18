@@ -161,3 +161,48 @@ def test_rollout_step_and_observation_together() -> None:
         sp, gl = rollout.build_all_seat_observations()
         assert np.isfinite(sp).all()
         assert np.isfinite(gl).all()
+
+
+def test_evaluation_pool_does_not_replace_training_pool() -> None:
+    """A fixed eval pool must not become the training setup distribution."""
+    import junqi_rl.gpu_rollout as gpu_rollout_mod
+
+    N = 8
+    # The device pool is process-global and uploaded once, so force a rebuild
+    # to make this test independent of which rollout was constructed first.
+    gpu_rollout_mod._reset_pool_uploaded = False
+    gpu_rollout_mod._training_setup_pool = None
+
+    try:
+        rollout = GpuRollout(
+            num_envs=N, mixed_setup=True, mixed_own_team_styles=("T",),
+        )
+        rollout.reset(seed_base=0)
+
+        def own_lineups() -> set[tuple[int, ...]]:
+            host = rollout.state.copy_to_host()
+            per_seat = host["piece_type_arr"].reshape(N, 4, 30)
+            return {tuple(row) for row in per_seat[:, 0, :]}
+
+        def restart_every_env(seed: int) -> None:
+            rollout.state.copy_termination_from_host(
+                np.ones(N, dtype=bool),
+                np.zeros(N, dtype=np.int8),
+                np.zeros(N, dtype=bool),
+            )
+            rollout.reset_terminated_device(seed=seed)
+
+        restart_every_env(1)
+        assert len(own_lineups()) == 1, "mixed_setup should fix the own-team lineup"
+
+        rollout.upload_fixed_evaluation_setup_pool(seed=20_260_817)
+        restart_every_env(2)
+        assert len(own_lineups()) > 1, "eval pool should be uniform for all seats"
+
+        assert rollout.restore_training_setup_pool() > 0
+        restart_every_env(3)
+        assert len(own_lineups()) == 1, "training pool must survive an evaluation"
+    finally:
+        gpu_rollout_mod._reset_pool_uploaded = False
+        gpu_rollout_mod._training_setup_pool = None
+        GpuRollout(num_envs=1)

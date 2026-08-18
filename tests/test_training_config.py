@@ -34,7 +34,8 @@ def test_iteration_baseline_is_sparse_and_valid() -> None:
     assert cfg.ppo.lr_schedule_unit == "rollout"
     assert cfg.arr.enabled is False
     assert cfg.belief.enabled is True
-    assert cfg.mixed_setup is True
+    assert cfg.mixed_setup is False
+    assert cfg.fixed_setup_styles is None
     assert cfg.rollout.storage_mode == "compact_history"
 
 
