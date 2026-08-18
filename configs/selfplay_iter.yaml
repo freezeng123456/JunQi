@@ -1,0 +1,70 @@
+# Self-play iteration base.
+#
+# Same knobs as iteration_baseline.yaml except the opponent: warm-started from
+# the 200-rollout BeliefNet vs-random run, which had saturated at a 100% win
+# rate and could no longer rank two candidates. vs-random eval stays on as a
+# regression guard, but the score that matters is h2h against that frozen
+# checkpoint (eval_baseline_ckpt below).
+#
+# Toggle the arrangement net per run with `--set arr__enabled=true`.
+
+env:
+  num_envs: 128
+  steps_per_env: 512
+  max_num_moves: 4000
+  seed: 241
+  use_gpu_rollout: true
+
+net:
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  embed_dim: 128
+  n_head: 4
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 32
+  pos_emb_std: 0.02
+
+ppo:
+  num_epochs_per_rollout: 1
+  minibatch_size: 512
+  dtype: bfloat16
+  # torch.compile under self-play is a documented crash path (DDP_DEPLOYMENT.md).
+  torch_compile: false
+  lr_schedule_unit: rollout
+  max_grad_norm: 0.267
+  adv_filt_rate: 0.75
+
+arr:
+  enabled: false
+
+belief:
+  enabled: true
+
+rollout:
+  storage_mode: compact_history
+  csr_legal_mask: true
+  csr_k_max: 256
+
+resume: /jizhicfs/freezeng123456/JunQi-runs/feat_ablate_200r_20260817/f_belief/ckpt_000200.pt
+save_dir: exps/selfplay_iter
+# resume restores num_rollout=200, so this budgets 200 further rollouts.
+total_rollouts: 400
+save_every: 25
+eval_every: 10
+eval_num_games: 128
+eval_record_games: 0
+league_eval_games: 0
+log_every: 5
+
+eval_baseline_ckpt: /jizhicfs/freezeng123456/JunQi-runs/feat_ablate_200r_20260817/f_belief/ckpt_000200.pt
+eval_baseline_games: 128
+
+device: cuda
+seed: 241
+random_opponent: false
+train_value_on_random_seats: false
+reward_shaping: true
+mixed_setup: false
