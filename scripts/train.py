@@ -356,6 +356,30 @@ def train(cfg: TrainConfig) -> None:
         print(f"[train] lr schedule (unit={unit}, decay={cfg.ppo.lr_decay}, "
               f"ceil={cfg.ppo.lr_ceil:.1e}, floor={cfg.ppo.lr_floor:.1e}):")
         print(f"[train]   {sched}")
+        from junqi_rl.training.ppo import magnet_alpha as _magalpha
+        mag_unit = cfg.ppo.temperature_schedule_unit
+        mag_probes = [1, 2, 25, 100, 900, 3000]
+        if mag_unit == "rollout":
+            mag_vals = [
+                _magalpha(
+                    cfg.ppo.temperature_coef, t, cfg.ppo.temperature_decay,
+                )
+                for t in mag_probes
+            ]
+            mag_line = "  ".join(
+                f"t={t}:{a:.4f}" for t, a in zip(mag_probes, mag_vals)
+            )
+            print(
+                f"[train] magnet α (unit={mag_unit}, "
+                f"coef={cfg.ppo.temperature_coef}, "
+                f"decay={cfg.ppo.temperature_decay}, no floor/ceil):"
+            )
+            print(f"[train]   {mag_line}")
+        else:
+            print(
+                f"[train] magnet α unit={mag_unit} "
+                f"(legacy power_schedule with floor/ceil)"
+            )
         if floor_hit is not None and floor_hit < cfg.total_rollouts:
             print(f"[train]   ⚠️  lr will hit floor at {unit_name}={floor_hit} "
                   f"(< total_rollouts={cfg.total_rollouts}). "
@@ -781,6 +805,7 @@ def train(cfg: TrainConfig) -> None:
                 device=device,
                 seed_base=cfg.env.seed + rollout_idx,
                 reset_at_start=(rollout_idx == start_rollout),
+                act_chunk_size=int(getattr(cfg.ppo, "act_chunk_size", 0) or 0),
             )
             # Pass random_opponent from config to v2 collector. When
             # cfg.random_opponent=False, the collector will use the
@@ -956,6 +981,8 @@ def train(cfg: TrainConfig) -> None:
                 kl_log_ratio_max = summary.get(
                     "train/kl_log_ratio_abs_max", float("nan")
                 )
+                alpha = summary.get("train/temperature", float("nan"))
+                entropy = summary.get("train/entropy", float("nan"))
                 nan_skips = summary.get("train/nan_skip_total", 0.0)
                 grad_skips = summary.get("train/grad_skip_total", 0.0)
                 policy_kept = summary.get("rollout/n_policy_kept", 0.0)
@@ -984,7 +1011,9 @@ def train(cfg: TrainConfig) -> None:
                     f"ret={mean_ret:+.4f}  lr={lr:.2e}  "
                     f"fps={fps:.0f}  elapsed={elapsed:.0f}s  "
                     f"kl_loss={kl_loss:+.4f}  approx_kl={approx_kl:+.4f}  "
-                    f"kl_max={kl_log_ratio_max:.3f}  kept={policy_kept:.0f}  "
+                    f"kl_max={kl_log_ratio_max:.3f}  "
+                    f"alpha={alpha:.4f}  H={entropy:.3f}  "
+                    f"kept={policy_kept:.0f}  "
                     f"nan_skip={nan_skips:.0f}  grad_skip={grad_skips:.0f}"
                     f"{arr_suffix}"
                 )

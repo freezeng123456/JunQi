@@ -28,15 +28,16 @@ env:
   use_gpu_rollout: true
 
 net:
-  cnn_channels: 64
-  cnn_layers: 2
-  depth: 4
-  embed_dim: 128
-  n_head: 4
+  # ~10.8M move net (was 1.13M: d=4 e=128 cnn=64×2 k=32).
+  cnn_channels: 128
+  cnn_layers: 3
+  depth: 8
+  embed_dim: 320
+  n_head: 8
   ff_factor: 4
   dropout: 0.0
   use_cat_vf: true
-  action_key_dim: 32
+  action_key_dim: 64
   pos_emb_std: 0.02
 
 ppo:
@@ -46,6 +47,10 @@ ppo:
   # torch.compile under self-play is a documented crash path (DDP_DEPLOYMENT.md).
   torch_compile: false
   lr_schedule_unit: rollout
+  # Paper magnet: α = 0.05 / t^0.3 on rollout index, no floor/ceil.
+  temperature_schedule_unit: rollout
+  # Split collect ``policy.act`` so 2048 envs fit the ~10M net.
+  act_chunk_size: 256
   max_grad_norm: 0.267
   # Ataraxos trains on the top 25% of transitions by |advantage|. This
   # field is the fraction KEPT, so the previous 0.75 trained on the top
@@ -72,10 +77,9 @@ eval_record_games: 0
 league_eval_games: 0
 log_every: 10
 
-# The vs-random checkpoint saturated at ~1.0 by R150 and stopped ranking
-# anything. The yardstick is now the inverted-filter run's final state, so
-# h2h answers directly whether the corrected filter is an improvement.
-eval_baseline_ckpt: /jizhicfs/freezeng123456/JunQi-runs/ataraxos_selfplay_20260818/ckpt_000850.pt
+# Yardstick is the previous from-scratch 1.13M run's final weights.
+# Report h2h as win/loss/draw; vs-random is saturated and not for decisions.
+eval_baseline_ckpt: /jizhicfs/freezeng123456/JunQi-runs/ataraxos_bigbatch_20260818/ckpt_003000.pt
 eval_baseline_games: 128
 
 device: cuda

@@ -77,6 +77,16 @@ def _world_size() -> int:
 # ---------------------------------------------------------------------------
 
 
+def magnet_alpha(coef: float, iteration: int, decay: float) -> float:
+    """Ataraxos magnet coefficient: ``coef / t^decay``.
+
+    ``iteration`` is the 1-indexed training iteration (rollout). The paper
+    uses ``0.05 / t^{0.3}`` with no floor or ceiling.
+    """
+    t = max(int(iteration), 1)
+    return float(coef) / (float(t) ** float(decay))
+
+
 def power_schedule(
     coef: float,
     step: int,
@@ -84,7 +94,7 @@ def power_schedule(
     ceil: float,
     floor: float,
 ) -> float:
-    """Smooth annealing schedule — matches Ataraxos exactly.
+    """Smooth annealing schedule used by the learning-rate clock.
 
     ``value(t) = clamp(coef / (1 + t)^decay, floor, ceil)``
 
@@ -201,19 +211,35 @@ class PPOConfig:
     temperature_decay: float = 0.3
     """Power-schedule decay for temperature."""
 
+    temperature_schedule_unit: str = "grad_step"
+    """Time unit driving the magnet / entropy coefficient.
+
+    * ``"grad_step"`` (legacy): ``clamp(coef / (1+t)^decay, floor, ceil)``
+      with ``t = num_train_step``. On the 2048-env H20 run this made α
+      ~15% of the paper value from rollout 1 and hit the 0.001 floor by
+      rollout ~900.
+    * ``"rollout"``: paper formula ``coef / t^decay`` with
+      ``t = num_rollout + 1`` (first PPO update is iteration 1). No
+      floor or ceiling.
+    """
+
+    act_chunk_size: int = 0
+    """If >0, ``policy.act`` during GPU collect is split along the env
+    dimension into chunks of this size. 0 means one forward over all envs.
+    Used to keep ``num_envs`` high when the move net is ~10M params.
+    """
+
     uniform_magnet: bool = True
     """If True, entropy bonus encourages uniform distribution.
     If False, it simply maximises entropy."""
 
     # --- KL divergence ---
     kl_coef: float = 0.1
-    """Weight for the sampled KL trust-region penalty.
+    """Weight for reverse KL to the data-collection policy.
 
-    The full action distribution is intentionally not stored in the rollout
-    buffer (the action space is 83,521 entries).  The trainer therefore uses
-    a bounded Huber penalty on the sampled action log-ratio as a stable proxy
-    for ``KL(π_old || π_new)``.  ``train/approx_kl`` remains a separate
-    diagnostic based on the correctly signed sampled estimator.
+    Ataraxos uses ``0.1 * KL(π_θ || π_θt)`` over the full legal support,
+    where ``π_θt`` is a frozen copy of the weights that collected the
+    rollout. The sampled Huber proxy remains a diagnostic only.
     """
 
     kl_proxy_beta: float = 1.0
@@ -400,6 +426,14 @@ class PPOTrainer:
         # module, so this is safe.
         self.ema = EMAPolicy(self._policy_unwrapped, cfg.ema_decay)
 
+        # Frozen snapshot of the collection policy π_θt. Weights are copied
+        # at the start of each train_epoch (after collect, before the first
+        # gradient step) so reverse KL is against the behaviour policy.
+        self._collect_policy = copy.deepcopy(self._policy_unwrapped)
+        self._collect_policy.eval()
+        for p in self._collect_policy.parameters():
+            p.requires_grad_(False)
+
         # Optimiser.  ``foreach=True`` (default on CUDA in recent torch) uses
         # fused multi-tensor ops — about 20-30% faster than the per-param
         # fallback for ~1M-param models.
@@ -451,14 +485,31 @@ class PPOTrainer:
             pg["lr"] = lr
         return lr
 
+    def _sync_collect_policy(self) -> None:
+        """Copy learner weights into the frozen collection snapshot."""
+        self._collect_policy.load_state_dict(self._policy_unwrapped.state_dict())
+        self._collect_policy.eval()
+
     def _get_temperature(self) -> float:
         cfg = self.cfg
-        return power_schedule(
-            cfg.temperature_coef,
-            self.num_train_step,
-            cfg.temperature_decay,
-            cfg.temperature_ceil,
-            cfg.temperature_floor,
+        unit = getattr(cfg, "temperature_schedule_unit", "grad_step")
+        if unit == "rollout":
+            return magnet_alpha(
+                cfg.temperature_coef,
+                self.num_rollout + 1,
+                cfg.temperature_decay,
+            )
+        if unit == "grad_step":
+            return power_schedule(
+                cfg.temperature_coef,
+                self.num_train_step,
+                cfg.temperature_decay,
+                cfg.temperature_ceil,
+                cfg.temperature_floor,
+            )
+        raise ValueError(
+            "temperature_schedule_unit must be 'rollout' or 'grad_step'; "
+            f"got {unit!r}"
         )
 
     # -------------------------------------------------------------------------
@@ -557,7 +608,7 @@ class PPOTrainer:
         legal_mask: Tensor,  # (B, FLAT_ACTION_DIM) bool
         *,
         weight_per: Tensor | None = None,
-    ) -> Tensor:
+    ) -> tuple[Tensor, Tensor]:
         """Magnet / entropy loss: encourages uniform distribution over legal moves.
 
         Ataraxos calls this the "magnet" loss.  When ``uniform_magnet=True``
@@ -591,9 +642,12 @@ class PPOTrainer:
             per_sample = -entropy
 
         if weight_per is None:
-            return per_sample.mean()
+            return per_sample.mean(), entropy.mean()
         w_sum = weight_per.sum().clamp_min(1.0)
-        return (per_sample * weight_per).sum() / w_sum
+        return (
+            (per_sample * weight_per).sum() / w_sum,
+            (entropy * weight_per).sum() / w_sum,
+        )
 
     def _kl_loss(
         self,
@@ -621,6 +675,36 @@ class PPOTrainer:
             torch.zeros_like(old_probs),
         )
         return per_action.sum(dim=-1).mean()
+
+    def _reverse_kl(
+        self,
+        new_log_probs: Tensor,
+        old_log_probs: Tensor,
+        legal_mask: Tensor,
+        *,
+        weight_per: Tensor | None = None,
+    ) -> Tensor:
+        """``KL(π_new || π_old)`` over legal actions (Ataraxos reverse KL)."""
+        finite = (
+            legal_mask
+            & torch.isfinite(new_log_probs)
+            & torch.isfinite(old_log_probs)
+        )
+        new_probs = torch.where(
+            finite,
+            new_log_probs.exp(),
+            torch.zeros_like(new_log_probs),
+        )
+        per_action = torch.where(
+            finite,
+            new_probs * (new_log_probs - old_log_probs),
+            torch.zeros_like(new_log_probs),
+        )
+        per_sample = per_action.sum(dim=-1)
+        if weight_per is None:
+            return per_sample.mean()
+        w_sum = weight_per.sum().clamp_min(1.0)
+        return (per_sample * weight_per).sum() / w_sum
 
     def _sampled_kl_penalty(
         self,
@@ -716,6 +800,13 @@ class PPOTrainer:
 
         legal_mask = batch.legal_mask.to(self.device)
 
+        with torch.inference_mode(), autocast(
+            device_type=ctx_device, dtype=self._amp_dtype, enabled=self._use_amp
+        ):
+            old_log_probs_all = self._collect_policy(
+                obs_sp_in, obs_gl_in, legal_mask,
+            )["log_probs"]
+
         with autocast(device_type=ctx_device, dtype=self._amp_dtype, enabled=self._use_amp):
             out = self._policy_for_train(
                 obs_sp_in,
@@ -755,7 +846,9 @@ class PPOTrainer:
                     "train/policy_loss": zero.detach(),
                     "train/value_loss": zero.detach(),
                     "train/entropy_loss": zero.detach(),
+                    "train/entropy": zero.detach(),
                     "train/kl_loss": zero.detach(),
+                    "train/kl_proxy": zero.detach(),
                     "train/approx_kl": zero.detach(),
                     "train/kl_log_ratio_abs_max": zero.detach(),
                     "train/total_loss": zero.detach(),
@@ -771,11 +864,9 @@ class PPOTrainer:
             # Old log-probs (scalar per action, stored in buffer)
             old_log_prob = batch.old_log_probs.to(self.device)
 
-            # Old full distribution for KL (re-derive as detached baseline)
-            # We use the stored log_probs as the "old" distribution approximation
-            # by treating old_log_prob as the anchor; for KL we approximate
-            # using the action taken (importance-weighted).
-            # Full old distribution is not stored to save memory; use action KL.
+            # Reverse KL uses the frozen collection snapshot's full legal
+            # distribution (``old_log_probs_all``). ``old_log_prob`` is the
+            # stored sampled log-prob for the PPO ratio.
             adv = batch.advantages.to(self.device)
             ret = batch.returns.to(self.device)
 
@@ -819,21 +910,19 @@ class PPOTrainer:
                 weight_per=policy_weight_per,
             )
             value_loss = self._value_loss(value, ret)
-            entropy_loss = self._entropy_loss(
+            entropy_loss, entropy = self._entropy_loss(
                 new_log_probs_all, legal_mask,
                 weight_per=policy_weight_per,
             )
 
-            # Sampled KL / trust-region diagnostics.
-            #
-            # The old implementation used ``new_log_prob - old_log_prob`` as
-            # a positive KL penalty. Since actions are sampled from π_old,
-            # that expectation is actually ``-KL(π_old || π_new)``; minimizing
-            # it encouraged the policy to move *away* from the rollout policy.
-            # Keep the correctly signed estimator for diagnostics and use the
-            # bounded Huber proxy for the optimization term.
+            kl_loss = self._reverse_kl(
+                new_log_probs_all,
+                old_log_probs_all,
+                legal_mask,
+                weight_per=policy_weight_per,
+            )
             log_ratio = new_log_prob - old_log_prob.detach()
-            kl_loss = self._sampled_kl_penalty(
+            kl_proxy = self._sampled_kl_penalty(
                 log_ratio,
                 weight_per=policy_weight_per,
             )
@@ -909,7 +998,9 @@ class PPOTrainer:
                 "train/policy_loss": zero.detach(),
                 "train/value_loss": zero.detach(),
                 "train/entropy_loss": zero.detach(),
+                "train/entropy": zero.detach(),
                 "train/kl_loss": zero.detach(),
+                "train/kl_proxy": zero.detach(),
                 "train/approx_kl": zero.detach(),
                 "train/kl_log_ratio_abs_max": zero.detach(),
                 "train/total_loss": zero.detach(),
@@ -939,7 +1030,9 @@ class PPOTrainer:
             "train/policy_loss": policy_loss.detach(),
             "train/value_loss": value_loss.detach(),
             "train/entropy_loss": entropy_loss.detach(),
+            "train/entropy": entropy.detach(),
             "train/kl_loss": kl_loss.detach(),
+            "train/kl_proxy": kl_proxy.detach(),
             "train/approx_kl": approx_kl.detach(),
             "train/kl_log_ratio_abs_max": log_ratio_abs_max.detach(),
             "train/total_loss": total_loss.detach(),
@@ -973,6 +1066,7 @@ class PPOTrainer:
         """
         cfg = self.cfg
         all_metrics: list[dict] = []
+        self._sync_collect_policy()
         if _is_distributed() and getattr(
             rollout,
             "uses_compact_history",

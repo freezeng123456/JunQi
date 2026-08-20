@@ -259,6 +259,10 @@ def validate_config(cfg: TrainConfig) -> None:
         raise ValueError(
             "ppo.lr_schedule_unit must be 'grad_step' or 'rollout'"
         )
+    if cfg.ppo.temperature_schedule_unit not in {"grad_step", "rollout"}:
+        raise ValueError(
+            "ppo.temperature_schedule_unit must be 'grad_step' or 'rollout'"
+        )
     cfg.ppo.get_dtype()
     if cfg.rollout.storage_mode not in {"full_obs", "compact_history"}:
         raise ValueError(

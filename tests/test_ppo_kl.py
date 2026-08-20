@@ -6,7 +6,12 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
-from junqi_rl.training.ppo import EMAPolicy, PPOConfig, PPOTrainer
+from junqi_rl.training.ppo import (
+    EMAPolicy,
+    PPOConfig,
+    PPOTrainer,
+    magnet_alpha,
+)
 
 
 def _trainer() -> PPOTrainer:
@@ -96,3 +101,47 @@ def test_policy_active_action_legality_is_checked_directly():
         trainer._assert_policy_active_actions_legal(
             legal, actions, torch.tensor([True, True])
         )
+
+
+
+def test_magnet_alpha_matches_paper_formula():
+    assert magnet_alpha(0.05, 1, 0.3) == pytest.approx(0.05)
+    assert magnet_alpha(0.05, 900, 0.3) == pytest.approx(0.05 / (900 ** 0.3))
+    assert magnet_alpha(0.05, 900, 0.3) > 0.001
+    assert magnet_alpha(0.05, 3000, 0.3) == pytest.approx(0.05 / (3000 ** 0.3))
+
+
+def test_get_temperature_rollout_unit_uses_paper_formula():
+    trainer = _trainer()
+    trainer.cfg.temperature_schedule_unit = "rollout"
+    trainer.cfg.temperature_coef = 0.05
+    trainer.cfg.temperature_decay = 0.3
+    trainer.num_rollout = 0
+    assert trainer._get_temperature() == pytest.approx(0.05)
+    trainer.num_rollout = 899
+    assert trainer._get_temperature() == pytest.approx(0.05 / (900 ** 0.3))
+
+
+def test_reverse_kl_zero_on_identical_legal_support():
+    trainer = _trainer()
+    legal = torch.tensor([[True, True, False], [True, False, True]])
+    logits = torch.tensor([[1.0, 0.0, 9.0], [0.4, 9.0, -0.1]])
+    logits = logits.masked_fill(~legal, float("-inf"))
+    logp = torch.log_softmax(logits, dim=-1)
+    kl = trainer._reverse_kl(logp, logp, legal)
+    assert torch.isfinite(kl)
+    assert abs(kl.item()) < 1e-6
+
+
+def test_reverse_kl_positive_when_new_is_peakier():
+    trainer = _trainer()
+    legal = torch.tensor([[True, True, True]])
+    old = torch.log_softmax(torch.zeros(1, 3), dim=-1)
+    logits = torch.tensor([[5.0, 0.0, 0.0]], requires_grad=True)
+    new = torch.log_softmax(logits, dim=-1)
+    kl = trainer._reverse_kl(new, old, legal)
+    assert torch.isfinite(kl)
+    assert kl.item() > 0.0
+    kl.backward()
+    assert logits.grad is not None
+    assert torch.isfinite(logits.grad).all()

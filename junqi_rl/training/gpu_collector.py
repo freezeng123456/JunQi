@@ -267,6 +267,31 @@ def build_legal_mask_batch_gpu(
 # collect_rollout_gpu
 # ---------------------------------------------------------------------------
 
+def _policy_act(policy, sp, gl, lm, chunk_size: int = 0):
+    """Call ``policy.act``, optionally chunked along the env batch dim.
+
+    Peak activation memory for the ~10M move net scales with the env
+    batch. Splitting ``act`` keeps ``num_envs`` high without holding a
+    full 2048-env forward in one shot.  ``chunk_size <= 0`` is one call.
+    """
+    n = int(sp.shape[0])
+    cs = int(chunk_size or 0)
+    if cs <= 0 or n <= cs:
+        return policy.act(sp, gl, lm)
+    actions, log_probs, values = [], [], []
+    for start in range(0, n, cs):
+        sl = slice(start, min(start + cs, n))
+        action, log_prob, value = policy.act(sp[sl], gl[sl], lm[sl])
+        actions.append(action)
+        log_probs.append(log_prob)
+        values.append(value)
+    return (
+        torch.cat(actions, dim=0),
+        torch.cat(log_probs, dim=0),
+        torch.cat(values, dim=0),
+    )
+
+
 def collect_rollout_gpu(
     rollout_world: GpuRollout,
     policy: "JunqiNet",
@@ -276,6 +301,7 @@ def collect_rollout_gpu(
     seed_base: int = 0,
     reset_at_start: bool = True,
     reward_shaping: bool = False,
+    act_chunk_size: int = 0,
 ) -> None:
     """Collect ``buffer.steps_per_env`` transitions using ``rollout_world``.
 
@@ -392,7 +418,9 @@ def collect_rollout_gpu(
                 sp_t = torch.from_numpy(act_sp).to(_device)
                 gl_t = torch.from_numpy(act_gl).to(_device)
                 lm_t = torch.from_numpy(legal_mask_np).to(_device)
-            actions_can, log_probs, values = policy.act(sp_t, gl_t, lm_t)
+            actions_can, log_probs, values = _policy_act(
+                policy, sp_t, gl_t, lm_t, chunk_size=act_chunk_size,
+            )
         if _gpu_buffer:
             # Keep tensors resident; we only need CPU copies of actions to
             # feed the GPU step kernel.
@@ -525,7 +553,9 @@ def collect_rollout_gpu(
         lm_t = torch.from_numpy(legal_mask_np).to(_device)
 
     with torch.no_grad():
-        _, _, last_values = policy.act(sp_t, gl_t, lm_t)
+        _, _, last_values = _policy_act(
+            policy, sp_t, gl_t, lm_t, chunk_size=act_chunk_size,
+        )
 
     last_values_np = last_values.detach().cpu().numpy().astype(np.float32)
     if last_values_np.ndim > 1:
@@ -646,6 +676,7 @@ def collect_rollout_gpu_v2(
     on_reset=None,
     use_compile: bool = True,
     autocast_dtype=None,  # torch.dtype; defaults to bfloat16 below
+    act_chunk_size: int = 0,
 ):
     """Zero-CPU hot-path rollout collector.
 
@@ -740,7 +771,9 @@ def collect_rollout_gpu_v2(
         # dtype is configurable (defaults to bf16; see resolution at function
         # entry). DO NOT hard-code fp16 here — see v33c R107 NaN root cause.
         with torch.no_grad(), torch.amp.autocast("cuda", dtype=autocast_dtype):
-            actions_can, log_probs, values = policy.act(obs_sp_t, obs_gl_t, lm_t)
+            actions_can, log_probs, values = _policy_act(
+                policy, obs_sp_t, obs_gl_t, lm_t, chunk_size=act_chunk_size,
+            )
         log_probs_t = log_probs.detach().to(torch.float32)
         values_t = values.detach().to(torch.float32)
         values_t = _categorical_value_to_scalar(values_t)
@@ -934,7 +967,9 @@ def collect_rollout_gpu_v2(
     lm_t = rollout_world.legal_mask_canonical_torch_device(acting_t)
 
     with torch.no_grad(), torch.amp.autocast("cuda", dtype=autocast_dtype):
-        _, _, last_values = policy.act(obs_sp_t, obs_gl_t, lm_t)
+        _, _, last_values = _policy_act(
+            policy, obs_sp_t, obs_gl_t, lm_t, chunk_size=act_chunk_size,
+        )
 
     # Keep everything on-device; compute_returns accepts torch tensors.
     lv = last_values.detach().to(torch.float32)
