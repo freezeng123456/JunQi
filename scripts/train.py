@@ -363,6 +363,7 @@ def train(cfg: TrainConfig) -> None:
             mag_vals = [
                 _magalpha(
                     cfg.ppo.temperature_coef, t, cfg.ppo.temperature_decay,
+                    cfg.ppo.temperature_floor,
                 )
                 for t in mag_probes
             ]
@@ -371,8 +372,10 @@ def train(cfg: TrainConfig) -> None:
             )
             print(
                 f"[train] magnet α (unit={mag_unit}, "
+                f"shape={cfg.ppo.magnet_shape}, "
                 f"coef={cfg.ppo.temperature_coef}, "
-                f"decay={cfg.ppo.temperature_decay}, no floor/ceil):"
+                f"decay={cfg.ppo.temperature_decay}, "
+                f"floor={cfg.ppo.temperature_floor}):"
             )
             print(f"[train]   {mag_line}")
         else:
@@ -380,6 +383,11 @@ def train(cfg: TrainConfig) -> None:
                 f"[train] magnet α unit={mag_unit} "
                 f"(legacy power_schedule with floor/ceil)"
             )
+        print(
+            f"[train] minibatch_group={cfg.ppo.minibatch_group}  "
+            f"steps_per_env={cfg.env.steps_per_env}  "
+            f"adv_filt_rate={cfg.ppo.adv_filt_rate}"
+        )
         if floor_hit is not None and floor_hit < cfg.total_rollouts:
             print(f"[train]   ⚠️  lr will hit floor at {unit_name}={floor_hit} "
                   f"(< total_rollouts={cfg.total_rollouts}). "
@@ -451,6 +459,7 @@ def train(cfg: TrainConfig) -> None:
             td_lambda=cfg.ppo.td_lambda,
             adv_filt_thresh=cfg.ppo.adv_filt_thresh,
             adv_filt_rate=cfg.ppo.adv_filt_rate,
+            minibatch_group=cfg.ppo.minibatch_group,
             device=device,
             csr_legal_mask=cfg.rollout.csr_legal_mask,
             csr_k_max=cfg.rollout.csr_k_max,
@@ -485,6 +494,7 @@ def train(cfg: TrainConfig) -> None:
             td_lambda=cfg.ppo.td_lambda,
             adv_filt_thresh=cfg.ppo.adv_filt_thresh,
             adv_filt_rate=cfg.ppo.adv_filt_rate,
+            minibatch_group=cfg.ppo.minibatch_group,
             device=device,
         )
 
@@ -530,6 +540,7 @@ def train(cfg: TrainConfig) -> None:
         )
         if is_rank0:
             print(f"[train] Arrangement training enabled: n_arr={cfg.arr.n_arr}, "
+                  f"pool_size={cfg.arr.pool_size}, "
                   f"refresh_every={cfg.arr.refresh_every}, "
                   f"storage_duration={cfg.arr.storage_duration}")
 
@@ -682,7 +693,10 @@ def train(cfg: TrainConfig) -> None:
             )
             # Push the pool to CUDA so reset_terminated_envs picks from it.
             pool_size = env.refresh_setup_pool_from_arrangements(
-                arr_gen.samples, arr_gen.seat_idx,
+                arr_gen.samples,
+                arr_gen.seat_idx,
+                pool_size=cfg.arr.pool_size,
+                seed=cfg.env.seed + rollout_idx * 17,
             )
             # Record the generation-time info so process_data has targets.
             arr_buffer.add_arrangements(
@@ -694,6 +708,10 @@ def train(cfg: TrainConfig) -> None:
                 step=rollout_idx,
             )
             mc.inc("arr/pool_size", float(pool_size))
+            mc.inc(
+                "arr/n_unique_pool",
+                float(getattr(env, "last_setup_pool_unique", pool_size)),
+            )
             mc.inc("arr/retry_rate", float(arr_gen.stats["retry_rate"]))
             mc.inc("arr/fallback_rate", float(arr_gen.stats["fallback_rate"]))
             mc.inc("time/arr_refresh_s", time.time() - t_arr0)
@@ -983,9 +1001,14 @@ def train(cfg: TrainConfig) -> None:
                 )
                 alpha = summary.get("train/temperature", float("nan"))
                 entropy = summary.get("train/entropy", float("nan"))
+                collect_entropy = summary.get("collect/entropy", float("nan"))
+                magnet_kl = summary.get("train/entropy_loss", float("nan"))
+                n_upd = summary.get("train/num_updates", float("nan"))
                 nan_skips = summary.get("train/nan_skip_total", 0.0)
                 grad_skips = summary.get("train/grad_skip_total", 0.0)
                 policy_kept = summary.get("rollout/n_policy_kept", 0.0)
+                kept_mean = summary.get("rollout/kept_mean", float("nan"))
+                kept_min = summary.get("rollout/kept_min", float("nan"))
                 # In DDP mode this prints PER-RANK fps; cluster-wide
                 # throughput is approximately (fps × world_size).
                 fps = (cfg.env.num_envs * cfg.env.steps_per_env * cfg.log_every
@@ -1002,6 +1025,7 @@ def train(cfg: TrainConfig) -> None:
                 elif "arr/pool_size" in summary:
                     arr_suffix = (
                         f"  arr_pool={summary.get('arr/pool_size', 0.0):.0f}"
+                        f"  arr_uniq={summary.get('arr/n_unique_pool', 0.0):.0f}"
                         f"  arr_retry={summary.get('arr/retry_rate', 0.0):.3f}"
                         f"  arr_fb={summary.get('arr/fallback_rate', 0.0):.3f}"
                     )
@@ -1013,7 +1037,10 @@ def train(cfg: TrainConfig) -> None:
                     f"kl_loss={kl_loss:+.4f}  approx_kl={approx_kl:+.4f}  "
                     f"kl_max={kl_log_ratio_max:.3f}  "
                     f"alpha={alpha:.4f}  H={entropy:.3f}  "
-                    f"kept={policy_kept:.0f}  "
+                    f"Hc={collect_entropy:.3f}  "
+                    f"mkl={magnet_kl:+.4f}  n_upd={n_upd:.0f}  "
+                    f"kept={policy_kept:.0f}  kept_mean={kept_mean:.0f}  "
+                    f"kept_min={kept_min:.0f}  "
                     f"nan_skip={nan_skips:.0f}  grad_skip={grad_skips:.0f}"
                     f"{arr_suffix}"
                 )

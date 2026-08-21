@@ -545,6 +545,13 @@ class JunqiNet(nn.Module):
         lse = logits_f.logsumexp(dim=-1)  # (B,)
         log_probs = logits_f.gather(1, actions.unsqueeze(1)).squeeze(1) - lse
 
+        # Mean entropy over legal actions, for collect-wide H (not the
+        # advantage-filtered training batch). Illegal logits are -inf.
+        log_p = logits_f - lse.unsqueeze(-1)
+        safe_p = torch.where(legal_mask, log_p.exp(), torch.zeros_like(log_p))
+        safe_log_p = torch.where(legal_mask, log_p, torch.zeros_like(log_p))
+        self._last_entropy_t = -(safe_p * safe_log_p).sum(dim=-1)
+
         values = self._value(cls)
         return actions.int(), log_probs, values
 
