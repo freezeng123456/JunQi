@@ -101,17 +101,32 @@ def benchmark_forward(
     warmup: int,
     iterations: int,
     device: torch.device,
+    dtype_name: str,
 ) -> dict[str, float]:
     model = JunqiNet(cfg).to(device).eval()
     model.load_state_dict(initial_state)
     spatial, global_, legal, actions = make_inputs(batch_size, device, seed=1001)
+    amp_dtype = {
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+        "float32": torch.float32,
+    }[dtype_name]
+    use_amp = dtype_name != "float32"
 
     def sampled():
-        with torch.inference_mode():
+        with torch.inference_mode(), torch.autocast(
+            device_type=device.type,
+            dtype=amp_dtype,
+            enabled=use_amp,
+        ):
             model(spatial, global_, legal)
 
     def evaluated():
-        with torch.inference_mode():
+        with torch.inference_mode(), torch.autocast(
+            device_type=device.type,
+            dtype=amp_dtype,
+            enabled=use_amp,
+        ):
             model(spatial, global_, legal, actions=actions)
 
     sampled_ms = timed_cuda(sampled, warmup=warmup, iterations=iterations)
@@ -141,6 +156,7 @@ def benchmark_update_mode(
     warmup: int,
     iterations: int,
     device: torch.device,
+    dtype_name: str,
 ) -> dict[str, float]:
     torch.manual_seed(2002)
     torch.cuda.manual_seed_all(2002)
@@ -150,7 +166,7 @@ def benchmark_update_mode(
         model,
         PPOConfig(
             net=cfg,
-            dtype="float32",
+            dtype=dtype_name,
             kl_mode=mode,
             torch_compile=False,
             num_epochs_per_rollout=1,
@@ -211,6 +227,12 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument(
+        "--dtype",
+        choices=("float32", "bfloat16", "float16"),
+        default="float32",
+        help="autocast/training dtype used by the benchmark",
+    )
+    parser.add_argument(
         "--checkpoint",
         type=Path,
         help="optional trainer checkpoint; loads policy, EMA and optimizer state",
@@ -258,6 +280,7 @@ def main() -> None:
         "device": torch.cuda.get_device_name(device),
         "torch": torch.__version__,
         "batch_size": args.batch_size,
+        "dtype": args.dtype,
         "parameters": sum(tensor.numel() for tensor in initial_state.values()),
         "state_key_sha256": state_key_sha256,
         "checkpoint": str(args.checkpoint.resolve()) if args.checkpoint else None,
@@ -270,6 +293,7 @@ def main() -> None:
             warmup=args.warmup,
             iterations=args.iterations,
             device=device,
+            dtype_name=args.dtype,
         ),
     }
     full = benchmark_update_mode(
@@ -281,6 +305,7 @@ def main() -> None:
         warmup=args.warmup,
         iterations=args.iterations,
         device=device,
+        dtype_name=args.dtype,
     )
     sampled = benchmark_update_mode(
         "sampled_proxy",
@@ -291,6 +316,7 @@ def main() -> None:
         warmup=args.warmup,
         iterations=args.iterations,
         device=device,
+        dtype_name=args.dtype,
     )
     result["ppo_update"] = {
         "reverse_full": full,
