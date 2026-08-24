@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+# This module exercises the RL evaluator, whose implementation imports Torch.
+# The core test profile intentionally installs no RL extras, so skip during
+# collection instead of failing before pytest can apply its test selection.
+pytest.importorskip("torch")
+
 from junqi_rl.analysis import random_eval
 from junqi_rl.analysis.protocol import EvaluationCounts
 
