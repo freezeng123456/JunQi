@@ -102,6 +102,56 @@ class RolloutBatch:
     value_only_mask: Tensor | None = None
 
 
+
+def timestep_keep_env_indices(
+    abs_adv: np.ndarray,
+    *,
+    rate: float,
+    thresh: float,
+    own_mask: np.ndarray | None = None,
+) -> list[np.ndarray]:
+    """Per-collect-row env indices to keep for PPO.
+
+    ``abs_adv`` is ``|A_norm|`` with shape ``(T, N)``.  Each row is the
+    same simulator step across parallel envs.  Within a row, keep the
+    top ``round(N * rate)`` entries that also satisfy ``|A| >= thresh``
+    and ``own_mask``.  Empty rows yield an empty index array so the
+    caller can skip that Adam step.
+
+    This is Ataraxos Appendix D.4: filter shrinks the per-step batch,
+    it does not change the number of gradient steps (one per row).
+    """
+    if abs_adv.ndim != 2:
+        raise ValueError(f"abs_adv must be (T, N), got {abs_adv.shape}")
+    t_steps, n_envs = abs_adv.shape
+    if own_mask is None:
+        own = np.ones((t_steps, n_envs), dtype=bool)
+    else:
+        own = np.asarray(own_mask, dtype=bool)
+        if own.shape != abs_adv.shape:
+            raise ValueError(
+                f"own_mask shape {own.shape} != abs_adv {abs_adv.shape}"
+            )
+    if rate >= 1.0:
+        k = n_envs
+    elif rate <= 0.0:
+        k = 1
+    else:
+        k = max(1, int(round(n_envs * float(rate))))
+    out: list[np.ndarray] = []
+    for t in range(t_steps):
+        cand = own[t] & (abs_adv[t] >= float(thresh))
+        idx = np.flatnonzero(cand)
+        if idx.size == 0:
+            out.append(np.zeros(0, dtype=np.int64))
+            continue
+        if idx.size > k:
+            order = np.argsort(-abs_adv[t, idx], kind="stable")[:k]
+            idx = idx[order]
+        out.append(idx.astype(np.int64, copy=False))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # RolloutBuffer
 # ---------------------------------------------------------------------------
@@ -147,6 +197,7 @@ class RolloutBuffer:
         adv_filt_thresh: float = 0.01,
         adv_filt_rate: float = 0.75,
         device: str | torch.device = "cpu",
+        minibatch_group: str = "global",
     ) -> None:
         self.num_envs = num_envs
         self.steps_per_env = steps_per_env
@@ -156,6 +207,12 @@ class RolloutBuffer:
         self.adv_filt_thresh = adv_filt_thresh
         self.adv_filt_rate = adv_filt_rate
         self.device = torch.device(device)
+        if minibatch_group not in {"global", "timestep"}:
+            raise ValueError(
+                "minibatch_group must be 'global' or 'timestep'; "
+                f"got {minibatch_group!r}"
+            )
+        self.minibatch_group = minibatch_group
 
         N = num_envs
         T = steps_per_env
@@ -319,25 +376,12 @@ class RolloutBuffer:
         # many survive ``adv_filt_thresh``, i.e. the opposite knob.
         abs_adv = np.abs(adv_norm)
         thresh = self.adv_filt_thresh
-        if self.adv_filt_rate < 1.0:
-            q_thresh = float(np.quantile(abs_adv, 1.0 - self.adv_filt_rate))
-            thresh = max(thresh, q_thresh)
-        adv_mask = abs_adv >= thresh
-
-        # Build index array
-        indices = np.where(adv_mask)[0]
-        if shuffle:
-            g = rng if rng is not None else np.random.default_rng()
-            g.shuffle(indices)
-
         dev = self.device
 
-        for start in range(0, len(indices), batch_size):
-            idx = indices[start : start + batch_size]
-            if len(idx) == 0:
-                continue
-
-            batch = RolloutBatch(
+        def _emit(idx: np.ndarray):
+            if idx.size == 0:
+                return
+            yield RolloutBatch(
                 obs_spatial=torch.from_numpy(obs_sp[idx]).to(dev),
                 obs_global=torch.from_numpy(obs_gl[idx]).to(dev),
                 legal_mask=torch.from_numpy(lm[idx]).to(dev),
@@ -348,7 +392,51 @@ class RolloutBuffer:
                 values=torch.from_numpy(val[idx]).to(dev),
                 adv_mask=torch.ones(len(idx), dtype=torch.bool, device=dev),
             )
-            yield batch
+
+        if self.minibatch_group == "timestep":
+            rows = timestep_keep_env_indices(
+                abs_adv.reshape(T, N),
+                rate=self.adv_filt_rate,
+                thresh=self.adv_filt_thresh,
+            )
+            sizes = [int(r.size) for r in rows]
+            self._last_n_total = int(T * N)
+            self._last_n_own = int(T * N)
+            self._last_n_policy = int(sum(sizes))
+            self._last_thresh_used = float(self.adv_filt_thresh)
+            nonempty = [s for s in sizes if s > 0]
+            self._last_kept_mean = float(np.mean(sizes)) if sizes else 0.0
+            self._last_kept_min = float(min(nonempty) if nonempty else 0)
+            self._last_kept_max = float(max(sizes) if sizes else 0)
+            self._last_n_empty_steps = float(sum(1 for s in sizes if s == 0))
+            for t, env_idx in enumerate(rows):
+                if env_idx.size == 0:
+                    continue
+                yield from _emit((t * N + env_idx).astype(np.int64))
+            return
+
+        if self.adv_filt_rate < 1.0:
+            q_thresh = float(np.quantile(abs_adv, 1.0 - self.adv_filt_rate))
+            thresh = max(thresh, q_thresh)
+        adv_mask = abs_adv >= thresh
+
+        indices = np.where(adv_mask)[0]
+        if shuffle:
+            g = rng if rng is not None else np.random.default_rng()
+            g.shuffle(indices)
+
+        self._last_n_total = int(T * N)
+        self._last_n_own = int(T * N)
+        self._last_n_policy = int(len(indices))
+        self._last_thresh_used = float(thresh)
+        self._last_kept_mean = float("nan")
+        self._last_kept_min = float("nan")
+        self._last_kept_max = float("nan")
+        self._last_n_empty_steps = 0.0
+
+        for start in range(0, len(indices), batch_size):
+            idx = indices[start : start + batch_size]
+            yield from _emit(idx)
 
     def num_valid_transitions(self) -> int:
         """Count transitions passing the advantage filter (for logging)."""
@@ -362,10 +450,25 @@ class RolloutBuffer:
         adv = self.advantages_.reshape(-1)
         ret = self.returns_.reshape(-1)
         rew = self.rewards.reshape(-1)
-        return {
+        out = {
             "rollout/mean_reward": float(rew.mean()),
             "rollout/mean_return": float(ret.mean()),
             "rollout/mean_advantage": float(adv.mean()),
             "rollout/std_advantage": float(adv.std() + 1e-8),
             "rollout/num_valid": float(self.num_valid_transitions()),
         }
+        if hasattr(self, "_last_n_total"):
+            out["rollout/n_total"] = float(self._last_n_total)
+            out["rollout/n_own_seat"] = float(self._last_n_own)
+            out["rollout/n_policy_kept"] = float(self._last_n_policy)
+            out["rollout/keep_frac_own"] = (
+                float(self._last_n_policy) / max(1.0, float(self._last_n_own))
+            )
+            out["rollout/adv_thresh_used"] = float(self._last_thresh_used)
+            out["rollout/kept_mean"] = float(self._last_kept_mean)
+            out["rollout/kept_min"] = float(self._last_kept_min)
+            out["rollout/kept_max"] = float(self._last_kept_max)
+            out["rollout/n_empty_steps"] = float(self._last_n_empty_steps)
+        return out
+
+__all__ = ["RolloutBuffer", "RolloutBatch", "timestep_keep_env_indices", "FLAT_ACTION_DIM"]

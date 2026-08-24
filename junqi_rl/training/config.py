@@ -37,6 +37,10 @@ class ArrangementTrainConfig:
     enabled: bool = False
     refresh_every: int = 1
     n_arr: int = 1024
+    # Combined 4-seat boards uploaded to CUDA. 0 = zip n_arr//4 frozen
+    # tuples (legacy). >0 independently re-pairs per-seat samples up to
+    # this many rows so parallel games do not reuse a few hundred openings.
+    pool_size: int = 10_000
     storage_duration: int = 4
     net: ArrangementNetConfig = field(default_factory=ArrangementNetConfig)
     ppo: ArrangementPPOConfig = field(default_factory=ArrangementPPOConfig)
@@ -255,6 +259,8 @@ def validate_config(cfg: TrainConfig) -> None:
         )
     if cfg.arr.n_arr <= 0 or cfg.arr.n_arr % 4:
         raise ValueError("arr.n_arr must be a positive multiple of 4")
+    if cfg.arr.pool_size < 0:
+        raise ValueError("arr.pool_size must be >= 0 (0 = zip-only pairing)")
     if cfg.ppo.lr_schedule_unit not in {"grad_step", "rollout"}:
         raise ValueError(
             "ppo.lr_schedule_unit must be 'grad_step' or 'rollout'"
@@ -266,6 +272,14 @@ def validate_config(cfg: TrainConfig) -> None:
     if cfg.ppo.kl_mode not in {"reverse_full", "sampled_proxy"}:
         raise ValueError(
             "ppo.kl_mode must be 'reverse_full' or 'sampled_proxy'"
+        )
+    if cfg.ppo.magnet_shape not in {"uniform_legal", "piece_then_dest"}:
+        raise ValueError(
+            "ppo.magnet_shape must be 'uniform_legal' or 'piece_then_dest'"
+        )
+    if cfg.ppo.minibatch_group not in {"global", "timestep"}:
+        raise ValueError(
+            "ppo.minibatch_group must be 'global' or 'timestep'"
         )
     cfg.ppo.get_dtype()
     if cfg.rollout.storage_mode not in {"full_obs", "compact_history"}:

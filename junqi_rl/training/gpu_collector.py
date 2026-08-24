@@ -278,13 +278,18 @@ def _policy_act(policy, sp, gl, lm, chunk_size: int = 0):
     cs = int(chunk_size or 0)
     if cs <= 0 or n <= cs:
         return policy.act(sp, gl, lm)
-    actions, log_probs, values = [], [], []
+    actions, log_probs, values, ents = [], [], [], []
     for start in range(0, n, cs):
         sl = slice(start, min(start + cs, n))
         action, log_prob, value = policy.act(sp[sl], gl[sl], lm[sl])
         actions.append(action)
         log_probs.append(log_prob)
         values.append(value)
+        ent = getattr(policy, "_last_entropy_t", None)
+        if ent is not None:
+            ents.append(ent)
+    if ents:
+        policy._last_entropy_t = torch.cat(ents, dim=0)
     return (
         torch.cat(actions, dim=0),
         torch.cat(log_probs, dim=0),
@@ -362,6 +367,8 @@ def collect_rollout_gpu(
     done_flags = term["terminated"].copy()
 
     step_counter = 0
+    collect_ent_sum = None
+    collect_ent_n = 0
 
     for t in range(T):
         # ---- Determine acting seat per env (fast D2H of only turn) ------
@@ -754,6 +761,8 @@ def collect_rollout_gpu_v2(
     callbacks_enabled = on_termination is not None or on_reset is not None
 
     step_counter = 0
+    collect_ent_sum = None
+    collect_ent_n = 0
 
     for t in range(T):
         # ---- Turn (zero-copy GPU view) -----------------------------------
@@ -777,6 +786,11 @@ def collect_rollout_gpu_v2(
         log_probs_t = log_probs.detach().to(torch.float32)
         values_t = values.detach().to(torch.float32)
         values_t = _categorical_value_to_scalar(values_t)
+        ent_t = getattr(policy, "_last_entropy_t", None)
+        if ent_t is not None:
+            m = ent_t.detach().to(torch.float32).mean()
+            collect_ent_sum = m if collect_ent_sum is None else collect_ent_sum + m
+            collect_ent_n += 1
 
         # ---- Random opponent: replace actions for enemy seats (1, 3) ---------
         if random_opponent:
@@ -959,6 +973,9 @@ def collect_rollout_gpu_v2(
             on_reset(fired_t=fired_t, rollout_world=rollout_world)
 
         step_counter += 1
+
+    if collect_ent_n:
+        buffer._collect_entropy = float((collect_ent_sum / collect_ent_n).item())
 
     # ---- Bootstrap values for last state ----------------------------------
     turn_t = rollout_world.turn_torch()

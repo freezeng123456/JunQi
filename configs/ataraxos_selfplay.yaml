@@ -59,6 +59,13 @@ ppo:
 
 arr:
   enabled: true
+  # Paper: 1000 setups / player / GPU, independently sampled per seat.
+  # Zip pairing of n_arr=1024 previously uploaded only 256 combined
+  # boards, so 2048 envs reused the same 256 openings. Generate 1024
+  # lineups per seat and expand to a 16384-board pool by independently
+  # re-pairing seats (CUDA hashes each env onto one combined row).
+  n_arr: 4096
+  pool_size: 16384
 
 belief:
   enabled: false

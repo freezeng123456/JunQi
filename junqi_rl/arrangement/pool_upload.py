@@ -10,12 +10,18 @@ current distribution.
 Design
 ------
 * Each pool entry is a *combined* setup: one arrangement per seat.
-* We group ``n_arr`` sampled arrangements into ``n_arr // 4`` combined
-  pool entries by pairing consecutive samples (sample 4k..4k+3 become
-  seats 0..3 of pool entry k). The caller (``generate_arrangements``)
-  cycles seats by default so this mapping is "natural".
-* Pool entries with wrong seat distribution are silently skipped — the
-  caller is responsible for ensuring ``n_arr`` is a multiple of 4.
+* Zip pairing (``pool_size<=0``): group samples into ``min_per_seat``
+  combined entries, sample ``k`` of seat ``s`` becoming seat ``s`` of
+  pool entry ``k``. This is the legacy mapping.
+* Expanded pairing (``pool_size>0``): keep the zip prefix so every
+  sampled arrangement appears at least once, then fill the remaining
+  rows by independently sampling one lineup per seat. CUDA reset hashes
+  each env onto one combined row, so a pool of size ``n_arr//4`` reuses
+  the same 4-tuples across thousands of games. Independent pairing is
+  how a per-seat setup net becomes a large unique-game pool without
+  generating ``num_envs`` autoregressive samples.
+* Pool entries with wrong seat distribution raise rather than silently
+  producing an all-zero pool.
 
 Reverse lookup
 --------------
@@ -60,21 +66,36 @@ assert ARRANGEMENT_SIZE == SLOTS_PER_SEAT == 30
 def arrangements_to_pool(
     samples: Tensor,    # (n_arr, 30, 13) one-hot
     seat_idx: Tensor,   # (n_arr,) int64 in [0, 4)
+    *,
+    pool_size: int = 0,
+    seed: int = 0,
 ) -> np.ndarray:
     """Convert arrangement-net samples to a ``(pool_size, 120)`` int8 pool.
 
-    Groups samples into pool entries by seat_idx: we re-order the provided
-    samples so that slot ``4k+s`` (0<=s<4) is the arrangement used by seat
-    ``s`` in pool entry ``k``. Excess samples of any one seat are dropped.
+    Zip pairing (``pool_size<=0``): slot ``k`` of seat ``s`` is the ``k``-th
+    sample of that seat. Excess samples of any one seat are dropped, so the
+    returned pool has ``min_per_seat`` rows.
+
+    Expanded pairing (``pool_size>0``): keep that zip prefix so every
+    sampled arrangement is used at least once, then fill remaining rows by
+    independently sampling one lineup per seat. The CUDA reset kernel
+    hashes each env onto a single combined row, so zip-only pools of size
+    ``n_arr//4`` make thousands of parallel games reuse a few hundred
+    openings.
 
     Parameters
     ----------
     samples : (n_arr, 30, 13) float
     seat_idx : (n_arr,) int64
+    pool_size : int
+        Target number of combined 4-seat boards. ``<=0`` keeps zip-only
+        behaviour. Otherwise ``max(pool_size, min_per_seat)``.
+    seed : int
+        RNG seed for the independent-combination tail.
 
     Returns
     -------
-    pool : (pool_size, 120) int8 — piece-type values (0..13) flattened
+    pool : (P, 120) int8 — piece-type values (0..13) flattened
         row-major as [seat0_slot0, seat0_slot1, ..., seat3_slot29].
     """
     if samples.ndim != 3 or samples.size(1) != ARRANGEMENT_SIZE or samples.size(2) != N_PIECE_TYPE_WITH_NONE:
@@ -86,6 +107,8 @@ def arrangements_to_pool(
         raise ValueError(
             f"seat_idx shape {seat_idx.shape} must match samples.size(0)"
         )
+    if int(pool_size) < 0:
+        raise ValueError(f"pool_size must be >= 0, got {pool_size}")
 
     # Convert one-hot to vocab indices (n_arr, 30) → PieceType.value (n_arr, 30).
     vocab = samples.argmax(dim=-1).to("cpu").numpy().astype(np.int64)  # (n_arr, 30)
@@ -105,12 +128,19 @@ def arrangements_to_pool(
             "Call generate_arrangements with seats covering all 4 indices."
         )
 
-    pool_size = min_per_seat
-    pool = np.zeros((pool_size, 4 * SLOTS_PER_SEAT), dtype=np.int8)  # (P, 120)
+    zip_size = min_per_seat
+    target = zip_size if int(pool_size) <= 0 else max(int(pool_size), zip_size)
+    pool = np.zeros((target, 4 * SLOTS_PER_SEAT), dtype=np.int8)  # (P, 120)
     for s in range(N_SEATS):
-        seat_idxs = per_seat_indices[s][:pool_size]  # (P,)
-        # Destination columns for seat s: [s*30, s*30+1, ..., s*30+29].
-        pool[:, s * SLOTS_PER_SEAT:(s + 1) * SLOTS_PER_SEAT] = piece_types[seat_idxs]
+        seat_idxs = per_seat_indices[s][:zip_size]
+        pool[:zip_size, s * SLOTS_PER_SEAT:(s + 1) * SLOTS_PER_SEAT] = piece_types[seat_idxs]
+    if target > zip_size:
+        rng = np.random.default_rng(int(seed))
+        extra = target - zip_size
+        for s in range(N_SEATS):
+            ids = per_seat_indices[s]
+            pick = rng.integers(0, len(ids), size=extra)
+            pool[zip_size:, s * SLOTS_PER_SEAT:(s + 1) * SLOTS_PER_SEAT] = piece_types[ids[pick]]
     return pool
 
 
