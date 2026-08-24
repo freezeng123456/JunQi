@@ -99,6 +99,12 @@ def evaluate_candidate(
     from junqi_rl.analysis.random_eval import evaluate_paired_head_to_head
     from junqi_rl.gpu_rollout import GpuRollout
 
+    autocast_dtype = {
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+        "float32": torch.float32,
+    }[args.dtype]
+
     state = load_state(candidate_path)
     candidate = load_policy(state, device)
     baseline = load_policy(baseline_state, device)
@@ -119,7 +125,7 @@ def evaluate_candidate(
         device=device,
         seed=args.seed,
         max_moves=args.max_moves,
-        autocast_dtype=torch.float32,
+        autocast_dtype=autocast_dtype,
         greedy=args.greedy,
     )
     result = {
@@ -131,6 +137,7 @@ def evaluate_candidate(
         "environment_seed": args.seed,
         "action_seed": action_seed,
         "greedy": args.greedy,
+        "dtype": args.dtype,
         "metrics": metrics,
     }
     del state, candidate, baseline, bootstrap
@@ -150,6 +157,12 @@ def main() -> None:
     parser.add_argument("--max-moves", type=int, default=4000)
     parser.add_argument("--seed", type=int, default=1_000_587)
     parser.add_argument("--setup-seed", type=int, default=20_260_817)
+    parser.add_argument(
+        "--dtype",
+        choices=("float32", "bfloat16", "float16"),
+        default="float32",
+        help="autocast dtype used by H2H policy inference",
+    )
     parser.add_argument("--greedy", action="store_true")
     args = parser.parse_args()
 
@@ -191,6 +204,7 @@ def main() -> None:
     output = {
         "device": torch.cuda.get_device_name(device),
         "torch": torch.__version__,
+        "dtype": args.dtype,
         "base": {"path": str(args.base), "sha256": file_sha256(args.base)},
         "baseline": {
             "path": str(args.baseline),
