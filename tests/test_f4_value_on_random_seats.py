@@ -393,11 +393,16 @@ def test_ppo_entropy_loss_weight_per_consistency() -> None:
     logits = torch.where(legal, logits, torch.full_like(logits, -1e9))
     log_probs = torch.log_softmax(logits, dim=-1)
 
-    base = trainer._entropy_loss(log_probs, legal).item()
-    one = trainer._entropy_loss(log_probs, legal,
-                                weight_per=torch.ones(B, device="cuda")).item()
-    z   = trainer._entropy_loss(log_probs, legal,
-                                weight_per=torch.zeros(B, device="cuda")).item()
+    base, _ = trainer._entropy_loss(log_probs, legal)
+    one, _ = trainer._entropy_loss(
+        log_probs, legal, weight_per=torch.ones(B, device="cuda")
+    )
+    z, _ = trainer._entropy_loss(
+        log_probs, legal, weight_per=torch.zeros(B, device="cuda")
+    )
+    base = base.item()
+    one = one.item()
+    z = z.item()
     assert abs(one - base) < 1e-5, f"weight=ones should match no-mask: {one} vs {base}"
     assert abs(z) < 1e-12, f"weight=zeros should be 0: {z}"
 

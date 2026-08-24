@@ -1551,7 +1551,6 @@ int LoadReplayPath(Junqi *pJunqi, const char *path)
 	pJunqi->bStop = 1;
 	pJunqi->iRpStep = 0;
 	pJunqi->bResetFlag = 1;
-	ResetReplayInfo(pJunqi);
 	return 1;
 }
 
@@ -1649,7 +1648,6 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
     {
     	preStep = 0;
     	pJunqi->bResetFlag = 0;
-	ResetReplayInfo(pJunqi);
     	ReSetChessBoard(pJunqi);
     }
 
@@ -1670,14 +1668,6 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 				return;
 			}
 			pJunqi->eTurn = iDir;
-			pJunqi->replay_last_dir = iDir;
-			pJunqi->replay_last_src_x = -1;
-			pJunqi->replay_last_src_y = -1;
-			pJunqi->replay_last_dst_x = -1;
-			pJunqi->replay_last_dst_y = -1;
-			pJunqi->replay_last_src_type = NONE;
-			pJunqi->replay_last_dst_type = NONE;
-			pJunqi->replay_last_event = event;
 			if( event==SURRENDER_EVENT )
 			{
 				DestroyAllChess(pJunqi, iDir);
@@ -1739,13 +1729,6 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 		}
 		//设置当前下棋方
 		pJunqi->eTurn = pSrc->pLineup->iDir;
-		pJunqi->replay_last_dir = pSrc->pLineup->iDir;
-		pJunqi->replay_last_src_x = p1.x;
-		pJunqi->replay_last_src_y = p1.y;
-		pJunqi->replay_last_dst_x = p2.x;
-		pJunqi->replay_last_dst_y = p2.y;
-		pJunqi->replay_last_src_type = pSrc->type;
-		pJunqi->replay_last_dst_type = pDst->type;
 
 		if( IsEnableMove(pJunqi, pSrc, pDst, 1) )
 		{
@@ -1753,7 +1736,6 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 			gtk_widget_hide(pJunqi->redRectangle[1]);
 			int type;
 			type = CompareChess(pSrc, pDst);
-			pJunqi->replay_last_event = type;
 			PlayResult(pJunqi, pSrc, pDst, type);
 			ChessTurn(pJunqi);
 			if( i==pJunqi->iRpStep-1 )
@@ -1773,7 +1755,6 @@ void ShowReplayStep(Junqi *pJunqi, u8 next_flag)
 		}
 	}
 	preStep = pJunqi->iRpStep;
-	UpdateReplayInfo(pJunqi, pJunqi->iRpStep, max_step);
 
 }
 
