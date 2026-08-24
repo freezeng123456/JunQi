@@ -1,0 +1,73 @@
+# T4-A validation/continuation profile for the 10.8M move network.
+#
+# Model inputs, outputs and parameter shapes are identical to
+# configs/ataraxos_selfplay.yaml.  The smaller rollout dimensions are an
+# execution profile for a 15 GiB T4, not a model change.  Promote changes to a
+# long run only after fixed-seed throughput, loss and H2H parity checks.
+
+env:
+  num_envs: 128
+  steps_per_env: 128
+  max_num_moves: 4000
+  seed: 241
+  use_gpu_rollout: true
+
+net:
+  cnn_channels: 128
+  cnn_layers: 3
+  depth: 8
+  embed_dim: 320
+  n_head: 8
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 64
+  pos_emb_std: 0.02
+
+ppo:
+  num_epochs_per_rollout: 1
+  minibatch_size: 128
+  # The 10.8M policy's float16 backward produced non-finite gradients on T4
+  # even at loss scale 1. T4 has no native bf16 Tensor Cores, so use float32
+  # for trustworthy debugging/short continuation runs.
+  dtype: float32
+  torch_compile: false
+  lr_schedule_unit: rollout
+  temperature_schedule_unit: rollout
+  act_chunk_size: 64
+  max_grad_norm: 0.267
+  adv_filt_rate: 0.25
+  # Engineering fast path: removes the frozen-policy full forward. Switch to
+  # reverse_full for exact historical KL semantics.
+  kl_mode: sampled_proxy
+
+arr:
+  enabled: true
+
+belief:
+  enabled: false
+
+rollout:
+  storage_mode: compact_history
+  csr_legal_mask: true
+  csr_k_max: 256
+
+save_dir: /data/disk2/junqi_opt/runs/10m_sampled_proxy
+total_rollouts: 3000
+save_every: 25
+eval_every: 10
+eval_num_games: 64
+eval_record_games: 0
+league_eval_games: 0
+log_every: 1
+
+resume: /data/disk2/junqi_opt/models/junqi-10m-pin01-nofilt-20260821/ckpt_000570.pt
+eval_baseline_ckpt: /data/disk2/junqi_opt/models/junqi-1.13m-bigbatch-r3000/ckpt_003000.pt
+eval_baseline_games: 64
+
+device: cuda
+seed: 241
+random_opponent: false
+train_value_on_random_seats: false
+reward_shaping: false
+mixed_setup: false

@@ -263,6 +263,10 @@ def validate_config(cfg: TrainConfig) -> None:
         raise ValueError(
             "ppo.temperature_schedule_unit must be 'grad_step' or 'rollout'"
         )
+    if cfg.ppo.kl_mode not in {"reverse_full", "sampled_proxy"}:
+        raise ValueError(
+            "ppo.kl_mode must be 'reverse_full' or 'sampled_proxy'"
+        )
     cfg.ppo.get_dtype()
     if cfg.rollout.storage_mode not in {"full_obs", "compact_history"}:
         raise ValueError(

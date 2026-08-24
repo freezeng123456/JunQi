@@ -245,6 +245,18 @@ class PPOConfig:
     kl_proxy_beta: float = 1.0
     """Huber transition for the sampled KL proxy in log-probability units."""
 
+    kl_mode: str = "reverse_full"
+    """Trust-region implementation used in the optimisation loss.
+
+    * ``"reverse_full"`` preserves the Ataraxos-aligned path and evaluates a
+      frozen collection-policy copy on every minibatch.
+    * ``"sampled_proxy"`` uses the already-stored rollout action log-probability
+      and bounded Huber proxy.  It avoids the frozen model copy and its full
+      forward pass, at the cost of replacing exact reverse KL with a sampled
+      trust-region estimate.  Use it as an explicit, benchmarked optimisation;
+      the compatibility default remains ``"reverse_full"``.
+    """
+
     # --- GAE ---
     gamma: float = 1.0
     """Discount factor."""
@@ -372,6 +384,11 @@ class PPOTrainer:
         device: str | torch.device = "cpu",
     ) -> None:
         self.cfg = cfg
+        if cfg.kl_mode not in {"reverse_full", "sampled_proxy"}:
+            raise ValueError(
+                "kl_mode must be 'reverse_full' or 'sampled_proxy'; "
+                f"got {cfg.kl_mode!r}"
+            )
         self.device = torch.device(device)
         self.num_train_step: int = 0
         self.num_rollout: int = 0
@@ -426,13 +443,18 @@ class PPOTrainer:
         # module, so this is safe.
         self.ema = EMAPolicy(self._policy_unwrapped, cfg.ema_decay)
 
-        # Frozen snapshot of the collection policy π_θt. Weights are copied
-        # at the start of each train_epoch (after collect, before the first
-        # gradient step) so reverse KL is against the behaviour policy.
-        self._collect_policy = copy.deepcopy(self._policy_unwrapped)
-        self._collect_policy.eval()
-        for p in self._collect_policy.parameters():
-            p.requires_grad_(False)
+        # Frozen snapshot of the collection policy π_θt. It is only needed by
+        # exact reverse KL. The sampled-proxy path uses rollout action
+        # log-probabilities already resident in the buffer, so allocating a
+        # second model and running it for every minibatch would be pure waste.
+        self._collect_policy: JunqiNet | None
+        if cfg.kl_mode == "reverse_full":
+            self._collect_policy = copy.deepcopy(self._policy_unwrapped)
+            self._collect_policy.eval()
+            for p in self._collect_policy.parameters():
+                p.requires_grad_(False)
+        else:
+            self._collect_policy = None
 
         # Optimiser.  ``foreach=True`` (default on CUDA in recent torch) uses
         # fused multi-tensor ops — about 20-30% faster than the per-param
@@ -487,8 +509,11 @@ class PPOTrainer:
 
     def _sync_collect_policy(self) -> None:
         """Copy learner weights into the frozen collection snapshot."""
-        self._collect_policy.load_state_dict(self._policy_unwrapped.state_dict())
-        self._collect_policy.eval()
+        collect_policy = getattr(self, "_collect_policy", None)
+        if collect_policy is None:
+            return
+        collect_policy.load_state_dict(self._policy_unwrapped.state_dict())
+        collect_policy.eval()
 
     def _get_temperature(self) -> float:
         cfg = self.cfg
@@ -800,18 +825,28 @@ class PPOTrainer:
 
         legal_mask = batch.legal_mask.to(self.device)
 
-        with torch.inference_mode(), autocast(
-            device_type=ctx_device, dtype=self._amp_dtype, enabled=self._use_amp
-        ):
-            old_log_probs_all = self._collect_policy(
-                obs_sp_in, obs_gl_in, legal_mask,
-            )["log_probs"]
+        evaluated_actions = batch.actions.to(self.device)
+
+        old_log_probs_all: Tensor | None = None
+        if self._collect_policy is not None:
+            with torch.inference_mode(), autocast(
+                device_type=ctx_device,
+                dtype=self._amp_dtype,
+                enabled=self._use_amp,
+            ):
+                old_log_probs_all = self._collect_policy(
+                    obs_sp_in,
+                    obs_gl_in,
+                    legal_mask,
+                    actions=evaluated_actions,
+                )["log_probs"]
 
         with autocast(device_type=ctx_device, dtype=self._amp_dtype, enabled=self._use_amp):
             out = self._policy_for_train(
                 obs_sp_in,
                 obs_gl_in,
                 legal_mask,
+                actions=evaluated_actions,
             )
             new_log_probs_all = out["log_probs"]       # (B, FLAT_ACTION_DIM)
             value = out["value"]                        # (B,) or (B, N_VF_CAT)
@@ -831,9 +866,11 @@ class PPOTrainer:
             # `isfinite` (which rejects both NaN and -inf) was a project-level
             # bug that caused 100% of fp16 minibatches to be short-circuited
             # in v17-v32 (silent ceiling = no actual training happened).
-            if (torch.isnan(new_log_probs_all).any()
-                    or torch.isnan(value).any()
-                    or torch.isinf(value).any()):
+            bad_forward = (
+                torch.isnan(new_log_probs_all).any()
+                | (~torch.isfinite(value).all())
+            )
+            if bool(bad_forward):
                 self._nan_skip_count += 1
                 # Return a zero-gradient "no-op" result: zero losses, no
                 # backward/step. The caller's aggregator averages these as
@@ -858,7 +895,7 @@ class PPOTrainer:
                 }
 
             # Log-prob of the chosen action
-            act_idx = batch.actions.unsqueeze(1)       # (B, 1)
+            act_idx = evaluated_actions.unsqueeze(1)   # (B, 1)
             new_log_prob = new_log_probs_all.gather(1, act_idx).squeeze(1)  # (B,)
 
             # Old log-probs (scalar per action, stored in buffer)
@@ -915,17 +952,20 @@ class PPOTrainer:
                 weight_per=policy_weight_per,
             )
 
-            kl_loss = self._reverse_kl(
-                new_log_probs_all,
-                old_log_probs_all,
-                legal_mask,
-                weight_per=policy_weight_per,
-            )
             log_ratio = new_log_prob - old_log_prob.detach()
             kl_proxy = self._sampled_kl_penalty(
                 log_ratio,
                 weight_per=policy_weight_per,
             )
+            if old_log_probs_all is None:
+                kl_loss = kl_proxy
+            else:
+                kl_loss = self._reverse_kl(
+                    new_log_probs_all,
+                    old_log_probs_all,
+                    legal_mask,
+                    weight_per=policy_weight_per,
+                )
             signed_approx_kl = -log_ratio
             if policy_weight_per is not None:
                 w_sum = policy_weight_per.sum().clamp_min(1.0)

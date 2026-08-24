@@ -145,3 +145,36 @@ def test_reverse_kl_positive_when_new_is_peakier():
     kl.backward()
     assert logits.grad is not None
     assert torch.isfinite(logits.grad).all()
+
+
+def test_sampled_proxy_mode_does_not_allocate_collection_policy():
+    net_cfg = JunqiNetConfig(
+        cnn_channels=8,
+        cnn_layers=1,
+        depth=1,
+        embed_dim=32,
+        n_head=2,
+        ff_factor=2,
+        action_key_dim=8,
+    )
+    cfg = PPOConfig(net=net_cfg, dtype="float32", kl_mode="sampled_proxy")
+    trainer = PPOTrainer(JunqiNet(net_cfg), cfg, device="cpu")
+
+    assert trainer._collect_policy is None
+    trainer._sync_collect_policy()
+
+
+def test_invalid_kl_mode_is_rejected():
+    net_cfg = JunqiNetConfig(
+        cnn_channels=8,
+        cnn_layers=1,
+        depth=1,
+        embed_dim=32,
+        n_head=2,
+        ff_factor=2,
+        action_key_dim=8,
+    )
+    cfg = PPOConfig(net=net_cfg, dtype="float32", kl_mode="not-a-mode")
+
+    with pytest.raises(ValueError, match="kl_mode"):
+        PPOTrainer(JunqiNet(net_cfg), cfg, device="cpu")

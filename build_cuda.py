@@ -54,6 +54,10 @@ configure_cmd = [
     CUDA_SRC,
     "-B", BUILD_DIR,
     f"-Dpybind11_DIR={PYBIND11_DIR}",
+    # CMake's FindPython otherwise searches PATH independently and can pair
+    # this interpreter with a different system Python that lacks development
+    # headers (common on experiment servers with an isolated venv/conda env).
+    f"-DPython3_EXECUTABLE={PYTHON_EXEC}",
     f"-DCMAKE_CUDA_ARCHITECTURES={CUDA_ARCH}",
     f"-DCMAKE_CUDA_COMPILER={os.environ.get('CMAKE_CUDA_COMPILER', '/usr/local/cuda/bin/nvcc')}",
     f"-DCMAKE_INSTALL_PREFIX={INSTALL_TO}",
