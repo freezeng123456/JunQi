@@ -435,11 +435,19 @@ class JunqiNet(nn.Module):
         obs_spatial: Tensor,    # (B, OBS_CHANNELS, 17, 17)  float32
         obs_global: Tensor,     # (B, OBS_GLOBAL_DIMS)        float32
         legal_mask: Tensor,     # (B, FLAT_ACTION_DIM)        bool
+        *,
+        actions: Tensor | None = None,
     ) -> dict[str, Tensor]:
         """Full forward pass used during training.
 
         Returns a dict with keys:
         ``action``, ``action_log_prob``, ``log_probs``, ``value``.
+
+        ``actions`` is an optional training-only fast path.  When supplied,
+        the method evaluates those actions instead of drawing a throwaway
+        sample.  The returned keys, shapes and checkpoint structure are
+        unchanged.  Existing callers that pass the original three inputs keep
+        the exact sampling behaviour.
 
         NaN-safe: if any row of ``logits_f`` contains NaN/Inf (observed
         on T4 with fp16 autocast under slow-lr-decay regimes — see v29
@@ -465,20 +473,27 @@ class JunqiNet(nn.Module):
         # the rest) doesn't help — a single -inf from the legal mask
         # mixed with a finite NaN still makes the row all-zero after
         # softmax, which sample() rejects.
-        finite_mask = torch.isfinite(logits_f).all(dim=-1)    # (B,) bool
-        if not bool(finite_mask.all()):
-            # Count occurrences for downstream logging.
-            self._nan_fwd_count += int((~finite_mask).sum().item())
-            # Build fallback logits: 0 where legal, -inf where illegal.
-            fallback = torch.where(
-                legal_mask,
-                torch.zeros_like(logits_f),
-                torch.full_like(logits_f, float("-inf")),
-            )
-            # Replace only the bad rows.
-            # unsqueeze(-1) for broadcasting the row-mask across actions.
-            bad_rows = (~finite_mask).unsqueeze(-1)
-            logits_f = torch.where(bad_rows, fallback, logits_f)
+        # The guard and its diagnostic counter are only needed before random
+        # sampling: Categorical rejects a poisoned probability tensor. During
+        # PPO action evaluation no sampler is constructed, and the trainer has
+        # one batched NaN/Inf check that can skip the update. Avoiding these
+        # ``bool(cuda_tensor)`` checks removes two forced stream
+        # synchronisations from every training forward.
+        if actions is None:
+            finite_mask = torch.isfinite(logits_f).all(dim=-1)  # (B,) bool
+            if not bool(finite_mask.all()):
+                # Count occurrences for downstream logging.
+                self._nan_fwd_count += int((~finite_mask).sum().item())
+                # Build fallback logits: 0 where legal, -inf where illegal.
+                fallback = torch.where(
+                    legal_mask,
+                    torch.zeros_like(logits_f),
+                    torch.full_like(logits_f, float("-inf")),
+                )
+                # Replace only the bad rows.
+                # unsqueeze(-1) for broadcasting the row-mask across actions.
+                bad_rows = (~finite_mask).unsqueeze(-1)
+                logits_f = torch.where(bad_rows, fallback, logits_f)
 
         # Dead envs (terminated transitions stored as dummy slots) carry a
         # legal_mask with zero True entries. Their logits row is then
@@ -493,20 +508,40 @@ class JunqiNet(nn.Module):
         # vs-random mode and these transitions contribute zero gradient,
         # so the artificial uniform prior is harmless.
         no_legal = ~legal_mask.any(dim=-1)                  # (B,) bool
-        if bool(no_legal.any()):
-            uniform = torch.zeros_like(logits_f)            # all-zero -> uniform
-            logits_f = torch.where(no_legal.unsqueeze(-1), uniform, logits_f)
+        if actions is None:
+            if bool(no_legal.any()):
+                uniform = torch.zeros_like(logits_f)        # all-zero -> uniform
+                logits_f = torch.where(no_legal.unsqueeze(-1), uniform, logits_f)
+        else:
+            # This branch is entirely device-side: it is a no-op for normal
+            # legal rows and keeps legacy dummy/dead rows finite without a
+            # host synchronisation.
+            logits_f = torch.where(
+                no_legal.unsqueeze(-1),
+                torch.zeros_like(logits_f),
+                logits_f,
+            )
 
         log_probs = logits_f.log_softmax(dim=-1)
 
-        dist = Categorical(logits=logits_f)
-        actions = dist.sample()  # (B,)
+        if actions is None:
+            dist = Categorical(logits=logits_f)
+            chosen_actions = dist.sample()  # (B,)
+        else:
+            if actions.ndim != 1 or actions.shape[0] != logits_f.shape[0]:
+                raise ValueError(
+                    "actions must have shape (B,), matching the observation "
+                    f"batch; got {tuple(actions.shape)} for B={logits_f.shape[0]}"
+                )
+            chosen_actions = actions.to(device=logits_f.device, dtype=torch.long)
 
         value = self._value(cls)
 
         return {
-            "action": actions.int(),
-            "action_log_prob": log_probs.gather(1, actions.unsqueeze(1)).squeeze(1),
+            "action": chosen_actions.int(),
+            "action_log_prob": log_probs.gather(
+                1, chosen_actions.unsqueeze(1)
+            ).squeeze(1),
             "log_probs": log_probs,          # full distribution
             "value": value,
         }
@@ -533,17 +568,22 @@ class JunqiNet(nn.Module):
         cls, cells = self._encode(obs_spatial, obs_global)
         logits = self._policy_logits(cells, legal_mask)  # (B, 83521), illegal=-inf
 
-        # Gumbel-max trick: logits + Gumbel(0,1), then argmax.
-        # -inf + finite = -inf, so illegal actions are automatically excluded.
         logits_f = logits.float()
         u = torch.rand_like(logits_f).clamp_(1e-10, 1.0)
         gumbel = -torch.log(-torch.log(u))
         actions = (logits_f + gumbel).argmax(dim=-1)
+        lse = logits_f.logsumexp(dim=-1)
+        log_probs = (
+            logits_f.gather(1, actions.unsqueeze(1)).squeeze(1)
+            - lse
+        )
 
-        # log_prob = logit[chosen] - logsumexp(logits)
-        # logsumexp correctly ignores -inf entries (exp(-inf) = 0).
-        lse = logits_f.logsumexp(dim=-1)  # (B,)
-        log_probs = logits_f.gather(1, actions.unsqueeze(1)).squeeze(1) - lse
+        # Mean entropy over legal actions, for collect-wide H (not the
+        # advantage-filtered training batch). Illegal logits are -inf.
+        log_p = logits_f - lse.unsqueeze(-1)
+        safe_p = torch.where(legal_mask, log_p.exp(), torch.zeros_like(log_p))
+        safe_log_p = torch.where(legal_mask, log_p, torch.zeros_like(log_p))
+        self._last_entropy_t = -(safe_p * safe_log_p).sum(dim=-1)
 
         values = self._value(cls)
         return actions.int(), log_probs, values

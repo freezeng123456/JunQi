@@ -56,9 +56,19 @@ ppo:
   # field is the fraction KEPT, so the previous 0.75 trained on the top
   # 75% -- the inverse -- diluting every update with low-signal samples.
   adv_filt_rate: 0.25
+  # Validated on H20 from ckpt_000570.pt: removes the frozen-policy
+  # full-action reverse-KL pass while preserving the model I/O contract.
+  kl_mode: sampled_proxy
 
 arr:
   enabled: true
+  # Paper: 1000 setups / player / GPU, independently sampled per seat.
+  # Zip pairing of n_arr=1024 previously uploaded only 256 combined
+  # boards, so 2048 envs reused the same 256 openings. Generate 1024
+  # lineups per seat and expand to a 16384-board pool by independently
+  # re-pairing seats (CUDA hashes each env onto one combined row).
+  n_arr: 4096
+  pool_size: 16384
 
 belief:
   enabled: false

@@ -1016,6 +1016,9 @@ class GpuRollout:
         self,
         samples: "torch.Tensor",   # (n_arr, 30, 13) one-hot
         seat_idx: "torch.Tensor",  # (n_arr,) int64
+        *,
+        pool_size: int = 0,
+        seed: int = 0,
     ) -> int:
         """Re-upload the GPU setup pool from arrangement-net samples.
 
@@ -1031,7 +1034,13 @@ class GpuRollout:
             :func:`junqi_rl.arrangement.sampling.generate_arrangements`.
         seat_idx
             ``(n_arr,)`` int64 seat index for each sample. ``n_arr`` must
-            have at least 1 sample per seat; pool_size = min across seats.
+            have at least 1 sample per seat.
+        pool_size
+            Target combined-board count. ``<=0`` keeps zip pairing
+            (``min`` samples across seats). ``>0`` independently re-pairs
+            per-seat lineups; see :func:`arrangements_to_pool`.
+        seed
+            RNG seed for independent pairing.
 
         Returns
         -------
@@ -1039,13 +1048,17 @@ class GpuRollout:
             Number of combined-setup entries in the new pool.
         """
         global _training_setup_pool
+        import numpy as np
         from junqi_rl.arrangement.pool_upload import (
             arrangements_to_pool,
             refresh_gpu_setup_pool,
         )
-        pool = arrangements_to_pool(samples, seat_idx)
+        pool = arrangements_to_pool(
+            samples, seat_idx, pool_size=int(pool_size), seed=int(seed),
+        )
         refresh_gpu_setup_pool(pool)
         _training_setup_pool = pool
+        self.last_setup_pool_unique = int(np.unique(pool, axis=0).shape[0])
         return int(pool.shape[0])
 
     def snapshot_env_arrangements(self) -> "np.ndarray":

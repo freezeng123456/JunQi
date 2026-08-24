@@ -145,3 +145,71 @@ def test_reverse_kl_positive_when_new_is_peakier():
     kl.backward()
     assert logits.grad is not None
     assert torch.isfinite(logits.grad).all()
+
+
+def test_sampled_proxy_mode_does_not_allocate_collection_policy():
+    net_cfg = JunqiNetConfig(
+        cnn_channels=8,
+        cnn_layers=1,
+        depth=1,
+        embed_dim=32,
+        n_head=2,
+        ff_factor=2,
+        action_key_dim=8,
+    )
+    cfg = PPOConfig(net=net_cfg, dtype="float32", kl_mode="sampled_proxy")
+    trainer = PPOTrainer(JunqiNet(net_cfg), cfg, device="cpu")
+
+    assert trainer._collect_policy is None
+    trainer._sync_collect_policy()
+
+
+def test_invalid_kl_mode_is_rejected():
+    net_cfg = JunqiNetConfig(
+        cnn_channels=8,
+        cnn_layers=1,
+        depth=1,
+        embed_dim=32,
+        n_head=2,
+        ff_factor=2,
+        action_key_dim=8,
+    )
+    cfg = PPOConfig(net=net_cfg, dtype="float32", kl_mode="not-a-mode")
+
+    with pytest.raises(ValueError, match="kl_mode"):
+        PPOTrainer(JunqiNet(net_cfg), cfg, device="cpu")
+
+
+def test_magnet_alpha_respects_floor():
+    assert magnet_alpha(0.08, 3000, 0.2, floor=0.02) == pytest.approx(0.02)
+    assert magnet_alpha(0.08, 1, 0.2, floor=0.02) == pytest.approx(0.08)
+
+
+def test_piece_then_dest_kl_zero_when_policy_matches_rho():
+    trainer = _trainer()
+    trainer.cfg.magnet_shape = "piece_then_dest"
+    trainer.cfg.uniform_magnet = True
+    # 2×2 board: actions src*2+dst. src0 has dests 0 and 1; src1 has dest 0.
+    legal = torch.tensor([[True, True, True, False]])
+    rho = torch.tensor([[0.25, 0.25, 0.50, 0.0]])
+    logp = rho.clamp(min=1e-12).log()
+    logp = logp.masked_fill(~legal, float("-inf"))
+    loss, entropy = trainer._entropy_loss(logp, legal)
+    assert torch.isfinite(loss)
+    assert abs(loss.item()) < 1e-5
+    assert entropy.item() > 0.0
+
+
+def test_piece_then_dest_upweights_scarce_piece_vs_uniform():
+    trainer = _trainer()
+    trainer.cfg.uniform_magnet = True
+    legal = torch.tensor([[True, True, True, False]])
+    # Peak on the scarce piece's only dest (action 2).
+    logits = torch.tensor([[0.0, 0.0, 4.0, -1e9]])
+    logp = torch.log_softmax(logits.masked_fill(~legal, float("-inf")), dim=-1)
+    trainer.cfg.magnet_shape = "uniform_legal"
+    loss_u, _ = trainer._entropy_loss(logp, legal)
+    trainer.cfg.magnet_shape = "piece_then_dest"
+    loss_p, _ = trainer._entropy_loss(logp, legal)
+    # ρ_ptd(action 2)=0.5 > ρ_unif=1/3, so a peak there is closer to ptd.
+    assert loss_p.item() < loss_u.item()

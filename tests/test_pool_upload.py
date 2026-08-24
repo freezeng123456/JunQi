@@ -131,6 +131,59 @@ def test_pool_rejects_bad_shape():
         arrangements_to_pool(torch.zeros(4, 30, 13), torch.zeros(5, dtype=torch.long))
 
 
+def test_pool_size_zero_keeps_zip_pairing():
+    samples, seats = _make_n_samples(8, seed=2)
+    zipped = arrangements_to_pool(samples, seats)
+    also = arrangements_to_pool(samples, seats, pool_size=0, seed=99)
+    assert zipped.shape == (2, 120)
+    assert np.array_equal(zipped, also)
+
+
+def test_expanded_pool_keeps_zip_prefix_and_grows():
+    samples, seats = _make_n_samples(8, seed=4)
+    zipped = arrangements_to_pool(samples, seats)
+    expanded = arrangements_to_pool(samples, seats, pool_size=16, seed=0)
+    assert expanded.shape == (16, 120)
+    assert np.array_equal(expanded[:2], zipped)
+    n_unique = int(np.unique(expanded, axis=0).shape[0])
+    assert n_unique >= 8, n_unique
+    for entry in expanded:
+        for seat in range(4):
+            lineup = [PieceType(int(v)) for v in entry[seat * SLOTS_PER_SEAT:(seat + 1) * SLOTS_PER_SEAT]]
+            r = validate_lineup(lineup)
+            assert r.ok, r.violations
+
+
+def test_expanded_pool_is_deterministic_in_seed():
+    samples, seats = _make_n_samples(16, seed=5)
+    a = arrangements_to_pool(samples, seats, pool_size=32, seed=7)
+    b = arrangements_to_pool(samples, seats, pool_size=32, seed=7)
+    c = arrangements_to_pool(samples, seats, pool_size=32, seed=8)
+    assert np.array_equal(a, b)
+    assert not np.array_equal(a, c)
+
+
+def test_expanded_pool_uses_independent_seat_pairing():
+    """Zip pairing freezes 4-tuples; expansion should remix seats."""
+    samples, seats = _make_n_samples(32, seed=6)
+    zipped = arrangements_to_pool(samples, seats)
+    expanded = arrangements_to_pool(samples, seats, pool_size=64, seed=1)
+    zip_set = {row.tobytes() for row in zipped}
+    extra = expanded[len(zipped):]
+    n_new = sum(1 for row in extra if row.tobytes() not in zip_set)
+    assert n_new >= 16, n_new
+    # Every seat block in the expanded pool must come from that seat's samples.
+    vocab = samples.argmax(dim=-1).numpy()
+    lut = np.asarray(VOCAB_IDX_TO_PIECE_TYPE_VALUE, dtype=np.int8)
+    pt = lut[vocab]
+    seats_np = seats.numpy()
+    for s in range(4):
+        allowed = {pt[i].tobytes() for i in np.nonzero(seats_np == s)[0]}
+        for row in expanded:
+            block = row[s * SLOTS_PER_SEAT:(s + 1) * SLOTS_PER_SEAT]
+            assert block.tobytes() in allowed
+
+
 # ---------------------------------------------------------------------------
 # refresh_gpu_setup_pool — monkey-patched CUDA
 # ---------------------------------------------------------------------------

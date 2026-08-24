@@ -77,14 +77,21 @@ def _world_size() -> int:
 # ---------------------------------------------------------------------------
 
 
-def magnet_alpha(coef: float, iteration: int, decay: float) -> float:
-    """Ataraxos magnet coefficient: ``coef / t^decay``.
+def magnet_alpha(
+    coef: float,
+    iteration: int,
+    decay: float,
+    floor: float = 0.0,
+) -> float:
+    """Magnet coefficient: ``max(coef / t^decay, floor)``.
 
     ``iteration`` is the 1-indexed training iteration (rollout). The paper
-    uses ``0.05 / t^{0.3}`` with no floor or ceiling.
+    uses ``0.05 / t^{0.3}`` with no floor. A positive ``floor`` keeps a
+    residual pull toward the magnet after the power law has decayed.
     """
     t = max(int(iteration), 1)
-    return float(coef) / (float(t) ** float(decay))
+    raw = float(coef) / (float(t) ** float(decay))
+    return max(raw, float(floor))
 
 
 def power_schedule(
@@ -233,6 +240,15 @@ class PPOConfig:
     """If True, entropy bonus encourages uniform distribution.
     If False, it simply maximises entropy."""
 
+    magnet_shape: str = "uniform_legal"
+    """Target of the magnet reverse-KL.
+
+    * ``"uniform_legal"``: ρ is uniform over legal actions.
+    * ``"piece_then_dest"``: paper ρ — pick a movable piece uniformly,
+      then a legal destination for that piece uniformly. Action ids are
+      ``src * n + dst`` over a square compact board (129×129 here).
+    """
+
     # --- KL divergence ---
     kl_coef: float = 0.1
     """Weight for reverse KL to the data-collection policy.
@@ -244,6 +260,18 @@ class PPOConfig:
 
     kl_proxy_beta: float = 1.0
     """Huber transition for the sampled KL proxy in log-probability units."""
+
+    kl_mode: str = "reverse_full"
+    """Trust-region implementation used in the optimisation loss.
+
+    * ``"reverse_full"`` preserves the Ataraxos-aligned path and evaluates a
+      frozen collection-policy copy on every minibatch.
+    * ``"sampled_proxy"`` uses the already-stored rollout action log-probability
+      and bounded Huber proxy.  It avoids the frozen model copy and its full
+      forward pass, at the cost of replacing exact reverse KL with a sampled
+      trust-region estimate.  Use it as an explicit, benchmarked optimisation;
+      the compatibility default remains ``"reverse_full"``.
+    """
 
     # --- GAE ---
     gamma: float = 1.0
@@ -320,7 +348,25 @@ class PPOConfig:
     """Number of optimisation epochs per collected rollout."""
 
     minibatch_size: int = 512
-    """Minibatch size for PPO gradient updates."""
+    """Minibatch size for PPO gradient updates.
+
+    Ignored as a split size when ``minibatch_group="timestep"``: each
+    collect row is one Adam step whose batch is whoever survived the
+    per-row filter (at most ``round(N * adv_filt_rate)``).
+    """
+
+    minibatch_group: str = "global"
+    """How to slice a rollout into PPO updates.
+
+    * ``"global"``: flatten ``(T, N)``, keep the global top
+      ``adv_filt_rate`` by ``|A|``, shuffle, then cut ``minibatch_size``
+      chunks.  Adam-step count equals kept / minibatch_size.
+    * ``"timestep"``: one Adam step per collect row ``t``.  Within the
+      row, keep the top ``adv_filt_rate`` of the N envs by ``|A|``
+      (and ``|A| >= adv_filt_thresh``).  Filter only shrinks that row;
+      Adam-step count equals T (empty rows skipped).  ``shuffle`` is
+      ignored so ``t=0..T-1`` stay in order.
+    """
 
     # --- Mixed precision ---
     dtype: str = "bfloat16"
@@ -372,6 +418,11 @@ class PPOTrainer:
         device: str | torch.device = "cpu",
     ) -> None:
         self.cfg = cfg
+        if cfg.kl_mode not in {"reverse_full", "sampled_proxy"}:
+            raise ValueError(
+                "kl_mode must be 'reverse_full' or 'sampled_proxy'; "
+                f"got {cfg.kl_mode!r}"
+            )
         self.device = torch.device(device)
         self.num_train_step: int = 0
         self.num_rollout: int = 0
@@ -426,13 +477,18 @@ class PPOTrainer:
         # module, so this is safe.
         self.ema = EMAPolicy(self._policy_unwrapped, cfg.ema_decay)
 
-        # Frozen snapshot of the collection policy π_θt. Weights are copied
-        # at the start of each train_epoch (after collect, before the first
-        # gradient step) so reverse KL is against the behaviour policy.
-        self._collect_policy = copy.deepcopy(self._policy_unwrapped)
-        self._collect_policy.eval()
-        for p in self._collect_policy.parameters():
-            p.requires_grad_(False)
+        # Frozen snapshot of the collection policy π_θt. It is only needed by
+        # exact reverse KL. The sampled-proxy path uses rollout action
+        # log-probabilities already resident in the buffer, so allocating a
+        # second model and running it for every minibatch would be pure waste.
+        self._collect_policy: JunqiNet | None
+        if cfg.kl_mode == "reverse_full":
+            self._collect_policy = copy.deepcopy(self._policy_unwrapped)
+            self._collect_policy.eval()
+            for p in self._collect_policy.parameters():
+                p.requires_grad_(False)
+        else:
+            self._collect_policy = None
 
         # Optimiser.  ``foreach=True`` (default on CUDA in recent torch) uses
         # fused multi-tensor ops — about 20-30% faster than the per-param
@@ -487,8 +543,11 @@ class PPOTrainer:
 
     def _sync_collect_policy(self) -> None:
         """Copy learner weights into the frozen collection snapshot."""
-        self._collect_policy.load_state_dict(self._policy_unwrapped.state_dict())
-        self._collect_policy.eval()
+        collect_policy = getattr(self, "_collect_policy", None)
+        if collect_policy is None:
+            return
+        collect_policy.load_state_dict(self._policy_unwrapped.state_dict())
+        collect_policy.eval()
 
     def _get_temperature(self) -> float:
         cfg = self.cfg
@@ -498,6 +557,7 @@ class PPOTrainer:
                 cfg.temperature_coef,
                 self.num_rollout + 1,
                 cfg.temperature_decay,
+                getattr(cfg, "temperature_floor", 0.0),
             )
         if unit == "grad_step":
             return power_schedule(
@@ -611,10 +671,8 @@ class PPOTrainer:
     ) -> tuple[Tensor, Tensor]:
         """Magnet / entropy loss: encourages uniform distribution over legal moves.
 
-        Ataraxos calls this the "magnet" loss.  When ``uniform_magnet=True``
-        the loss pushes the policy toward a *uniform* distribution over legal
-        actions (maximise entropy relative to uniform), rather than just
-        maximising entropy.
+        Magnet loss is reverse KL to a target ρ.  ``magnet_shape`` selects
+        ρ; ``uniform_magnet=False`` falls back to maximising entropy.
 
         ``weight_per`` (optional, shape (B,) float32 ∈ {0, 1}): per-sample
         weight. Used by F-4 to silence the entropy gradient on value-only
@@ -632,14 +690,21 @@ class PPOTrainer:
         )
         entropy = -plogp.sum(dim=-1)  # (B,)
 
-        if self.cfg.uniform_magnet:
-            # Relative entropy: H(π) − H(uniform) = log|A| − H(π)
-            n_legal = legal_mask.float().sum(dim=-1).clamp(min=1.0)  # (B,)
-            log_n = n_legal.log()
-            # Magnet loss: encourage π → uniform ↔ minimise -H(π) + const
-            per_sample = -(entropy - log_n)  # (B,)
-        else:
+        shape = getattr(self.cfg, "magnet_shape", "uniform_legal")
+        if not self.cfg.uniform_magnet:
             per_sample = -entropy
+        elif shape == "piece_then_dest":
+            per_sample = self._kl_to_piece_then_dest(
+                log_probs, probs, legal_mask,
+            )
+        elif shape == "uniform_legal":
+            n_legal = legal_mask.float().sum(dim=-1).clamp(min=1.0)
+            per_sample = -(entropy - n_legal.log())
+        else:
+            raise ValueError(
+                "magnet_shape must be 'uniform_legal' or 'piece_then_dest'; "
+                f"got {shape!r}"
+            )
 
         if weight_per is None:
             return per_sample.mean(), entropy.mean()
@@ -648,6 +713,46 @@ class PPOTrainer:
             (per_sample * weight_per).sum() / w_sum,
             (entropy * weight_per).sum() / w_sum,
         )
+
+    def _kl_to_piece_then_dest(
+        self,
+        log_probs: Tensor,
+        probs: Tensor,
+        legal_mask: Tensor,
+    ) -> Tensor:
+        """``KL(π || ρ)`` with ρ = uniform piece then uniform dest.
+
+        Action index is ``src * n + dst`` on a square board (n=√A).
+        Matches Ataraxos ``get_weighted_uniform_policy``.
+        """
+        batch, n_actions = legal_mask.shape
+        n_cells = int(math.isqrt(n_actions))
+        if n_cells * n_cells != n_actions:
+            raise ValueError(
+                "piece_then_dest magnet requires a square action layout "
+                f"(src*n+dst); got last dim {n_actions}"
+            )
+        src = torch.arange(n_actions, device=legal_mask.device) // n_cells
+        src = src.unsqueeze(0).expand(batch, -1)
+        counts = torch.zeros(
+            batch, n_cells, device=legal_mask.device, dtype=probs.dtype,
+        )
+        counts.scatter_add_(1, src, legal_mask.to(dtype=probs.dtype))
+        n_movable = (counts > 0).to(dtype=probs.dtype).sum(dim=-1).clamp(min=1.0)
+        dests = counts.gather(1, src).clamp(min=1.0)
+        rho = torch.where(
+            legal_mask,
+            1.0 / (n_movable.unsqueeze(1) * dests),
+            torch.zeros_like(probs),
+        )
+        log_rho = torch.where(
+            legal_mask,
+            rho.clamp(min=1e-12).log(),
+            torch.zeros_like(probs),
+        )
+        return (probs * (log_probs - log_rho)).where(
+            legal_mask, torch.zeros_like(probs),
+        ).sum(dim=-1)
 
     def _kl_loss(
         self,
@@ -800,18 +905,28 @@ class PPOTrainer:
 
         legal_mask = batch.legal_mask.to(self.device)
 
-        with torch.inference_mode(), autocast(
-            device_type=ctx_device, dtype=self._amp_dtype, enabled=self._use_amp
-        ):
-            old_log_probs_all = self._collect_policy(
-                obs_sp_in, obs_gl_in, legal_mask,
-            )["log_probs"]
+        evaluated_actions = batch.actions.to(self.device)
+
+        old_log_probs_all: Tensor | None = None
+        if self._collect_policy is not None:
+            with torch.inference_mode(), autocast(
+                device_type=ctx_device,
+                dtype=self._amp_dtype,
+                enabled=self._use_amp,
+            ):
+                old_log_probs_all = self._collect_policy(
+                    obs_sp_in,
+                    obs_gl_in,
+                    legal_mask,
+                    actions=evaluated_actions,
+                )["log_probs"]
 
         with autocast(device_type=ctx_device, dtype=self._amp_dtype, enabled=self._use_amp):
             out = self._policy_for_train(
                 obs_sp_in,
                 obs_gl_in,
                 legal_mask,
+                actions=evaluated_actions,
             )
             new_log_probs_all = out["log_probs"]       # (B, FLAT_ACTION_DIM)
             value = out["value"]                        # (B,) or (B, N_VF_CAT)
@@ -831,9 +946,11 @@ class PPOTrainer:
             # `isfinite` (which rejects both NaN and -inf) was a project-level
             # bug that caused 100% of fp16 minibatches to be short-circuited
             # in v17-v32 (silent ceiling = no actual training happened).
-            if (torch.isnan(new_log_probs_all).any()
-                    or torch.isnan(value).any()
-                    or torch.isinf(value).any()):
+            bad_forward = (
+                torch.isnan(new_log_probs_all).any()
+                | (~torch.isfinite(value).all())
+            )
+            if bool(bad_forward):
                 self._nan_skip_count += 1
                 # Return a zero-gradient "no-op" result: zero losses, no
                 # backward/step. The caller's aggregator averages these as
@@ -858,7 +975,7 @@ class PPOTrainer:
                 }
 
             # Log-prob of the chosen action
-            act_idx = batch.actions.unsqueeze(1)       # (B, 1)
+            act_idx = evaluated_actions.unsqueeze(1)   # (B, 1)
             new_log_prob = new_log_probs_all.gather(1, act_idx).squeeze(1)  # (B,)
 
             # Old log-probs (scalar per action, stored in buffer)
@@ -915,17 +1032,20 @@ class PPOTrainer:
                 weight_per=policy_weight_per,
             )
 
-            kl_loss = self._reverse_kl(
-                new_log_probs_all,
-                old_log_probs_all,
-                legal_mask,
-                weight_per=policy_weight_per,
-            )
             log_ratio = new_log_prob - old_log_prob.detach()
             kl_proxy = self._sampled_kl_penalty(
                 log_ratio,
                 weight_per=policy_weight_per,
             )
+            if old_log_probs_all is None:
+                kl_loss = kl_proxy
+            else:
+                kl_loss = self._reverse_kl(
+                    new_log_probs_all,
+                    old_log_probs_all,
+                    legal_mask,
+                    weight_per=policy_weight_per,
+                )
             signed_approx_kl = -log_ratio
             if policy_weight_per is not None:
                 w_sum = policy_weight_per.sum().clamp_min(1.0)

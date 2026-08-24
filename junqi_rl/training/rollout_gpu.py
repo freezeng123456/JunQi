@@ -46,6 +46,7 @@ from junqi_rl.training.rollout import (
     BOARD_SIZE,
     FLAT_ACTION_DIM,
     RolloutBatch,
+    timestep_keep_env_indices,
 )
 
 # Upper bound on per-env legal action count.  Empirically the kernel
@@ -181,6 +182,7 @@ class RolloutBufferGPU:
         td_lambda: float = 0.8,
         adv_filt_thresh: float = 0.01,
         adv_filt_rate: float = 0.75,
+        minibatch_group: str = "global",
         device: str | torch.device = "cuda",
         csr_legal_mask: bool = True,
         csr_k_max: int = CSR_K_MAX,
@@ -197,6 +199,12 @@ class RolloutBufferGPU:
         self.td_lambda = td_lambda
         self.adv_filt_thresh = adv_filt_thresh
         self.adv_filt_rate = adv_filt_rate
+        if minibatch_group not in {"global", "timestep"}:
+            raise ValueError(
+                "minibatch_group must be 'global' or 'timestep'; "
+                f"got {minibatch_group!r}"
+            )
+        self.minibatch_group = minibatch_group
         self.device = torch.device(device)
         self.csr_legal_mask = bool(csr_legal_mask)
         self.csr_k_max = int(csr_k_max)
@@ -629,6 +637,71 @@ class RolloutBufferGPU:
         thresh = self.adv_filt_thresh
         keep = own_mask & (abs_adv >= thresh)
 
+        def _emit(idx: Tensor, vo: Tensor):
+            if idx.numel() == 0:
+                return
+            seats_batch = seats_flat.index_select(0, idx)
+            if self.uses_compact_history:
+                obs_sp_batch, obs_gl_batch, lm_batch = self.history.reconstruct(
+                    idx,
+                    seats_batch,
+                    dtype=self.obs_storage_dtype,
+                )
+            elif self.csr_legal_mask:
+                lm_batch = _csr_to_dense_selected(
+                    flat_ids, flat_cnt, idx, FLAT_ACTION_DIM,
+                )
+                obs_sp_batch = obs_sp.index_select(0, idx)
+                obs_gl_batch = obs_gl.index_select(0, idx)
+            else:
+                lm_batch = lm.index_select(0, idx)
+                obs_sp_batch = obs_sp.index_select(0, idx)
+                obs_gl_batch = obs_gl.index_select(0, idx)
+            yield RolloutBatch(
+                obs_spatial=obs_sp_batch,
+                obs_global=obs_gl_batch,
+                legal_mask=lm_batch,
+                actions=act.index_select(0, idx).to(torch.int64),
+                old_log_probs=lp.index_select(0, idx),
+                advantages=adv_norm.index_select(0, idx),
+                returns=ret.index_select(0, idx),
+                values=val.index_select(0, idx),
+                adv_mask=torch.ones(idx.numel(), dtype=torch.bool, device=dev),
+                value_only_mask=vo,
+            )
+
+        if self.minibatch_group == "timestep":
+            # One Adam step per collect row.  Filter only shrinks the row.
+            # shuffle is ignored so t=0..T-1 stay in order.
+            abs_np = abs_adv.detach().view(T, N).cpu().numpy()
+            own_np = own_mask.detach().view(T, N).cpu().numpy()
+            rows = timestep_keep_env_indices(
+                abs_np,
+                rate=self.adv_filt_rate,
+                thresh=self.adv_filt_thresh,
+                own_mask=own_np,
+            )
+            sizes = [int(r.size) for r in rows]
+            nonempty = [s for s in sizes if s > 0]
+            n_policy = int(sum(sizes))
+            self._last_n_total = int(total)
+            self._last_n_own = int(own_mask.sum().item())
+            self._last_n_policy = n_policy
+            self._last_thresh_used = float(self.adv_filt_thresh)
+            self._last_kept_mean = float(np.mean(sizes)) if sizes else 0.0
+            self._last_kept_min = float(min(nonempty) if nonempty else 0)
+            self._last_kept_max = float(max(sizes) if sizes else 0)
+            self._last_n_empty_steps = float(sum(1 for s in sizes if s == 0))
+            for t, env_idx in enumerate(rows):
+                if env_idx.size == 0:
+                    continue
+                flat = torch.from_numpy(
+                    (t * N + env_idx).astype(np.int64)
+                ).to(dev)
+                vo = torch.zeros(flat.numel(), dtype=torch.bool, device=dev)
+                yield from _emit(flat, vo)
+            return
+
         # --- Avoid per-call .item() syncs ---
         # The old path called .item() on n_total and n_kept per minibatches()
         # call, forcing 2 device syncs.  With 4 epochs × 248 minibatches these
@@ -659,6 +732,10 @@ class RolloutBufferGPU:
         self._last_n_own        = int(own_mask.sum().item())
         self._last_n_policy     = n_policy
         self._last_thresh_used  = float(thresh)
+        self._last_kept_mean = float("nan")
+        self._last_kept_min = float("nan")
+        self._last_kept_max = float("nan")
+        self._last_n_empty_steps = 0.0
 
         # F-4: optionally mix in seat 1/3 transitions as VALUE-ONLY samples.
         # They contribute only to value_loss (no policy / kl / entropy gradient)
@@ -791,6 +868,13 @@ class RolloutBufferGPU:
                 float(self._last_n_policy) / max(1.0, float(self._last_n_own))
             )
             out["rollout/adv_thresh_used"] = float(self._last_thresh_used)
+        if hasattr(self, "_collect_entropy"):
+            out["collect/entropy"] = float(self._collect_entropy)
+            if hasattr(self, "_last_kept_mean"):
+                out["rollout/kept_mean"] = float(self._last_kept_mean)
+                out["rollout/kept_min"] = float(self._last_kept_min)
+                out["rollout/kept_max"] = float(self._last_kept_max)
+                out["rollout/n_empty_steps"] = float(self._last_n_empty_steps)
         return out
 
 
