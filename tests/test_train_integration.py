@@ -131,21 +131,19 @@ def test_early_stop_config_yaml_roundtrip():
     assert cfg2.early_stop_min_rollout == 150
 
 
-def test_kl_proxy_config_yaml_roundtrip():
-    """The repaired sampled-KL controls must survive YAML loading."""
+def test_full_reverse_kl_config_yaml_roundtrip():
+    """The full reverse-KL coefficient must survive YAML loading."""
     mod = _load_train_module()
     import yaml
 
     cfg = mod.TrainConfig()
     cfg.ppo.kl_coef = 0.2
-    cfg.ppo.kl_proxy_beta = 1.5
 
     d = mod._dataclass_to_dict(cfg)
     s = yaml.dump(d)
     d2 = yaml.safe_load(s)
     cfg2 = mod._dict_to_dataclass(mod.TrainConfig, d2)
     assert cfg2.ppo.kl_coef == 0.2
-    assert cfg2.ppo.kl_proxy_beta == 1.5
 
 
 def test_belief_infer_chunk_size_default():

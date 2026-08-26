@@ -88,6 +88,17 @@ def test_config_extends_cycle_fails_fast(tmp_path: Path) -> None:
         load_config(_args(first))
 
 
+def test_removed_sampled_proxy_config_is_rejected(tmp_path: Path) -> None:
+    config = tmp_path / "sampled-proxy.yaml"
+    config.write_text(
+        "ppo:\n  kl_mode: sampled_proxy\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"ppo.*kl_mode"):
+        load_config(_args(config))
+
+
 def test_unknown_nested_key_fails_fast() -> None:
     with pytest.raises(ValueError, match=r"ppo.*clip_rnage"):
         _dict_to_dataclass(

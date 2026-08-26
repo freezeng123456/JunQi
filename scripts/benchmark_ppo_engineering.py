@@ -146,8 +146,7 @@ def benchmark_forward(
     return result
 
 
-def benchmark_update_mode(
-    mode: str,
+def benchmark_update(
     cfg: JunqiNetConfig,
     initial_state: dict[str, torch.Tensor],
     trainer_state: dict | None,
@@ -167,7 +166,6 @@ def benchmark_update_mode(
         PPOConfig(
             net=cfg,
             dtype=dtype_name,
-            kl_mode=mode,
             torch_compile=False,
             num_epochs_per_rollout=1,
             minibatch_size=batch_size,
@@ -296,8 +294,7 @@ def main() -> None:
             dtype_name=args.dtype,
         ),
     }
-    full = benchmark_update_mode(
-        "reverse_full",
+    result["ppo_update"] = benchmark_update(
         cfg,
         initial_state,
         trainer_state,
@@ -307,25 +304,6 @@ def main() -> None:
         device=device,
         dtype_name=args.dtype,
     )
-    sampled = benchmark_update_mode(
-        "sampled_proxy",
-        cfg,
-        initial_state,
-        trainer_state,
-        batch_size=args.batch_size,
-        warmup=args.warmup,
-        iterations=args.iterations,
-        device=device,
-        dtype_name=args.dtype,
-    )
-    result["ppo_update"] = {
-        "reverse_full": full,
-        "sampled_proxy": sampled,
-        "speedup": full["update_ms"] / sampled["update_ms"],
-        "peak_memory_saved_gib": (
-            full["peak_allocated_gib"] - sampled["peak_allocated_gib"]
-        ),
-    }
     print(json.dumps(result, indent=2, sort_keys=True))
 
 

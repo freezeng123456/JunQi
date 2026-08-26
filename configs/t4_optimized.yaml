@@ -40,10 +40,8 @@ ppo:
   temperature_decay: 0.3
   uniform_magnet: true
   kl_coef: 0.1
-  # Avoid a second full network forward for every PPO minibatch. Keep
-  # reverse_full for exact historical reproduction; benchmark this mode
-  # against the same seed before promoting a long-running checkpoint.
-  kl_mode: sampled_proxy
+  # Preserve the complete frozen-policy reverse KL. The training forward still
+  # uses supplied rollout actions and avoids throwaway action sampling.
   gamma: 1.0
   gae_lambda: 0.5
   td_lambda: 0.8

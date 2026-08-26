@@ -255,22 +255,8 @@ class PPOConfig:
 
     Ataraxos uses ``0.1 * KL(π_θ || π_θt)`` over the full legal support,
     where ``π_θt`` is a frozen copy of the weights that collected the
-    rollout. The sampled Huber proxy remains a diagnostic only.
-    """
-
-    kl_proxy_beta: float = 1.0
-    """Huber transition for the sampled KL proxy in log-probability units."""
-
-    kl_mode: str = "reverse_full"
-    """Trust-region implementation used in the optimisation loss.
-
-    * ``"reverse_full"`` preserves the Ataraxos-aligned path and evaluates a
-      frozen collection-policy copy on every minibatch.
-    * ``"sampled_proxy"`` uses the already-stored rollout action log-probability
-      and bounded Huber proxy.  It avoids the frozen model copy and its full
-      forward pass, at the cost of replacing exact reverse KL with a sampled
-      trust-region estimate.  Use it as an explicit, benchmarked optimisation;
-      the compatibility default remains ``"reverse_full"``.
+    rollout. The trainer always evaluates that complete frozen distribution;
+    this objective is not replaced by a sampled approximation.
     """
 
     # --- GAE ---
@@ -418,11 +404,6 @@ class PPOTrainer:
         device: str | torch.device = "cpu",
     ) -> None:
         self.cfg = cfg
-        if cfg.kl_mode not in {"reverse_full", "sampled_proxy"}:
-            raise ValueError(
-                "kl_mode must be 'reverse_full' or 'sampled_proxy'; "
-                f"got {cfg.kl_mode!r}"
-            )
         self.device = torch.device(device)
         self.num_train_step: int = 0
         self.num_rollout: int = 0
@@ -477,18 +458,13 @@ class PPOTrainer:
         # module, so this is safe.
         self.ema = EMAPolicy(self._policy_unwrapped, cfg.ema_decay)
 
-        # Frozen snapshot of the collection policy π_θt. It is only needed by
-        # exact reverse KL. The sampled-proxy path uses rollout action
-        # log-probabilities already resident in the buffer, so allocating a
-        # second model and running it for every minibatch would be pure waste.
-        self._collect_policy: JunqiNet | None
-        if cfg.kl_mode == "reverse_full":
-            self._collect_policy = copy.deepcopy(self._policy_unwrapped)
-            self._collect_policy.eval()
-            for p in self._collect_policy.parameters():
-                p.requires_grad_(False)
-        else:
-            self._collect_policy = None
+        # Frozen snapshot of the collection policy π_θt. PPO evaluates its
+        # complete legal-action distribution on every minibatch so the
+        # trust-region term is the Ataraxos reverse KL, not a sampled proxy.
+        self._collect_policy = copy.deepcopy(self._policy_unwrapped)
+        self._collect_policy.eval()
+        for p in self._collect_policy.parameters():
+            p.requires_grad_(False)
 
         # Optimiser.  ``foreach=True`` (default on CUDA in recent torch) uses
         # fused multi-tensor ops — about 20-30% faster than the per-param
@@ -543,11 +519,8 @@ class PPOTrainer:
 
     def _sync_collect_policy(self) -> None:
         """Copy learner weights into the frozen collection snapshot."""
-        collect_policy = getattr(self, "_collect_policy", None)
-        if collect_policy is None:
-            return
-        collect_policy.load_state_dict(self._policy_unwrapped.state_dict())
-        collect_policy.eval()
+        self._collect_policy.load_state_dict(self._policy_unwrapped.state_dict())
+        self._collect_policy.eval()
 
     def _get_temperature(self) -> float:
         cfg = self.cfg
@@ -761,12 +734,10 @@ class PPOTrainer:
     ) -> Tensor:
         """Full-distribution ``KL(π_old || π_new)`` for finite log-probs.
 
-        This helper is kept for callers that already have both full
+        This forward-KL helper is kept for callers that already have both full
         distributions. Illegal actions are ``-inf`` in both tensors; using
         ``0 * -inf`` directly would create NaNs, so those entries are masked
-        before the reduction. The main PPO path uses
-        :meth:`_sampled_kl_penalty` because storing the full old distribution
-        for every transition is prohibitively expensive.
+        before the reduction. The main PPO path uses :meth:`_reverse_kl`.
         """
         finite = torch.isfinite(old_log_probs) & torch.isfinite(new_log_probs)
         old_probs = torch.where(
@@ -806,37 +777,6 @@ class PPOTrainer:
             torch.zeros_like(new_log_probs),
         )
         per_sample = per_action.sum(dim=-1)
-        if weight_per is None:
-            return per_sample.mean()
-        w_sum = weight_per.sum().clamp_min(1.0)
-        return (per_sample * weight_per).sum() / w_sum
-
-    def _sampled_kl_penalty(
-        self,
-        log_ratio: Tensor,
-        *,
-        weight_per: Tensor | None = None,
-    ) -> Tensor:
-        """Return a bounded sampled trust-region penalty.
-
-        For actions sampled from ``π_old``, ``old_log_prob - new_log_prob``
-        has the correct sign for a forward-KL estimator. A raw linear sample
-        estimate has high variance and can be negative on an individual
-        minibatch, so the optimization term uses a Huber penalty centred at
-        zero. Its gradient is bounded when a policy has already drifted far
-        from the rollout policy, preventing the runaway negative-KL failure
-        that previously dominated the loss.
-        """
-        # Keep the optimisation term bounded even if a numerical/mask error
-        # produces an extreme diagnostic log-ratio. The unclipped value is
-        # still logged separately, so such events remain observable.
-        bounded_log_ratio = log_ratio.clamp(-20.0, 20.0)
-        per_sample = F.smooth_l1_loss(
-            bounded_log_ratio,
-            torch.zeros_like(bounded_log_ratio),
-            beta=float(self.cfg.kl_proxy_beta),
-            reduction="none",
-        )
         if weight_per is None:
             return per_sample.mean()
         w_sum = weight_per.sum().clamp_min(1.0)
@@ -907,19 +847,17 @@ class PPOTrainer:
 
         evaluated_actions = batch.actions.to(self.device)
 
-        old_log_probs_all: Tensor | None = None
-        if self._collect_policy is not None:
-            with torch.inference_mode(), autocast(
-                device_type=ctx_device,
-                dtype=self._amp_dtype,
-                enabled=self._use_amp,
-            ):
-                old_log_probs_all = self._collect_policy(
-                    obs_sp_in,
-                    obs_gl_in,
-                    legal_mask,
-                    actions=evaluated_actions,
-                )["log_probs"]
+        with torch.inference_mode(), autocast(
+            device_type=ctx_device,
+            dtype=self._amp_dtype,
+            enabled=self._use_amp,
+        ):
+            old_log_probs_all = self._collect_policy(
+                obs_sp_in,
+                obs_gl_in,
+                legal_mask,
+                actions=evaluated_actions,
+            )["log_probs"]
 
         with autocast(device_type=ctx_device, dtype=self._amp_dtype, enabled=self._use_amp):
             out = self._policy_for_train(
@@ -965,7 +903,6 @@ class PPOTrainer:
                     "train/entropy_loss": zero.detach(),
                     "train/entropy": zero.detach(),
                     "train/kl_loss": zero.detach(),
-                    "train/kl_proxy": zero.detach(),
                     "train/approx_kl": zero.detach(),
                     "train/kl_log_ratio_abs_max": zero.detach(),
                     "train/total_loss": zero.detach(),
@@ -1033,19 +970,12 @@ class PPOTrainer:
             )
 
             log_ratio = new_log_prob - old_log_prob.detach()
-            kl_proxy = self._sampled_kl_penalty(
-                log_ratio,
+            kl_loss = self._reverse_kl(
+                new_log_probs_all,
+                old_log_probs_all,
+                legal_mask,
                 weight_per=policy_weight_per,
             )
-            if old_log_probs_all is None:
-                kl_loss = kl_proxy
-            else:
-                kl_loss = self._reverse_kl(
-                    new_log_probs_all,
-                    old_log_probs_all,
-                    legal_mask,
-                    weight_per=policy_weight_per,
-                )
             signed_approx_kl = -log_ratio
             if policy_weight_per is not None:
                 w_sum = policy_weight_per.sum().clamp_min(1.0)
@@ -1120,7 +1050,6 @@ class PPOTrainer:
                 "train/entropy_loss": zero.detach(),
                 "train/entropy": zero.detach(),
                 "train/kl_loss": zero.detach(),
-                "train/kl_proxy": zero.detach(),
                 "train/approx_kl": zero.detach(),
                 "train/kl_log_ratio_abs_max": zero.detach(),
                 "train/total_loss": zero.detach(),
@@ -1152,7 +1081,6 @@ class PPOTrainer:
             "train/entropy_loss": entropy_loss.detach(),
             "train/entropy": entropy.detach(),
             "train/kl_loss": kl_loss.detach(),
-            "train/kl_proxy": kl_proxy.detach(),
             "train/approx_kl": approx_kl.detach(),
             "train/kl_log_ratio_abs_max": log_ratio_abs_max.detach(),
             "train/total_loss": total_loss.detach(),

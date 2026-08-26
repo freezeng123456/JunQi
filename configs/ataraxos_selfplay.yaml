@@ -56,9 +56,8 @@ ppo:
   # field is the fraction KEPT, so the previous 0.75 trained on the top
   # 75% -- the inverse -- diluting every update with low-signal samples.
   adv_filt_rate: 0.25
-  # Validated on H20 from ckpt_000570.pt: removes the frozen-policy
-  # full-action reverse-KL pass while preserving the model I/O contract.
-  kl_mode: sampled_proxy
+  # PPO always evaluates the frozen collection policy over the complete legal
+  # action support, preserving Ataraxos's full reverse-KL objective.
 
 arr:
   enabled: true

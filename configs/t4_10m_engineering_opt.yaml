@@ -37,9 +37,8 @@ ppo:
   act_chunk_size: 64
   max_grad_norm: 0.267
   adv_filt_rate: 0.25
-  # Engineering fast path: removes the frozen-policy full forward. Switch to
-  # reverse_full for exact historical KL semantics.
-  kl_mode: sampled_proxy
+  # The supplied-action fast path removes only throwaway action sampling. The
+  # frozen collection-policy forward remains for the full reverse KL.
 
 arr:
   enabled: true
@@ -52,7 +51,7 @@ rollout:
   csr_legal_mask: true
   csr_k_max: 256
 
-save_dir: /data/disk2/junqi_opt/runs/10m_sampled_proxy
+save_dir: /data/disk2/junqi_opt/runs/10m_reverse_full
 total_rollouts: 3000
 save_every: 25
 eval_every: 10
