@@ -140,6 +140,10 @@ python scripts/train.py --config configs/default.yaml
 输出目录等通过命令行参数传入。`configs/v42_*.yaml` 至
 `configs/v44_*.yaml` 保留为历史课程学习实验记录。
 
+PPO 始终使用冻结的 collection policy，在完整合法动作分布上计算
+`KL(π_new || π_collect)`。训练专用 `actions=` 快速路径只省去未使用的
+随机动作采样，不以 sampled proxy 替换完整反向 KL。
+
 训练结果不能只看单次对随机玩家胜率。正式比较至少应包含：
 
 - 多随机种子；

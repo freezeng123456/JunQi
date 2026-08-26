@@ -315,10 +315,6 @@ def validate_config(cfg: TrainConfig) -> None:
         raise ValueError(
             "ppo.temperature_schedule_unit must be 'grad_step' or 'rollout'"
         )
-    if cfg.ppo.kl_mode not in {"reverse_full", "sampled_proxy"}:
-        raise ValueError(
-            "ppo.kl_mode must be 'reverse_full' or 'sampled_proxy'"
-        )
     if cfg.ppo.magnet_shape not in {"uniform_legal", "piece_then_dest"}:
         raise ValueError(
             "ppo.magnet_shape must be 'uniform_legal' or 'piece_then_dest'"

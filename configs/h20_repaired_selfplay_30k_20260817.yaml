@@ -86,7 +86,6 @@ ppo:
   gae_lambda: 0.5
   gamma: 1.0
   kl_coef: 0.2
-  kl_proxy_beta: 1.0
   lr_ceil: 5.0e-05
   lr_coef: 0.5
   lr_decay: 0.6

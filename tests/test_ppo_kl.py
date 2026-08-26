@@ -33,38 +33,8 @@ def _trainer() -> PPOTrainer:
         net=net_cfg,
         dtype="float32",
         kl_coef=0.2,
-        kl_proxy_beta=1.0,
     )
     return PPOTrainer(JunqiNet(net_cfg), cfg, device="cpu")
-
-
-def test_sampled_kl_penalty_is_finite_and_nonnegative():
-    trainer = _trainer()
-    log_ratio = torch.tensor([-3.0, 0.0, 2.0], requires_grad=True)
-    penalty = trainer._sampled_kl_penalty(log_ratio)
-    assert torch.isfinite(penalty)
-    assert penalty.item() >= 0.0
-    penalty.backward()
-    assert torch.isfinite(log_ratio.grad).all()
-
-
-def test_sampled_kl_penalty_matches_bounded_huber_and_policy_weights():
-    trainer = _trainer()
-    log_ratio = torch.tensor([-30.0, -0.5, 0.0, 2.0])
-    weights = torch.tensor([1.0, 1.0, 0.0, 0.0])
-
-    # beta=1: |x| < 1 -> x^2/2; otherwise |x|-1/2. The first sample is
-    # clamped from -30 to -20 before applying the Huber expression.
-    expected_unweighted = torch.tensor([19.5, 0.125, 0.0, 1.5]).mean()
-    expected_weighted = torch.tensor([19.5, 0.125]).mean()
-
-    assert trainer._sampled_kl_penalty(log_ratio) == pytest.approx(
-        expected_unweighted.item()
-    )
-    assert trainer._sampled_kl_penalty(
-        log_ratio,
-        weight_per=weights,
-    ) == pytest.approx(expected_weighted.item())
 
 
 def test_full_kl_masks_illegal_negative_infinity_entries():
@@ -170,27 +140,9 @@ def test_reverse_kl_positive_when_new_is_peakier():
     assert torch.isfinite(logits.grad).all()
 
 
-def test_sampled_proxy_mode_does_not_allocate_collection_policy():
-    net_cfg = JunqiNetConfig(
-        cnn_channels=8,
-        cnn_layers=1,
-        depth=1,
-        embed_dim=32,
-        n_head=2,
-        ff_factor=2,
-        action_key_dim=8,
-    )
-    cfg = PPOConfig(net=net_cfg, dtype="float32", kl_mode="sampled_proxy")
-    trainer = PPOTrainer(JunqiNet(net_cfg), cfg, device="cpu")
-
-    assert trainer._collect_policy is None
-    trainer._sync_collect_policy()
-
-
-def test_reverse_full_remains_compatibility_default():
+def test_trainer_always_allocates_frozen_collection_policy():
     trainer = _trainer()
 
-    assert trainer.cfg.kl_mode == "reverse_full"
     assert trainer._collect_policy is not None
 
 
@@ -234,27 +186,13 @@ def test_ppo_update_evaluates_stored_actions_without_sampling(monkeypatch):
     assert trainer.num_train_step == 1
     assert trainer._nan_skip_count == 0
     assert trainer._grad_nan_skip_count == 0
+    assert "train/kl_proxy" not in metrics
+    assert torch.isfinite(metrics["train/kl_loss"])
     for value in metrics.values():
         if isinstance(value, torch.Tensor):
             assert torch.isfinite(value).all()
         elif isinstance(value, float):
             assert math.isfinite(value)
-
-
-def test_invalid_kl_mode_is_rejected():
-    net_cfg = JunqiNetConfig(
-        cnn_channels=8,
-        cnn_layers=1,
-        depth=1,
-        embed_dim=32,
-        n_head=2,
-        ff_factor=2,
-        action_key_dim=8,
-    )
-    cfg = PPOConfig(net=net_cfg, dtype="float32", kl_mode="not-a-mode")
-
-    with pytest.raises(ValueError, match="kl_mode"):
-        PPOTrainer(JunqiNet(net_cfg), cfg, device="cpu")
 
 
 def test_magnet_alpha_respects_floor():

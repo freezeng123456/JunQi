@@ -49,6 +49,7 @@ def test_single_process_ppo_streams_minibatches() -> None:
     trainer._grad_nan_skip_count = 0
     trainer._policy_unwrapped = object()
     trainer.ema = _FakeEMA()
+    trainer._sync_collect_policy = lambda: None
     rollout = _GuardedRollout()
 
     def update_step(batch_index: int) -> dict[str, object]:
@@ -80,6 +81,7 @@ def test_distributed_ppo_still_aligns_minibatch_count(monkeypatch) -> None:
     trainer._grad_nan_skip_count = 0
     trainer._policy_unwrapped = object()
     trainer.ema = _FakeEMA()
+    trainer._sync_collect_policy = lambda: None
     consumed: list[int] = []
 
     class Rollout:
@@ -120,6 +122,7 @@ def test_compact_history_rejects_ddp_until_index_plans_are_shared(
     )
     trainer._nan_skip_count = 0
     trainer._grad_nan_skip_count = 0
+    trainer._sync_collect_policy = lambda: None
     rollout = SimpleNamespace(uses_compact_history=True)
     monkeypatch.setattr(ppo_module, "_is_distributed", lambda: True)
 
