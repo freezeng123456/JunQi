@@ -144,6 +144,52 @@ def _nested_update(base: dict[str, Any], override: dict[str, Any]) -> dict[str, 
     return base
 
 
+def load_yaml_config(
+    path: str | os.PathLike[str],
+    *,
+    _stack: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Load one YAML config and recursively resolve its optional parent.
+
+    A child may declare ``extends: relative/or/absolute/path.yaml``. The
+    parent is resolved relative to the child file, loaded first, and then
+    recursively overridden by the child's remaining keys. Supporting one
+    parent keeps the final precedence order unambiguous while avoiding copied
+    production configs that drift apart.
+    """
+
+    config_path = os.path.realpath(os.fspath(path))
+    if config_path in _stack:
+        cycle = " -> ".join((*_stack, config_path))
+        raise ValueError(f"configuration extends cycle: {cycle}")
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"configuration file not found: {config_path}")
+
+    with open(config_path, encoding="utf-8") as handle:
+        values = yaml.safe_load(handle) or {}
+    if not isinstance(values, dict):
+        raise ValueError(
+            f"top-level YAML configuration must be a mapping: {config_path}"
+        )
+
+    parent = values.pop("extends", None)
+    if parent is None:
+        return values
+    if not isinstance(parent, str) or not parent.strip():
+        raise ValueError(
+            f"configuration 'extends' must be a non-empty path: {config_path}"
+        )
+
+    parent_path = os.path.expanduser(parent)
+    if not os.path.isabs(parent_path):
+        parent_path = os.path.join(os.path.dirname(config_path), parent_path)
+    resolved = load_yaml_config(
+        parent_path,
+        _stack=(*_stack, config_path),
+    )
+    return _nested_update(resolved, values)
+
+
 def _dataclass_to_dict(obj: Any) -> Any:
     """Convert nested dataclasses to portable YAML values."""
 
@@ -301,18 +347,13 @@ def validate_config(cfg: TrainConfig) -> None:
 
 
 def load_config(args: argparse.Namespace) -> TrainConfig:
-    """Resolve dataclass defaults, YAML, CLI flags, then ``--set`` values."""
+    """Resolve defaults, inherited YAML, CLI flags, then ``--set`` values."""
 
     resolved = _dataclass_to_dict(TrainConfig())
     config_path = getattr(args, "config", "")
     if config_path:
         path = os.fspath(config_path)
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"configuration file not found: {path}")
-        with open(path, encoding="utf-8") as handle:
-            yaml_values = yaml.safe_load(handle) or {}
-        if not isinstance(yaml_values, dict):
-            raise ValueError("top-level YAML configuration must be a mapping")
+        yaml_values = load_yaml_config(path)
         _nested_update(resolved, yaml_values)
         print(f"[config] Loaded YAML: {path}")
 
@@ -355,6 +396,7 @@ __all__ = [
     "_dict_to_dataclass",
     "_nested_update",
     "load_config",
+    "load_yaml_config",
     "parse_overrides",
     "validate_config",
 ]

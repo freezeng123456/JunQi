@@ -126,12 +126,19 @@ RL 轨迹可以包含每步 Top-K 动作概率、Value、Belief 快照及训练�
 ## 训练
 
 ```bash
+# 当前 10.8M H20 自对弈配置：继承 Ataraxos 配方，只将
+# ppo.adv_filt_rate 覆盖为 1.0（保留全部 transition）。
+python scripts/train.py --config configs/h20_10m_current.yaml
+
+# 通用小规模入口
 python scripts/train.py --config configs/default.yaml
 ```
 
-当前实验主线使用随机敌方布阵，避免固定四方镜像布局造成
-`piece_id → piece_type` 信息泄漏。最新实验配置位于
-`configs/v42_*.yaml` 至 `configs/v44_*.yaml`。
+当前 10.8M 主线配置为 `configs/h20_10m_current.yaml`。它通过
+`extends: ataraxos_selfplay.yaml` 复用模型、rollout、优化器、熵/KL 和
+布阵池设置，仅关闭 advantage quantile 过滤。机器相关的续训 checkpoint、
+输出目录等通过命令行参数传入。`configs/v42_*.yaml` 至
+`configs/v44_*.yaml` 保留为历史课程学习实验记录。
 
 训练结果不能只看单次对随机玩家胜率。正式比较至少应包含：
 

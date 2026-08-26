@@ -16,7 +16,7 @@ python scripts/train.py --num_envs 64 --steps_per_env 256 --save_dir exps/run01
 python scripts/train.py --resume exps/run01/ckpt_0010.pt --save_dir exps/run01
 
 Config hierarchy (later sources override earlier):
-    dataclass defaults → YAML file → CLI flags
+    dataclass defaults → inherited YAML parent(s) → YAML file → CLI flags
 """
 
 from __future__ import annotations
