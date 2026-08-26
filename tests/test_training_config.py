@@ -4,10 +4,10 @@ import argparse
 from pathlib import Path
 
 import pytest
-import yaml
 
 from junqi_rl.training.config import (
     TrainConfig,
+    _dataclass_to_dict,
     _dict_to_dataclass,
     load_config,
     parse_overrides,
@@ -68,6 +68,26 @@ def test_load_config_applies_extra_after_yaml() -> None:
     assert cfg.total_rollouts == 2
 
 
+def test_current_h20_config_only_overrides_advantage_filter() -> None:
+    base = load_config(_args(ROOT / "configs" / "ataraxos_selfplay.yaml"))
+    current = load_config(_args(ROOT / "configs" / "h20_10m_current.yaml"))
+
+    expected = _dataclass_to_dict(base)
+    expected["ppo"]["adv_filt_rate"] = 1.0
+    assert current.ppo.adv_filt_rate == 1.0
+    assert _dataclass_to_dict(current) == expected
+
+
+def test_config_extends_cycle_fails_fast(tmp_path: Path) -> None:
+    first = tmp_path / "first.yaml"
+    second = tmp_path / "second.yaml"
+    first.write_text("extends: second.yaml\n", encoding="utf-8")
+    second.write_text("extends: first.yaml\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="extends cycle"):
+        load_config(_args(first))
+
+
 def test_unknown_nested_key_fails_fast() -> None:
     with pytest.raises(ValueError, match=r"ppo.*clip_rnage"):
         _dict_to_dataclass(
@@ -100,10 +120,7 @@ def test_all_tracked_training_configs_remain_compatible() -> None:
     paths += sorted((ROOT / "exps").glob("**/cfg.yaml"))
 
     for path in paths:
-        values = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         try:
-            cfg = _dict_to_dataclass(TrainConfig, values)
-            cfg.ppo.net = cfg.net
-            validate_config(cfg)
+            load_config(_args(path))
         except (TypeError, ValueError) as exc:
             pytest.fail(f"{path.relative_to(ROOT)}: {exc}")
