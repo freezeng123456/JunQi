@@ -1,10 +1,13 @@
 """Regression tests for the sampled PPO KL trust-region path."""
 from __future__ import annotations
 
+import math
+
 import pytest
 
 torch = pytest.importorskip("torch")
 
+from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
 from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
 from junqi_rl.training.ppo import (
     EMAPolicy,
@@ -12,6 +15,7 @@ from junqi_rl.training.ppo import (
     PPOTrainer,
     magnet_alpha,
 )
+from junqi_rl.training.rollout import RolloutBatch
 
 
 def _trainer() -> PPOTrainer:
@@ -42,6 +46,25 @@ def test_sampled_kl_penalty_is_finite_and_nonnegative():
     assert penalty.item() >= 0.0
     penalty.backward()
     assert torch.isfinite(log_ratio.grad).all()
+
+
+def test_sampled_kl_penalty_matches_bounded_huber_and_policy_weights():
+    trainer = _trainer()
+    log_ratio = torch.tensor([-30.0, -0.5, 0.0, 2.0])
+    weights = torch.tensor([1.0, 1.0, 0.0, 0.0])
+
+    # beta=1: |x| < 1 -> x^2/2; otherwise |x|-1/2. The first sample is
+    # clamped from -30 to -20 before applying the Huber expression.
+    expected_unweighted = torch.tensor([19.5, 0.125, 0.0, 1.5]).mean()
+    expected_weighted = torch.tensor([19.5, 0.125]).mean()
+
+    assert trainer._sampled_kl_penalty(log_ratio) == pytest.approx(
+        expected_unweighted.item()
+    )
+    assert trainer._sampled_kl_penalty(
+        log_ratio,
+        weight_per=weights,
+    ) == pytest.approx(expected_weighted.item())
 
 
 def test_full_kl_masks_illegal_negative_infinity_entries():
@@ -162,6 +185,60 @@ def test_sampled_proxy_mode_does_not_allocate_collection_policy():
 
     assert trainer._collect_policy is None
     trainer._sync_collect_policy()
+
+
+def test_reverse_full_remains_compatibility_default():
+    trainer = _trainer()
+
+    assert trainer.cfg.kl_mode == "reverse_full"
+    assert trainer._collect_policy is not None
+
+
+def test_ppo_update_evaluates_stored_actions_without_sampling(monkeypatch):
+    trainer = _trainer()
+    batch_size = 2
+    spatial = torch.zeros(batch_size, OBS_CHANNELS, 17, 17)
+    global_ = torch.zeros(batch_size, OBS_GLOBAL_DIMS)
+    legal = torch.zeros(batch_size, 129 * 129, dtype=torch.bool)
+    legal[0, [3, 11]] = True
+    legal[1, [7, 19]] = True
+    actions = torch.tensor([11, 7])
+    trainer._sync_collect_policy()
+    with torch.inference_mode():
+        old_log_probs = trainer.policy(
+            spatial,
+            global_,
+            legal,
+            actions=actions,
+        )["action_log_prob"]
+
+    batch = RolloutBatch(
+        obs_spatial=spatial,
+        obs_global=global_,
+        legal_mask=legal,
+        actions=actions,
+        old_log_probs=old_log_probs,
+        advantages=torch.tensor([0.25, -0.25]),
+        returns=torch.tensor([0.5, -0.5]),
+        values=torch.zeros(batch_size),
+        adv_mask=torch.ones(batch_size, dtype=torch.bool),
+        value_only_mask=torch.zeros(batch_size, dtype=torch.bool),
+    )
+
+    def fail_if_sampled(*_args, **_kwargs):
+        raise AssertionError("PPO update must evaluate stored actions")
+
+    monkeypatch.setattr(torch.distributions.Categorical, "sample", fail_if_sampled)
+    metrics = trainer._update_step(batch)
+
+    assert trainer.num_train_step == 1
+    assert trainer._nan_skip_count == 0
+    assert trainer._grad_nan_skip_count == 0
+    for value in metrics.values():
+        if isinstance(value, torch.Tensor):
+            assert torch.isfinite(value).all()
+        elif isinstance(value, float):
+            assert math.isfinite(value)
 
 
 def test_invalid_kl_mode_is_rejected():
