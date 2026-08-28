@@ -270,7 +270,12 @@ class PPOConfig:
     """λ for TD-return mixture (0 = TD, 1 = MC)."""
 
     adv_filt_thresh: float = 0.01
-    """Minimum normalised |advantage| to train on."""
+    """Minimum |advantage| to train on.
+
+    Legacy row-local/global filters apply this after advantage normalisation.
+    Ataraxos rollout-scope filtering applies it to raw ``|A|``, matching the
+    official buffer; PPO still receives normalised advantages.
+    """
 
     adv_filt_rate: float = 0.75
     """Fraction of transitions kept, ranked by |advantage|.
@@ -279,6 +284,20 @@ class PPOConfig:
     trains on the top 75%. Ataraxos trains on the top 25%
     (``adv_filt_rate: 0.25``); the default is kept at 0.75 so the
     vs-random screening baselines stay comparable.
+    """
+
+    adv_filter_scope: str = "timestep"
+    """Scope used to compute the advantage quantile for timestep batches.
+
+    * ``"timestep"``: independently keep the top ``adv_filt_rate`` within
+      each collect row (legacy JunQi behaviour).
+    * ``"rollout"``: compute one quantile threshold across the complete
+      rollout, then apply that fixed threshold inside every collect row. This
+      matches Ataraxos: batching remains per simulator step, while filtering
+      is determined once per rollout buffer.
+
+    Global minibatching already computes one rollout-wide threshold, so this
+    field only changes ``minibatch_group="timestep"``.
     """
 
     # --- Optimiser ---
@@ -338,7 +357,9 @@ class PPOConfig:
 
     Ignored as a split size when ``minibatch_group="timestep"``: each
     collect row is one Adam step whose batch is whoever survived the
-    per-row filter (at most ``round(N * adv_filt_rate)``).
+    advantage filter. With ``adv_filter_scope="timestep"`` this is at most
+    ``round(N * adv_filt_rate)``; with rollout scope it varies by row and a
+    low-signal row may be empty.
     """
 
     minibatch_group: str = "global"
@@ -347,11 +368,10 @@ class PPOConfig:
     * ``"global"``: flatten ``(T, N)``, keep the global top
       ``adv_filt_rate`` by ``|A|``, shuffle, then cut ``minibatch_size``
       chunks.  Adam-step count equals kept / minibatch_size.
-    * ``"timestep"``: one Adam step per collect row ``t``.  Within the
-      row, keep the top ``adv_filt_rate`` of the N envs by ``|A|``
-      (and ``|A| >= adv_filt_thresh``).  Filter only shrinks that row;
-      Adam-step count equals T (empty rows skipped).  ``shuffle`` is
-      ignored so ``t=0..T-1`` stay in order.
+    * ``"timestep"``: one Adam step per collect row ``t``. The filter scope
+      is selected independently by ``adv_filter_scope``. Filter only shrinks
+      that row; Adam-step count is at most T (empty rows skipped). ``shuffle``
+      is ignored so ``t=0..T-1`` stay in order.
     """
 
     # --- Mixed precision ---

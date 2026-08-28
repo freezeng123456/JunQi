@@ -78,6 +78,28 @@ def test_current_h20_config_only_overrides_advantage_filter() -> None:
     assert _dataclass_to_dict(current) == expected
 
 
+def test_ataraxos_config_uses_rollout_quantile_with_timestep_batches() -> None:
+    cfg = load_config(_args(ROOT / "configs" / "ataraxos_selfplay.yaml"))
+
+    assert cfg.ppo.num_epochs_per_rollout == 1
+    assert cfg.ppo.minibatch_group == "timestep"
+    assert cfg.ppo.adv_filter_scope == "rollout"
+    assert cfg.ppo.adv_filt_rate == pytest.approx(0.25)
+    assert cfg.ppo.adv_filt_thresh == pytest.approx(0.01)
+    assert cfg.ppo.temperature_schedule_unit == "rollout"
+    assert cfg.ppo.temperature_coef == pytest.approx(0.1)
+    assert cfg.ppo.temperature_decay == pytest.approx(0.3)
+    assert cfg.ppo.temperature_floor == pytest.approx(0.0)
+
+
+def test_invalid_advantage_filter_scope_is_rejected() -> None:
+    cfg = TrainConfig()
+    cfg.ppo.adv_filter_scope = "rank"
+
+    with pytest.raises(ValueError, match="adv_filter_scope"):
+        validate_config(cfg)
+
+
 def test_config_extends_cycle_fails_fast(tmp_path: Path) -> None:
     first = tmp_path / "first.yaml"
     second = tmp_path / "second.yaml"

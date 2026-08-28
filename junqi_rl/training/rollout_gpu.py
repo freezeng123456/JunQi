@@ -72,6 +72,40 @@ def observation_storage_dtype(compute_dtype: torch.dtype) -> torch.dtype:
     raise ValueError(f"unsupported observation compute dtype: {compute_dtype}")
 
 
+def _rollout_advantage_keep_mask(
+    advantages: Tensor,
+    valid_mask: Tensor,
+    *,
+    keep_rate: float,
+    min_thresh: float,
+) -> tuple[Tensor, float]:
+    """Return Ataraxos-style selection over one rank's complete rollout.
+
+    The quantile is computed once from raw ``|A|`` at all valid positions.
+    The returned mask keeps that fixed threshold across every timestep.
+    This helper is device agnostic so its tensor logic can be tested on CPU
+    even though :class:`RolloutBufferGPU` itself requires CUDA.
+    """
+    if advantages.shape != valid_mask.shape:
+        raise ValueError(
+            "advantages and valid_mask must have identical shapes; "
+            f"got {advantages.shape} and {valid_mask.shape}"
+        )
+    if not 0.0 <= keep_rate <= 1.0:
+        raise ValueError(f"keep_rate must be in [0, 1]; got {keep_rate}")
+
+    abs_adv = advantages.abs()
+    threshold = float(min_thresh)
+    if keep_rate < 1.0:
+        valid_abs = abs_adv[valid_mask]
+        if valid_abs.numel() > 0:
+            threshold = max(
+                threshold,
+                torch.quantile(valid_abs.float(), 1.0 - keep_rate).item(),
+            )
+    return valid_mask & (abs_adv >= threshold), threshold
+
+
 def _to_tensor(x, *, device: torch.device, dtype: torch.dtype) -> Tensor:
     """Accept either a numpy array or a torch tensor and return a tensor on
     ``device`` with ``dtype``.  Cheap fast-path when ``x`` is already a
@@ -182,6 +216,7 @@ class RolloutBufferGPU:
         td_lambda: float = 0.8,
         adv_filt_thresh: float = 0.01,
         adv_filt_rate: float = 0.75,
+        adv_filter_scope: str = "timestep",
         minibatch_group: str = "global",
         device: str | torch.device = "cuda",
         csr_legal_mask: bool = True,
@@ -199,6 +234,12 @@ class RolloutBufferGPU:
         self.td_lambda = td_lambda
         self.adv_filt_thresh = adv_filt_thresh
         self.adv_filt_rate = adv_filt_rate
+        if adv_filter_scope not in {"timestep", "rollout"}:
+            raise ValueError(
+                "adv_filter_scope must be 'timestep' or 'rollout'; "
+                f"got {adv_filter_scope!r}"
+            )
+        self.adv_filter_scope = adv_filter_scope
         if minibatch_group not in {"global", "timestep"}:
             raise ValueError(
                 "minibatch_group must be 'global' or 'timestep'; "
@@ -673,21 +714,37 @@ class RolloutBufferGPU:
         if self.minibatch_group == "timestep":
             # One Adam step per collect row.  Filter only shrinks the row.
             # shuffle is ignored so t=0..T-1 stay in order.
-            abs_np = abs_adv.detach().view(T, N).cpu().numpy()
-            own_np = own_mask.detach().view(T, N).cpu().numpy()
-            rows = timestep_keep_env_indices(
-                abs_np,
-                rate=self.adv_filt_rate,
-                thresh=self.adv_filt_thresh,
-                own_mask=own_np,
-            )
+            if self.adv_filter_scope == "rollout":
+                # Match Ataraxos's buffer-level selection: the threshold is
+                # computed once from raw |A| over this rank's valid samples.
+                # The emitted PPO advantages remain globally normalised.
+                keep, thresh = _rollout_advantage_keep_mask(
+                    adv,
+                    own_mask,
+                    keep_rate=self.adv_filt_rate,
+                    min_thresh=self.adv_filt_thresh,
+                )
+                keep_np = keep.view(T, N).cpu().numpy()
+                rows = [
+                    np.flatnonzero(row).astype(np.int64, copy=False)
+                    for row in keep_np
+                ]
+            else:
+                abs_np = abs_adv.detach().view(T, N).cpu().numpy()
+                own_np = own_mask.detach().view(T, N).cpu().numpy()
+                rows = timestep_keep_env_indices(
+                    abs_np,
+                    rate=self.adv_filt_rate,
+                    thresh=self.adv_filt_thresh,
+                    own_mask=own_np,
+                )
             sizes = [int(r.size) for r in rows]
             nonempty = [s for s in sizes if s > 0]
             n_policy = int(sum(sizes))
             self._last_n_total = int(total)
             self._last_n_own = int(own_mask.sum().item())
             self._last_n_policy = n_policy
-            self._last_thresh_used = float(self.adv_filt_thresh)
+            self._last_thresh_used = float(thresh)
             self._last_kept_mean = float(np.mean(sizes)) if sizes else 0.0
             self._last_kept_min = float(min(nonempty) if nonempty else 0)
             self._last_kept_max = float(max(sizes) if sizes else 0)

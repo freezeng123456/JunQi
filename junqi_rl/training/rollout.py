@@ -118,8 +118,9 @@ def timestep_keep_env_indices(
     and ``own_mask``.  Empty rows yield an empty index array so the
     caller can skip that Adam step.
 
-    This is Ataraxos Appendix D.4: filter shrinks the per-step batch,
-    it does not change the number of gradient steps (one per row).
+    This is the legacy JunQi row-local quantile behaviour. Ataraxos also
+    trains one batch per simulator row, but computes a single advantage
+    threshold over the complete rollout before applying it to each row.
     """
     if abs_adv.ndim != 2:
         raise ValueError(f"abs_adv must be (T, N), got {abs_adv.shape}")
@@ -196,6 +197,7 @@ class RolloutBuffer:
         td_lambda: float = 0.8,
         adv_filt_thresh: float = 0.01,
         adv_filt_rate: float = 0.75,
+        adv_filter_scope: str = "timestep",
         device: str | torch.device = "cpu",
         minibatch_group: str = "global",
     ) -> None:
@@ -206,6 +208,12 @@ class RolloutBuffer:
         self.td_lambda = td_lambda
         self.adv_filt_thresh = adv_filt_thresh
         self.adv_filt_rate = adv_filt_rate
+        if adv_filter_scope not in {"timestep", "rollout"}:
+            raise ValueError(
+                "adv_filter_scope must be 'timestep' or 'rollout'; "
+                f"got {adv_filter_scope!r}"
+            )
+        self.adv_filter_scope = adv_filter_scope
         self.device = torch.device(device)
         if minibatch_group not in {"global", "timestep"}:
             raise ValueError(
@@ -394,16 +402,31 @@ class RolloutBuffer:
             )
 
         if self.minibatch_group == "timestep":
-            rows = timestep_keep_env_indices(
-                abs_adv.reshape(T, N),
-                rate=self.adv_filt_rate,
-                thresh=self.adv_filt_thresh,
-            )
+            if self.adv_filter_scope == "rollout":
+                # Ataraxos computes its single rollout-level threshold from
+                # raw |A|. Advantages are still normalised for the PPO loss;
+                # only the membership decision uses unnormalised values.
+                filter_abs = np.abs(adv)
+                if self.adv_filt_rate < 1.0:
+                    q_thresh = float(np.quantile(
+                        filter_abs, 1.0 - self.adv_filt_rate,
+                    ))
+                    thresh = max(thresh, q_thresh)
+                rows = [
+                    np.flatnonzero(row >= thresh).astype(np.int64, copy=False)
+                    for row in filter_abs.reshape(T, N)
+                ]
+            else:
+                rows = timestep_keep_env_indices(
+                    abs_adv.reshape(T, N),
+                    rate=self.adv_filt_rate,
+                    thresh=self.adv_filt_thresh,
+                )
             sizes = [int(r.size) for r in rows]
             self._last_n_total = int(T * N)
             self._last_n_own = int(T * N)
             self._last_n_policy = int(sum(sizes))
-            self._last_thresh_used = float(self.adv_filt_thresh)
+            self._last_thresh_used = float(thresh)
             nonempty = [s for s in sizes if s > 0]
             self._last_kept_mean = float(np.mean(sizes)) if sizes else 0.0
             self._last_kept_min = float(min(nonempty) if nonempty else 0)

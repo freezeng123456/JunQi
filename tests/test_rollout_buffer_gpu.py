@@ -207,3 +207,32 @@ def test_gpu_buffer_minibatches_on_device():
         assert batch.actions.dtype == torch.int64  # PPO expects long
         got_batch = True
     assert got_batch
+
+
+def test_gpu_buffer_rollout_scope_uses_one_threshold_for_all_rows():
+    """GPU selection matches Ataraxos's per-rank rollout quantile."""
+    N, T = 4, 2
+    buf = RolloutBufferGPU(
+        num_envs=N,
+        steps_per_env=T,
+        adv_filt_rate=0.25,
+        adv_filt_thresh=0.01,
+        adv_filter_scope="rollout",
+        minibatch_group="timestep",
+        device="cuda",
+        csr_legal_mask=False,
+    )
+    raw = torch.tensor(
+        [[100.0, -100.0, 90.0, -90.0], [1.0, -1.0, 0.5, -0.5]],
+        dtype=torch.float32,
+        device="cuda",
+    )
+    buf.advantages_.copy_(raw)
+    buf.returns_.copy_(raw)
+
+    batches = list(buf.minibatches(batch_size=512, shuffle=True))
+    assert len(batches) == 1
+    assert int(batches[0].actions.shape[0]) == 2
+    assert buf._last_n_policy == 2
+    assert buf._last_thresh_used == pytest.approx(92.5)
+    assert buf._last_n_empty_steps == 1.0

@@ -319,6 +319,10 @@ def validate_config(cfg: TrainConfig) -> None:
         raise ValueError(
             "ppo.magnet_shape must be 'uniform_legal' or 'piece_then_dest'"
         )
+    if cfg.ppo.adv_filter_scope not in {"timestep", "rollout"}:
+        raise ValueError(
+            "ppo.adv_filter_scope must be 'timestep' or 'rollout'"
+        )
     if cfg.ppo.minibatch_group not in {"global", "timestep"}:
         raise ValueError(
             "ppo.minibatch_group must be 'global' or 'timestep'"

@@ -385,6 +385,7 @@ def train(cfg: TrainConfig) -> None:
             )
         print(
             f"[train] minibatch_group={cfg.ppo.minibatch_group}  "
+            f"adv_filter_scope={cfg.ppo.adv_filter_scope}  "
             f"steps_per_env={cfg.env.steps_per_env}  "
             f"adv_filt_rate={cfg.ppo.adv_filt_rate}"
         )
@@ -459,6 +460,7 @@ def train(cfg: TrainConfig) -> None:
             td_lambda=cfg.ppo.td_lambda,
             adv_filt_thresh=cfg.ppo.adv_filt_thresh,
             adv_filt_rate=cfg.ppo.adv_filt_rate,
+            adv_filter_scope=cfg.ppo.adv_filter_scope,
             minibatch_group=cfg.ppo.minibatch_group,
             device=device,
             csr_legal_mask=cfg.rollout.csr_legal_mask,
@@ -494,6 +496,7 @@ def train(cfg: TrainConfig) -> None:
             td_lambda=cfg.ppo.td_lambda,
             adv_filt_thresh=cfg.ppo.adv_filt_thresh,
             adv_filt_rate=cfg.ppo.adv_filt_rate,
+            adv_filter_scope=cfg.ppo.adv_filter_scope,
             minibatch_group=cfg.ppo.minibatch_group,
             device=device,
         )

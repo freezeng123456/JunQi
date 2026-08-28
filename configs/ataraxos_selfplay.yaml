@@ -41,14 +41,23 @@ net:
   pos_emb_std: 0.02
 
 ppo:
+  # Ataraxos computes one 0.75-quantile threshold from all valid positions
+  # in this rank's rollout, then trains the surviving positions one simulator
+  # row at a time. A row may therefore keep more/fewer than exactly 25%.
+  minibatch_group: timestep
+  adv_filter_scope: rollout
   num_epochs_per_rollout: 1
   minibatch_size: 512
   dtype: bfloat16
   # torch.compile under self-play is a documented crash path (DDP_DEPLOYMENT.md).
   torch_compile: false
   lr_schedule_unit: rollout
-  # Paper magnet: α = 0.05 / t^0.3 on rollout index, no floor/ceil.
+  # Exploration-preserving departure from the paper coefficient:
+  # alpha(t) = 0.1 / t^0.3 on the rollout index, with no floor.
   temperature_schedule_unit: rollout
+  temperature_coef: 0.1
+  temperature_decay: 0.3
+  temperature_floor: 0.0
   # Split collect ``policy.act`` so 2048 envs fit the ~10M net.
   act_chunk_size: 256
   max_grad_norm: 0.267
@@ -56,6 +65,7 @@ ppo:
   # field is the fraction KEPT, so the previous 0.75 trained on the top
   # 75% -- the inverse -- diluting every update with low-signal samples.
   adv_filt_rate: 0.25
+  adv_filt_thresh: 0.01
   # PPO always evaluates the frozen collection policy over the complete legal
   # action support, preserving Ataraxos's full reverse-KL objective.
 
