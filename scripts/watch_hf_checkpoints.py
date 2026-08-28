@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Watch a training directory and upload stable numbered checkpoints to HF.
 
-The Hugging Face token is read once from ``JUNQI_HF_UPLOAD_TOKEN`` and removed
-from the process environment immediately. It is never written to the status
-file or logs. Every uploaded checkpoint is verified against the remote LFS
-SHA256 before it is marked complete.
+The preferred ``--token-stdin`` mode reads the Hugging Face token once from a
+pipe, so it never enters the long-lived process environment or command line.
+The environment-variable mode remains available for short-lived jobs. No
+credential is written to the status file or logs. Every uploaded checkpoint
+is verified against the remote LFS SHA256 before it is marked complete.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,11 +69,16 @@ def main() -> int:
     parser.add_argument("--poll-seconds", type=float, default=30.0)
     parser.add_argument("--stable-seconds", type=float, default=30.0)
     parser.add_argument("--stop-rollout", type=int, default=0)
+    parser.add_argument("--token-stdin", action="store_true")
     args = parser.parse_args()
 
-    token = os.environ.pop(TOKEN_ENV, None)
+    if args.token_stdin:
+        token = sys.stdin.readline().rstrip("\r\n")
+    else:
+        token = os.environ.pop(TOKEN_ENV, None)
     if not token:
-        raise RuntimeError(f"missing required environment variable {TOKEN_ENV}")
+        source = "stdin" if args.token_stdin else TOKEN_ENV
+        raise RuntimeError(f"missing Hugging Face token from {source}")
 
     from huggingface_hub import HfApi
 
