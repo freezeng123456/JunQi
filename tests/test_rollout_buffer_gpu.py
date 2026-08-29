@@ -266,6 +266,8 @@ def test_gpu_rollout_value_scope_keeps_all_rows_for_value_loss():
     assert [int(batch.actions.shape[0]) for batch in batches] == [2, 0]
     assert batches[0].value_only_mask.tolist() == [False, False]
     assert batches[1].value_only_mask.tolist() == []
+    assert batches[0].policy_value_indices.tolist() == [0, 1]
+    assert batches[1].policy_value_indices.tolist() == []
     assert torch.equal(batches[0].value_returns, raw[0])
     assert torch.equal(batches[1].value_returns, raw[1])
     assert buf._last_n_policy == 2

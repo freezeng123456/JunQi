@@ -426,6 +426,71 @@ class JunqiNet(nn.Module):
             return v.log_softmax(dim=-1)   # (B, N_VF_CAT)
         return v.squeeze(-1)               # (B,)
 
+    def _policy_from_encoded(
+        self,
+        cells: Tensor,
+        legal_mask: Tensor,
+        *,
+        actions: Tensor | None = None,
+    ) -> dict[str, Tensor]:
+        """Evaluate or sample the policy from already encoded cell tokens."""
+        logits = self._policy_logits(cells, legal_mask)
+        # Cast to fp32 for numerically stable log_softmax / sampling
+        # (fp16 logits with large masked regions can overflow).
+        logits_f = logits.float()
+
+        # Any non-finite value in a row poisons Categorical.sample(). During
+        # PPO evaluation the trainer owns the batched finite check, so avoid
+        # host synchronisations in that path.
+        if actions is None:
+            finite_mask = torch.isfinite(logits_f).all(dim=-1)
+            if not bool(finite_mask.all()):
+                self._nan_fwd_count += int((~finite_mask).sum().item())
+                fallback = torch.where(
+                    legal_mask,
+                    torch.zeros_like(logits_f),
+                    torch.full_like(logits_f, float("-inf")),
+                )
+                logits_f = torch.where(
+                    (~finite_mask).unsqueeze(-1), fallback, logits_f,
+                )
+
+        # Dead/dummy rows have no legal actions. Make their distribution
+        # finite so one such row cannot poison the complete minibatch.
+        no_legal = ~legal_mask.any(dim=-1)
+        if actions is None:
+            if bool(no_legal.any()):
+                logits_f = torch.where(
+                    no_legal.unsqueeze(-1),
+                    torch.zeros_like(logits_f),
+                    logits_f,
+                )
+        else:
+            logits_f = torch.where(
+                no_legal.unsqueeze(-1),
+                torch.zeros_like(logits_f),
+                logits_f,
+            )
+
+        log_probs = logits_f.log_softmax(dim=-1)
+        if actions is None:
+            chosen_actions = Categorical(logits=logits_f).sample()
+        else:
+            if actions.ndim != 1 or actions.shape[0] != logits_f.shape[0]:
+                raise ValueError(
+                    "actions must have shape (B,), matching the observation "
+                    f"batch; got {tuple(actions.shape)} for B={logits_f.shape[0]}"
+                )
+            chosen_actions = actions.to(device=logits_f.device, dtype=torch.long)
+
+        return {
+            "action": chosen_actions.int(),
+            "action_log_prob": log_probs.gather(
+                1, chosen_actions.unsqueeze(1)
+            ).squeeze(1),
+            "log_probs": log_probs,
+        }
+
     # -------------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------------
@@ -459,92 +524,44 @@ class JunqiNet(nn.Module):
         callers can surface the frequency.
         """
         cls, cells = self._encode(obs_spatial, obs_global)
-        logits = self._policy_logits(cells, legal_mask)
-        # Cast to fp32 for numerically stable log_softmax / sampling
-        # (fp16 logits with large masked regions can overflow).
-        logits_f = logits.float()
+        out = self._policy_from_encoded(cells, legal_mask, actions=actions)
+        out["value"] = self._value(cls)
+        return out
 
-        # --- NaN / Inf guard (pre-sample) ----------------------------
-        # Any non-finite value in a row poisons Categorical.sample() with
-        # "probability tensor contains either `inf`, `nan` or element <
-        # 0". Replace whole rows that are non-finite with a uniform-
-        # over-legal fallback (0.0 logit for legal, -inf for illegal).
-        # Per-element replacement (just setting NaN to 0 while keeping
-        # the rest) doesn't help — a single -inf from the legal mask
-        # mixed with a finite NaN still makes the row all-zero after
-        # softmax, which sample() rejects.
-        # The guard and its diagnostic counter are only needed before random
-        # sampling: Categorical rejects a poisoned probability tensor. During
-        # PPO action evaluation no sampler is constructed, and the trainer has
-        # one batched NaN/Inf check that can skip the update. Avoiding these
-        # ``bool(cuda_tensor)`` checks removes two forced stream
-        # synchronisations from every training forward.
-        if actions is None:
-            finite_mask = torch.isfinite(logits_f).all(dim=-1)  # (B,) bool
-            if not bool(finite_mask.all()):
-                # Count occurrences for downstream logging.
-                self._nan_fwd_count += int((~finite_mask).sum().item())
-                # Build fallback logits: 0 where legal, -inf where illegal.
-                fallback = torch.where(
-                    legal_mask,
-                    torch.zeros_like(logits_f),
-                    torch.full_like(logits_f, float("-inf")),
-                )
-                # Replace only the bad rows.
-                # unsqueeze(-1) for broadcasting the row-mask across actions.
-                bad_rows = (~finite_mask).unsqueeze(-1)
-                logits_f = torch.where(bad_rows, fallback, logits_f)
+    def forward_policy_value_shared(
+        self,
+        obs_spatial: Tensor,
+        obs_global: Tensor,
+        policy_indices: Tensor,
+        legal_mask: Tensor,
+        *,
+        actions: Tensor,
+    ) -> dict[str, Tensor]:
+        """Training-only shared encoder path for split policy/value samples.
 
-        # Dead envs (terminated transitions stored as dummy slots) carry a
-        # legal_mask with zero True entries. Their logits row is then
-        # all-(-inf), and ``log_softmax`` on such a row returns all-NaN
-        # (log(0/0)). Downstream the PPO trainer's
-        # ``torch.isfinite(...).all()`` guard sees one NaN and
-        # short-circuits the ENTIRE minibatch -> 96/96 minibatches per
-        # rollout were being silently dropped (root cause of the v17-v32
-        # "0.80 ceiling = no actual training" observation on T4 fp16).
-        # Replace any row with no legal action by uniform-over-all
-        # logits so log_softmax stays finite. Their advantage is 0 in
-        # vs-random mode and these transitions contribute zero gradient,
-        # so the artificial uniform prior is harmless.
-        no_legal = ~legal_mask.any(dim=-1)                  # (B,) bool
-        if actions is None:
-            if bool(no_legal.any()):
-                uniform = torch.zeros_like(logits_f)        # all-zero -> uniform
-                logits_f = torch.where(no_legal.unsqueeze(-1), uniform, logits_f)
-        else:
-            # This branch is entirely device-side: it is a no-op for normal
-            # legal rows and keeps legacy dummy/dead rows finite without a
-            # host synchronisation.
-            logits_f = torch.where(
-                no_legal.unsqueeze(-1),
-                torch.zeros_like(logits_f),
-                logits_f,
+        The observations contain every value sample. ``policy_indices`` picks
+        the advantage-filtered subset whose cell tokens enter the action head.
+        The returned policy tensors have size ``Bp`` while ``value`` has size
+        ``Bv``. This method adds no parameters and leaves :meth:`forward` and
+        checkpoint structure unchanged.
+        """
+        if policy_indices.ndim != 1:
+            raise ValueError("policy_indices must have shape (Bp,)")
+        policy_indices = policy_indices.to(
+            device=obs_spatial.device, dtype=torch.long,
+        )
+        if policy_indices.numel() != actions.shape[0]:
+            raise ValueError(
+                "policy_indices and actions must have the same length; "
+                f"got {policy_indices.numel()} and {actions.shape[0]}"
             )
-
-        log_probs = logits_f.log_softmax(dim=-1)
-
-        if actions is None:
-            dist = Categorical(logits=logits_f)
-            chosen_actions = dist.sample()  # (B,)
-        else:
-            if actions.ndim != 1 or actions.shape[0] != logits_f.shape[0]:
-                raise ValueError(
-                    "actions must have shape (B,), matching the observation "
-                    f"batch; got {tuple(actions.shape)} for B={logits_f.shape[0]}"
-                )
-            chosen_actions = actions.to(device=logits_f.device, dtype=torch.long)
-
-        value = self._value(cls)
-
-        return {
-            "action": chosen_actions.int(),
-            "action_log_prob": log_probs.gather(
-                1, chosen_actions.unsqueeze(1)
-            ).squeeze(1),
-            "log_probs": log_probs,          # full distribution
-            "value": value,
-        }
+        cls, cells = self._encode(obs_spatial, obs_global)
+        policy_cells = cells.index_select(0, policy_indices)
+        out = self._policy_from_encoded(
+            policy_cells, legal_mask, actions=actions,
+        )
+        out["value"] = self._value(cls)
+        return out
 
     def forward_value(
         self,

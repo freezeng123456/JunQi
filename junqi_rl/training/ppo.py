@@ -382,7 +382,9 @@ class PPOConfig:
     """Chunk size for the all-valid value-only forward/backward path.
 
     Value chunks bypass the 16,641-action policy head, so this controls trunk
-    activation memory without changing the number of optimiser steps.
+    activation memory without changing the number of optimiser steps. When a
+    complete timestep row fits in one chunk, value and filtered policy share
+    that learner encoder pass; smaller chunks use the memory-safe fallback.
     """
 
     minibatch_group: str = "global"
@@ -872,9 +874,11 @@ class PPOTrainer:
 
         The policy / entropy / full reverse-KL path only evaluates the
         advantage-filtered samples in the main ``RolloutBatch`` fields.  The
-        value objective uses ``value_obs_*`` and ``value_returns`` in fixed
-        chunks, bypassing the large action head.  All gradients accumulate
-        before one clip/optimizer step, preserving timestep-step semantics.
+        value objective uses ``value_obs_*`` and ``value_returns``. When the
+        full row fits in one value chunk, the learner encodes it once and the
+        action head indexes only policy rows; otherwise the memory-safe
+        separate chunk path is retained. All gradients accumulate before one
+        clip/optimizer step, preserving timestep-step semantics.
         """
         if _is_distributed():
             raise RuntimeError(
@@ -909,6 +913,12 @@ class PPOTrainer:
         n_value = int(value_returns.shape[0])
         if n_value <= 0:
             raise ValueError("split-value update received an empty value batch")
+        value_chunk_size = int(getattr(cfg, "value_minibatch_size", 256))
+        policy_value_indices = batch.policy_value_indices
+        shared_encoder = (
+            policy_value_indices is not None
+            and n_value <= value_chunk_size
+        )
 
         zero = torch.zeros((), device=self.device)
         policy_loss = zero
@@ -920,7 +930,7 @@ class PPOTrainer:
 
         self.optimizer.zero_grad(set_to_none=True)
 
-        if n_policy:
+        if n_policy and not shared_encoder:
             obs_sp_in, obs_gl_in = _inputs(batch.obs_spatial, batch.obs_global)
             legal_mask = batch.legal_mask.to(self.device)
             evaluated_actions = batch.actions.to(self.device)
@@ -1005,24 +1015,80 @@ class PPOTrainer:
         else:
             policy_total = zero
 
-        value_loss_sum = torch.zeros((), device=self.device)
-        value_chunk_size = int(getattr(cfg, "value_minibatch_size", 256))
-        for start in range(0, n_value, value_chunk_size):
-            stop = min(start + value_chunk_size, n_value)
-            value_sp, value_gl = _inputs(
-                value_obs_spatial[start:stop],
-                value_obs_global[start:stop],
-            )
-            ret_chunk = value_returns[start:stop].to(self.device)
+        if shared_encoder:
+            value_sp, value_gl = _inputs(value_obs_spatial, value_obs_global)
+            ret_all = value_returns.to(self.device)
+            evaluated_actions = batch.actions.to(self.device)
+            legal_mask = batch.legal_mask.to(self.device)
+            if n_policy:
+                policy_sp, policy_gl = _inputs(
+                    batch.obs_spatial, batch.obs_global,
+                )
+                with torch.inference_mode(), autocast(
+                    device_type=ctx_device,
+                    dtype=self._amp_dtype,
+                    enabled=self._use_amp,
+                ):
+                    old_log_probs_all = self._collect_policy(
+                        policy_sp,
+                        policy_gl,
+                        legal_mask,
+                        actions=evaluated_actions,
+                    )["log_probs"]
             with autocast(
                 device_type=ctx_device,
                 dtype=self._amp_dtype,
                 enabled=self._use_amp,
             ):
-                value_pred = self._policy_unwrapped.forward_value(
-                    value_sp, value_gl,
-                )
-                if bool((~torch.isfinite(value_pred)).any()):
+                if n_policy:
+                    out = self._policy_unwrapped.forward_policy_value_shared(
+                        value_sp,
+                        value_gl,
+                        policy_value_indices,
+                        legal_mask,
+                        actions=evaluated_actions,
+                    )
+                    new_log_probs_all = out["log_probs"]
+                    new_log_prob = out["action_log_prob"]
+                    value_pred = out["value"]
+                    old_log_prob = batch.old_log_probs.to(self.device)
+                    adv = batch.advantages.to(self.device)
+                    self._assert_policy_active_actions_legal(
+                        legal_mask,
+                        evaluated_actions,
+                        torch.ones_like(new_log_prob, dtype=torch.bool),
+                    )
+                    policy_loss = self._policy_loss(
+                        new_log_prob, old_log_prob, adv,
+                    )
+                    entropy_loss, entropy = self._entropy_loss(
+                        new_log_probs_all, legal_mask,
+                    )
+                    kl_loss = self._reverse_kl(
+                        new_log_probs_all,
+                        old_log_probs_all,
+                        legal_mask,
+                    )
+                    log_ratio = new_log_prob - old_log_prob.detach()
+                    approx_kl = (-log_ratio).mean()
+                    log_ratio_abs_max = log_ratio.abs().max()
+                    policy_total = (
+                        cfg.policy_coef * policy_loss
+                        + temp * entropy_loss
+                        + cfg.kl_coef * kl_loss
+                    )
+                else:
+                    value_pred = self._policy_unwrapped.forward_value(
+                        value_sp, value_gl,
+                    )
+                    policy_total = zero
+                if (
+                    bool((~torch.isfinite(value_pred)).any())
+                    or (
+                        n_policy
+                        and bool((~torch.isfinite(new_log_probs_all)).any())
+                    )
+                ):
                     self.optimizer.zero_grad(set_to_none=True)
                     self._nan_skip_count += 1
                     self.num_train_step += 1
@@ -1041,20 +1107,62 @@ class PPOTrainer:
                         "train/batch_size": n_policy,
                         "train/value_batch_size": n_value,
                     }
-                chunk_sum = self._value_loss(
-                    value_pred,
-                    ret_chunk,
-                    reduction="sum",
-                )
-                scaled_chunk_loss = cfg.vf_coef * chunk_sum / float(n_value)
-            value_loss_sum = value_loss_sum + chunk_sum.detach()
+                value_loss = self._value_loss(value_pred, ret_all)
+                total_loss = policy_total + cfg.vf_coef * value_loss
             if self._scaler is not None:
-                self._scaler.scale(scaled_chunk_loss).backward()
+                self._scaler.scale(total_loss).backward()
             else:
-                scaled_chunk_loss.backward()
+                total_loss.backward()
+        else:
+            value_loss_sum = torch.zeros((), device=self.device)
+            for start in range(0, n_value, value_chunk_size):
+                stop = min(start + value_chunk_size, n_value)
+                value_sp, value_gl = _inputs(
+                    value_obs_spatial[start:stop],
+                    value_obs_global[start:stop],
+                )
+                ret_chunk = value_returns[start:stop].to(self.device)
+                with autocast(
+                    device_type=ctx_device,
+                    dtype=self._amp_dtype,
+                    enabled=self._use_amp,
+                ):
+                    value_pred = self._policy_unwrapped.forward_value(
+                        value_sp, value_gl,
+                    )
+                    if bool((~torch.isfinite(value_pred)).any()):
+                        self.optimizer.zero_grad(set_to_none=True)
+                        self._nan_skip_count += 1
+                        self.num_train_step += 1
+                        lr = self._update_lr()
+                        return {
+                            "train/policy_loss": zero.detach(),
+                            "train/value_loss": zero.detach(),
+                            "train/entropy_loss": zero.detach(),
+                            "train/entropy": zero.detach(),
+                            "train/kl_loss": zero.detach(),
+                            "train/approx_kl": zero.detach(),
+                            "train/kl_log_ratio_abs_max": zero.detach(),
+                            "train/total_loss": zero.detach(),
+                            "train/temperature": temp,
+                            "train/lr": lr,
+                            "train/batch_size": n_policy,
+                            "train/value_batch_size": n_value,
+                        }
+                    chunk_sum = self._value_loss(
+                        value_pred,
+                        ret_chunk,
+                        reduction="sum",
+                    )
+                    scaled_chunk_loss = cfg.vf_coef * chunk_sum / float(n_value)
+                value_loss_sum = value_loss_sum + chunk_sum.detach()
+                if self._scaler is not None:
+                    self._scaler.scale(scaled_chunk_loss).backward()
+                else:
+                    scaled_chunk_loss.backward()
 
-        value_loss = value_loss_sum / float(n_value)
-        total_loss = policy_total.detach() + cfg.vf_coef * value_loss
+            value_loss = value_loss_sum / float(n_value)
+            total_loss = policy_total.detach() + cfg.vf_coef * value_loss
 
         if self._scaler is not None:
             self._scaler.unscale_(self.optimizer)

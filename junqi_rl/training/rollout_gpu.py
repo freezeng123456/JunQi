@@ -764,6 +764,7 @@ class RolloutBufferGPU:
                 value_obs_spatial=obs_sp_all,
                 value_obs_global=obs_gl_all,
                 value_returns=ret.index_select(0, flat_all),
+                policy_value_indices=policy_env,
             )
 
         if self.minibatch_group == "timestep":

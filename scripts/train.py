@@ -383,11 +383,20 @@ def train(cfg: TrainConfig) -> None:
                 f"[train] magnet α unit={mag_unit} "
                 f"(legacy power_schedule with floor/ceil)"
             )
+        value_path = (
+            "shared_encoder"
+            if (
+                cfg.ppo.value_sample_scope == "all_valid"
+                and cfg.ppo.value_minibatch_size >= cfg.env.num_envs
+            )
+            else "chunked_or_policy"
+        )
         print(
             f"[train] minibatch_group={cfg.ppo.minibatch_group}  "
             f"adv_filter_scope={cfg.ppo.adv_filter_scope}  "
             f"value_sample_scope={cfg.ppo.value_sample_scope}  "
             f"value_minibatch_size={cfg.ppo.value_minibatch_size}  "
+            f"value_path={value_path}  "
             f"steps_per_env={cfg.env.steps_per_env}  "
             f"adv_filt_rate={cfg.ppo.adv_filt_rate}"
         )

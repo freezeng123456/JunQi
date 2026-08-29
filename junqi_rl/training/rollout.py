@@ -88,10 +88,12 @@ class RolloutBatch:
     value_obs_spatial : (Bv, OBS_CHANNELS, 17, 17) float32, optional
     value_obs_global  : (Bv, OBS_GLOBAL_DIMS)      float32, optional
     value_returns     : (Bv,)                      float32, optional
+    policy_value_indices : (Bp,)                   int64, optional
         A separate all-valid value batch. When present, the main fields hold
         only advantage-filtered policy samples and PPO evaluates the value
-        objective through a value-only chunked forward. This avoids building
-        the 16,641-action distribution for the additional value samples.
+        objective on all samples. ``policy_value_indices`` maps the filtered
+        policy rows into this batch, allowing the learner encoder to run once
+        while the 16,641-action head still sees only policy samples.
     """
 
     obs_spatial: Tensor
@@ -110,6 +112,7 @@ class RolloutBatch:
     value_obs_spatial: Tensor | None = None
     value_obs_global: Tensor | None = None
     value_returns: Tensor | None = None
+    policy_value_indices: Tensor | None = None
 
 
 
@@ -449,6 +452,9 @@ class RolloutBuffer:
                 value_obs_spatial=torch.from_numpy(obs_sp[value_idx]).to(dev),
                 value_obs_global=torch.from_numpy(obs_gl[value_idx]).to(dev),
                 value_returns=torch.from_numpy(ret[value_idx]).to(dev),
+                policy_value_indices=torch.from_numpy(
+                    policy_env_idx.astype(np.int64, copy=False)
+                ).to(dev),
             )
 
         if self.minibatch_group == "timestep":
