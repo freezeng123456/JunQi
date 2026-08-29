@@ -97,6 +97,57 @@ def test_state_dict_strict_load_keeps_fast_path_outputs() -> None:
         assert torch.equal(actual[key], expected[key]), key
 
 
+def test_value_only_forward_matches_full_forward_value_and_state_dict() -> None:
+    model = _tiny_model()
+    keys_before = tuple(model.state_dict())
+    spatial = torch.zeros(2, OBS_CHANNELS, 17, 17)
+    global_ = torch.zeros(2, OBS_GLOBAL_DIMS)
+    legal = torch.zeros(2, FLAT_ACTION_DIM, dtype=torch.bool)
+    legal[0, [5, 13]] = True
+    legal[1, [7, 19]] = True
+    actions = torch.tensor([13, 7])
+
+    with torch.inference_mode():
+        full = model(spatial, global_, legal, actions=actions)["value"]
+        value_only = model.forward_value(spatial, global_)
+
+    assert torch.equal(value_only, full)
+    assert tuple(model.state_dict()) == keys_before
+
+
+def test_shared_encoder_path_matches_separate_policy_and_value_forwards() -> None:
+    model = _tiny_model()
+    keys_before = tuple(model.state_dict())
+    spatial = torch.randn(5, OBS_CHANNELS, 17, 17)
+    global_ = torch.randn(5, OBS_GLOBAL_DIMS)
+    policy_indices = torch.tensor([0, 2])
+    legal = torch.zeros(2, FLAT_ACTION_DIM, dtype=torch.bool)
+    legal[0, [5, 13]] = True
+    legal[1, [7, 19]] = True
+    actions = torch.tensor([13, 7])
+
+    with torch.inference_mode():
+        policy = model(
+            spatial.index_select(0, policy_indices),
+            global_.index_select(0, policy_indices),
+            legal,
+            actions=actions,
+        )
+        value = model.forward_value(spatial, global_)
+        shared = model.forward_policy_value_shared(
+            spatial,
+            global_,
+            policy_indices,
+            legal,
+            actions=actions,
+        )
+
+    for key in ("action", "action_log_prob", "log_probs"):
+        torch.testing.assert_close(shared[key], policy[key], atol=2e-6, rtol=2e-6)
+    torch.testing.assert_close(shared["value"], value, atol=2e-6, rtol=2e-6)
+    assert tuple(model.state_dict()) == keys_before
+
+
 def test_forward_rejects_mismatched_supplied_action_batch() -> None:
     model = _tiny_model()
     spatial = torch.zeros(2, OBS_CHANNELS, 17, 17)

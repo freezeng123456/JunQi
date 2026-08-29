@@ -37,6 +37,50 @@ def _trainer() -> PPOTrainer:
     return PPOTrainer(JunqiNet(net_cfg), cfg, device="cpu")
 
 
+def _split_value_batch(
+    trainer: PPOTrainer,
+    *,
+    n_policy: int = 2,
+    n_value: int = 5,
+) -> tuple[RolloutBatch, torch.Tensor, torch.Tensor, torch.Tensor]:
+    value_spatial = torch.randn(n_value, OBS_CHANNELS, 17, 17)
+    value_global = torch.randn(n_value, OBS_GLOBAL_DIMS)
+    value_returns = torch.linspace(-0.8, 0.8, n_value)
+    policy_value_indices = torch.arange(n_policy) * max(1, n_value // n_policy)
+    policy_spatial = value_spatial.index_select(0, policy_value_indices)
+    policy_global = value_global.index_select(0, policy_value_indices)
+    legal = torch.zeros(n_policy, 129 * 129, dtype=torch.bool)
+    legal[0, [3, 11]] = True
+    legal[1, [7, 19]] = True
+    actions = torch.tensor([11, 7])
+    trainer._sync_collect_policy()
+    with torch.inference_mode():
+        old_log_probs = trainer._collect_policy(
+            policy_spatial,
+            policy_global,
+            legal,
+            actions=actions,
+        )["action_log_prob"]
+
+    batch = RolloutBatch(
+        obs_spatial=policy_spatial,
+        obs_global=policy_global,
+        legal_mask=legal,
+        actions=actions,
+        old_log_probs=old_log_probs,
+        advantages=torch.tensor([0.25, -0.25]),
+        returns=torch.zeros(n_policy),
+        values=torch.zeros(n_policy),
+        adv_mask=torch.ones(n_policy, dtype=torch.bool),
+        value_only_mask=torch.zeros(n_policy, dtype=torch.bool),
+        value_obs_spatial=value_spatial,
+        value_obs_global=value_global,
+        value_returns=value_returns,
+        policy_value_indices=policy_value_indices,
+    )
+    return batch, value_spatial, value_global, value_returns
+
+
 def test_full_kl_masks_illegal_negative_infinity_entries():
     trainer = _trainer()
     old = torch.log(torch.tensor([[0.7, 0.3, 0.0]]))
@@ -193,6 +237,142 @@ def test_ppo_update_evaluates_stored_actions_without_sampling(monkeypatch):
             assert torch.isfinite(value).all()
         elif isinstance(value, float):
             assert math.isfinite(value)
+
+
+def test_split_value_chunks_match_one_full_value_backward():
+    """Chunking changes activation memory, not the all-valid value update."""
+    split = _trainer()
+    reference = _trainer()
+    reference.policy.load_state_dict(split.policy.state_dict(), strict=True)
+    for trainer in (split, reference):
+        trainer.cfg.policy_coef = 0.0
+        trainer.cfg.temperature_coef = 0.0
+        trainer.cfg.kl_coef = 0.0
+        trainer.cfg.value_minibatch_size = 2
+        trainer.cfg.max_grad_norm = 1.0e9
+        trainer.policy.eval()
+        # Adam's first step normalises tiny near-zero gradients by their own
+        # magnitude, which can amplify harmless accumulation-order noise.
+        # Plain SGD makes parameter deltas directly proportional to gradients.
+        trainer.optimizer = torch.optim.SGD(trainer.policy.parameters(), lr=1e-4)
+
+    n_value = 5
+    batch, value_spatial, value_global, value_returns = _split_value_batch(
+        split, n_value=n_value,
+    )
+
+    split_metrics = split._update_step(batch)
+
+    reference.optimizer.zero_grad(set_to_none=True)
+    reference_value = reference.policy.forward_value(value_spatial, value_global)
+    reference_loss = (
+        reference.cfg.vf_coef
+        * reference._value_loss(reference_value, value_returns)
+    )
+    reference_loss.backward()
+    torch.nn.utils.clip_grad_norm_(
+        reference.policy.parameters(), reference.cfg.max_grad_norm
+    )
+    reference.optimizer.step()
+
+    assert split_metrics["train/value_batch_size"] == n_value
+    assert split_metrics["train/value_loss"].item() == pytest.approx(
+        reference_loss.item() / reference.cfg.vf_coef,
+        abs=2e-6,
+    )
+    for (name, actual), (expected_name, expected) in zip(
+        split.policy.named_parameters(),
+        reference.policy.named_parameters(),
+        strict=True,
+    ):
+        assert name == expected_name
+        assert torch.allclose(actual, expected, atol=2e-6, rtol=2e-6), name
+
+
+def test_split_value_encodes_learner_batch_once(monkeypatch):
+    """All-valid value and filtered policy must share one learner encode."""
+    trainer = _trainer()
+    trainer.cfg.value_minibatch_size = 16
+    batch, _spatial, _global, _returns = _split_value_batch(trainer)
+
+    encode_calls = 0
+    original_encode = trainer.policy._encode
+
+    def counted_encode(*args, **kwargs):
+        nonlocal encode_calls
+        encode_calls += 1
+        return original_encode(*args, **kwargs)
+
+    monkeypatch.setattr(trainer.policy, "_encode", counted_encode)
+    trainer._update_step(batch)
+
+    assert encode_calls == 1
+
+
+def test_shared_encoder_update_matches_separate_split_update():
+    shared = _trainer()
+    separate = _trainer()
+    separate.policy.load_state_dict(shared.policy.state_dict(), strict=True)
+    separate._sync_collect_policy()
+    for trainer, chunk_size in ((shared, 16), (separate, 2)):
+        trainer.cfg.value_minibatch_size = chunk_size
+        trainer.cfg.max_grad_norm = 1.0e9
+        trainer.policy.eval()
+        trainer.optimizer = torch.optim.SGD(trainer.policy.parameters(), lr=1e-4)
+
+    batch, _spatial, _global, _returns = _split_value_batch(shared)
+    with torch.inference_mode():
+        shared_pre = shared.policy.forward_policy_value_shared(
+            batch.value_obs_spatial,
+            batch.value_obs_global,
+            batch.policy_value_indices,
+            batch.legal_mask,
+            actions=batch.actions,
+        )
+        separate_pre = separate.policy(
+            batch.obs_spatial,
+            batch.obs_global,
+            batch.legal_mask,
+            actions=batch.actions,
+        )
+        shared_old = shared._collect_policy(
+            batch.obs_spatial,
+            batch.obs_global,
+            batch.legal_mask,
+            actions=batch.actions,
+        )
+        separate_old = separate._collect_policy(
+            batch.obs_spatial,
+            batch.obs_global,
+            batch.legal_mask,
+            actions=batch.actions,
+        )
+    torch.testing.assert_close(
+        shared_pre["log_probs"], separate_pre["log_probs"], atol=2e-6, rtol=2e-6,
+    )
+    torch.testing.assert_close(
+        shared_old["log_probs"], separate_old["log_probs"], atol=2e-6, rtol=2e-6,
+    )
+    shared_metrics = shared._update_step(batch)
+    separate_metrics = separate._update_step(batch)
+
+    for key in (
+        "train/policy_loss",
+        "train/value_loss",
+        "train/entropy_loss",
+        "train/kl_loss",
+        "train/total_loss",
+    ):
+        assert shared_metrics[key].item() == pytest.approx(
+            separate_metrics[key].item(), abs=2e-6,
+        ), key
+    for (name, actual), (expected_name, expected) in zip(
+        shared.policy.named_parameters(),
+        separate.policy.named_parameters(),
+        strict=True,
+    ):
+        assert name == expected_name
+        assert torch.allclose(actual, expected, atol=3e-6, rtol=3e-6), name
 
 
 def test_magnet_alpha_respects_floor():

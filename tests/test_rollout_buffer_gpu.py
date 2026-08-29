@@ -236,3 +236,39 @@ def test_gpu_buffer_rollout_scope_uses_one_threshold_for_all_rows():
     assert buf._last_n_policy == 2
     assert buf._last_thresh_used == pytest.approx(92.5)
     assert buf._last_n_empty_steps == 1.0
+
+
+def test_gpu_rollout_value_scope_keeps_all_rows_for_value_loss():
+    """GPU buffer decouples policy filtering from all-valid value samples."""
+    N, T = 4, 2
+    buf = RolloutBufferGPU(
+        num_envs=N,
+        steps_per_env=T,
+        adv_filt_rate=0.25,
+        adv_filt_thresh=0.01,
+        adv_filter_scope="rollout",
+        value_sample_scope="all_valid",
+        minibatch_group="timestep",
+        device="cuda",
+        csr_legal_mask=False,
+    )
+    raw = torch.tensor(
+        [[100.0, -100.0, 90.0, -90.0], [1.0, -1.0, 0.5, -0.5]],
+        dtype=torch.float32,
+        device="cuda",
+    )
+    buf.advantages_.copy_(raw)
+    buf.returns_.copy_(raw)
+
+    batches = list(buf.minibatches(batch_size=512, shuffle=False))
+
+    assert len(batches) == T
+    assert [int(batch.actions.shape[0]) for batch in batches] == [2, 0]
+    assert batches[0].value_only_mask.tolist() == [False, False]
+    assert batches[1].value_only_mask.tolist() == []
+    assert batches[0].policy_value_indices.tolist() == [0, 1]
+    assert batches[1].policy_value_indices.tolist() == []
+    assert torch.equal(batches[0].value_returns, raw[0])
+    assert torch.equal(batches[1].value_returns, raw[1])
+    assert buf._last_n_policy == 2
+    assert buf._last_n_value == T * N
