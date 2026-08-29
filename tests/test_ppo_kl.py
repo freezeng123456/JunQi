@@ -195,6 +195,86 @@ def test_ppo_update_evaluates_stored_actions_without_sampling(monkeypatch):
             assert math.isfinite(value)
 
 
+def test_split_value_chunks_match_one_full_value_backward():
+    """Chunking changes activation memory, not the all-valid value update."""
+    split = _trainer()
+    reference = _trainer()
+    reference.policy.load_state_dict(split.policy.state_dict(), strict=True)
+    for trainer in (split, reference):
+        trainer.cfg.policy_coef = 0.0
+        trainer.cfg.temperature_coef = 0.0
+        trainer.cfg.kl_coef = 0.0
+        trainer.cfg.value_minibatch_size = 2
+        trainer.cfg.max_grad_norm = 1.0e9
+        trainer.policy.eval()
+        # Adam's first step normalises tiny near-zero gradients by their own
+        # magnitude, which can amplify harmless accumulation-order noise.
+        # Plain SGD makes parameter deltas directly proportional to gradients.
+        trainer.optimizer = torch.optim.SGD(trainer.policy.parameters(), lr=1e-4)
+
+    n_policy, n_value = 2, 5
+    policy_spatial = torch.randn(n_policy, OBS_CHANNELS, 17, 17)
+    policy_global = torch.randn(n_policy, OBS_GLOBAL_DIMS)
+    legal = torch.zeros(n_policy, 129 * 129, dtype=torch.bool)
+    legal[0, [3, 11]] = True
+    legal[1, [7, 19]] = True
+    actions = torch.tensor([11, 7])
+    split._sync_collect_policy()
+    with torch.inference_mode():
+        old_log_probs = split.policy(
+            policy_spatial,
+            policy_global,
+            legal,
+            actions=actions,
+        )["action_log_prob"]
+
+    value_spatial = torch.randn(n_value, OBS_CHANNELS, 17, 17)
+    value_global = torch.randn(n_value, OBS_GLOBAL_DIMS)
+    value_returns = torch.linspace(-0.8, 0.8, n_value)
+    batch = RolloutBatch(
+        obs_spatial=policy_spatial,
+        obs_global=policy_global,
+        legal_mask=legal,
+        actions=actions,
+        old_log_probs=old_log_probs,
+        advantages=torch.tensor([0.25, -0.25]),
+        returns=torch.zeros(n_policy),
+        values=torch.zeros(n_policy),
+        adv_mask=torch.ones(n_policy, dtype=torch.bool),
+        value_only_mask=torch.zeros(n_policy, dtype=torch.bool),
+        value_obs_spatial=value_spatial,
+        value_obs_global=value_global,
+        value_returns=value_returns,
+    )
+
+    split_metrics = split._update_step(batch)
+
+    reference.optimizer.zero_grad(set_to_none=True)
+    reference_value = reference.policy.forward_value(value_spatial, value_global)
+    reference_loss = (
+        reference.cfg.vf_coef
+        * reference._value_loss(reference_value, value_returns)
+    )
+    reference_loss.backward()
+    torch.nn.utils.clip_grad_norm_(
+        reference.policy.parameters(), reference.cfg.max_grad_norm
+    )
+    reference.optimizer.step()
+
+    assert split_metrics["train/value_batch_size"] == n_value
+    assert split_metrics["train/value_loss"].item() == pytest.approx(
+        reference_loss.item() / reference.cfg.vf_coef,
+        abs=2e-6,
+    )
+    for (name, actual), (expected_name, expected) in zip(
+        split.policy.named_parameters(),
+        reference.policy.named_parameters(),
+        strict=True,
+    ):
+        assert name == expected_name
+        assert torch.allclose(actual, expected, atol=2e-6, rtol=2e-6), name
+
+
 def test_magnet_alpha_respects_floor():
     assert magnet_alpha(0.08, 3000, 0.2, floor=0.02) == pytest.approx(0.02)
     assert magnet_alpha(0.08, 1, 0.2, floor=0.02) == pytest.approx(0.08)

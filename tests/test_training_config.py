@@ -92,6 +92,27 @@ def test_ataraxos_config_uses_rollout_quantile_with_timestep_batches() -> None:
     assert cfg.ppo.temperature_floor == pytest.approx(0.0)
 
 
+def test_value_all_config_only_decouples_value_sampling() -> None:
+    base = load_config(_args(ROOT / "configs" / "ataraxos_selfplay.yaml"))
+    value_all = load_config(
+        _args(ROOT / "configs" / "ataraxos_selfplay_value_all.yaml")
+    )
+
+    expected = _dataclass_to_dict(base)
+    expected["ppo"]["value_sample_scope"] = "all_valid"
+    expected["ppo"]["value_minibatch_size"] = 2048
+    assert _dataclass_to_dict(value_all) == expected
+
+
+def test_all_valid_value_scope_requires_timestep_minibatches() -> None:
+    cfg = TrainConfig()
+    cfg.ppo.value_sample_scope = "all_valid"
+    cfg.ppo.minibatch_group = "global"
+
+    with pytest.raises(ValueError, match="requires.*timestep"):
+        validate_config(cfg)
+
+
 def test_invalid_advantage_filter_scope_is_rejected() -> None:
     cfg = TrainConfig()
     cfg.ppo.adv_filter_scope = "rank"

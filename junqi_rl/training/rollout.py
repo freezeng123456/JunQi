@@ -85,6 +85,13 @@ class RolloutBatch:
                                                               gradient is gated to
                                                               policy-controlled
                                                               transitions.
+    value_obs_spatial : (Bv, OBS_CHANNELS, 17, 17) float32, optional
+    value_obs_global  : (Bv, OBS_GLOBAL_DIMS)      float32, optional
+    value_returns     : (Bv,)                      float32, optional
+        A separate all-valid value batch. When present, the main fields hold
+        only advantage-filtered policy samples and PPO evaluates the value
+        objective through a value-only chunked forward. This avoids building
+        the 16,641-action distribution for the additional value samples.
     """
 
     obs_spatial: Tensor
@@ -100,6 +107,9 @@ class RolloutBatch:
     # Older minibatches() implementations that don't yet emit this field will
     # leave it unset; callers MUST tolerate ``None`` and treat it as all-False.
     value_only_mask: Tensor | None = None
+    value_obs_spatial: Tensor | None = None
+    value_obs_global: Tensor | None = None
+    value_returns: Tensor | None = None
 
 
 
@@ -198,6 +208,7 @@ class RolloutBuffer:
         adv_filt_thresh: float = 0.01,
         adv_filt_rate: float = 0.75,
         adv_filter_scope: str = "timestep",
+        value_sample_scope: str = "policy",
         device: str | torch.device = "cpu",
         minibatch_group: str = "global",
     ) -> None:
@@ -214,6 +225,17 @@ class RolloutBuffer:
                 f"got {adv_filter_scope!r}"
             )
         self.adv_filter_scope = adv_filter_scope
+        if value_sample_scope not in {"policy", "all_valid"}:
+            raise ValueError(
+                "value_sample_scope must be 'policy' or 'all_valid'; "
+                f"got {value_sample_scope!r}"
+            )
+        if value_sample_scope == "all_valid" and minibatch_group != "timestep":
+            raise ValueError(
+                "value_sample_scope='all_valid' requires "
+                "minibatch_group='timestep'"
+            )
+        self.value_sample_scope = value_sample_scope
         self.device = torch.device(device)
         if minibatch_group not in {"global", "timestep"}:
             raise ValueError(
@@ -386,9 +408,11 @@ class RolloutBuffer:
         thresh = self.adv_filt_thresh
         dev = self.device
 
-        def _emit(idx: np.ndarray):
+        def _emit(idx: np.ndarray, value_only_mask: np.ndarray | None = None):
             if idx.size == 0:
                 return
+            if value_only_mask is None:
+                value_only_mask = np.zeros(idx.size, dtype=bool)
             yield RolloutBatch(
                 obs_spatial=torch.from_numpy(obs_sp[idx]).to(dev),
                 obs_global=torch.from_numpy(obs_gl[idx]).to(dev),
@@ -399,6 +423,32 @@ class RolloutBuffer:
                 returns=torch.from_numpy(ret[idx]).to(dev),
                 values=torch.from_numpy(val[idx]).to(dev),
                 adv_mask=torch.ones(len(idx), dtype=torch.bool, device=dev),
+                value_only_mask=torch.from_numpy(value_only_mask).to(dev),
+            )
+
+        def _emit_all_valid_row(t: int, policy_env_idx: np.ndarray):
+            value_idx = t * N + np.arange(N, dtype=np.int64)
+            policy_idx = (t * N + policy_env_idx).astype(np.int64, copy=False)
+            yield RolloutBatch(
+                obs_spatial=torch.from_numpy(obs_sp[policy_idx]).to(dev),
+                obs_global=torch.from_numpy(obs_gl[policy_idx]).to(dev),
+                legal_mask=torch.from_numpy(lm[policy_idx]).to(dev),
+                actions=torch.from_numpy(
+                    act[policy_idx].astype(np.int64, copy=False)
+                ).to(dev),
+                old_log_probs=torch.from_numpy(lp[policy_idx]).to(dev),
+                advantages=torch.from_numpy(adv_norm[policy_idx]).to(dev),
+                returns=torch.from_numpy(ret[policy_idx]).to(dev),
+                values=torch.from_numpy(val[policy_idx]).to(dev),
+                adv_mask=torch.ones(
+                    policy_idx.size, dtype=torch.bool, device=dev,
+                ),
+                value_only_mask=torch.zeros(
+                    policy_idx.size, dtype=torch.bool, device=dev,
+                ),
+                value_obs_spatial=torch.from_numpy(obs_sp[value_idx]).to(dev),
+                value_obs_global=torch.from_numpy(obs_gl[value_idx]).to(dev),
+                value_returns=torch.from_numpy(ret[value_idx]).to(dev),
             )
 
         if self.minibatch_group == "timestep":
@@ -426,6 +476,11 @@ class RolloutBuffer:
             self._last_n_total = int(T * N)
             self._last_n_own = int(T * N)
             self._last_n_policy = int(sum(sizes))
+            self._last_n_value = (
+                int(T * N)
+                if self.value_sample_scope == "all_valid"
+                else self._last_n_policy
+            )
             self._last_thresh_used = float(thresh)
             nonempty = [s for s in sizes if s > 0]
             self._last_kept_mean = float(np.mean(sizes)) if sizes else 0.0
@@ -433,9 +488,10 @@ class RolloutBuffer:
             self._last_kept_max = float(max(sizes) if sizes else 0)
             self._last_n_empty_steps = float(sum(1 for s in sizes if s == 0))
             for t, env_idx in enumerate(rows):
-                if env_idx.size == 0:
-                    continue
-                yield from _emit((t * N + env_idx).astype(np.int64))
+                if self.value_sample_scope == "all_valid":
+                    yield from _emit_all_valid_row(t, env_idx)
+                elif env_idx.size:
+                    yield from _emit((t * N + env_idx).astype(np.int64))
             return
 
         if self.adv_filt_rate < 1.0:
@@ -451,6 +507,7 @@ class RolloutBuffer:
         self._last_n_total = int(T * N)
         self._last_n_own = int(T * N)
         self._last_n_policy = int(len(indices))
+        self._last_n_value = self._last_n_policy
         self._last_thresh_used = float(thresh)
         self._last_kept_mean = float("nan")
         self._last_kept_min = float("nan")
@@ -484,6 +541,7 @@ class RolloutBuffer:
             out["rollout/n_total"] = float(self._last_n_total)
             out["rollout/n_own_seat"] = float(self._last_n_own)
             out["rollout/n_policy_kept"] = float(self._last_n_policy)
+            out["rollout/n_value_samples"] = float(self._last_n_value)
             out["rollout/keep_frac_own"] = (
                 float(self._last_n_policy) / max(1.0, float(self._last_n_own))
             )

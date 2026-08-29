@@ -142,6 +142,58 @@ def test_cpu_buffer_rollout_scope_uses_one_threshold_for_all_rows():
     assert buf._last_n_empty_steps == 1.0
 
 
+def test_cpu_rollout_value_scope_keeps_all_rows_for_value_loss():
+    """Policy stays top-25%, while value sees every valid transition."""
+    import torch
+
+    from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
+    from junqi_rl.training.rollout import FLAT_ACTION_DIM, RolloutBuffer
+
+    T, N = 2, 4
+    buf = RolloutBuffer(
+        num_envs=N,
+        steps_per_env=T,
+        adv_filt_rate=0.25,
+        adv_filt_thresh=0.01,
+        adv_filter_scope="rollout",
+        value_sample_scope="all_valid",
+        minibatch_group="timestep",
+    )
+    for _t in range(T):
+        buf.add(
+            obs_spatial=np.zeros((N, OBS_CHANNELS, 17, 17), dtype=np.float32),
+            obs_global=np.zeros((N, OBS_GLOBAL_DIMS), dtype=np.float32),
+            legal_mask=np.ones((N, FLAT_ACTION_DIM), dtype=bool),
+            actions=np.zeros(N, dtype=np.int32),
+            log_probs=np.zeros(N, dtype=np.float32),
+            values=np.zeros(N, dtype=np.float32),
+            rewards=np.zeros(N, dtype=np.float32),
+            dones=np.zeros(N, dtype=bool),
+            seats=np.zeros(N, dtype=np.int8),
+        )
+
+    raw = np.array(
+        [[100.0, -100.0, 90.0, -90.0], [1.0, -1.0, 0.5, -0.5]],
+        dtype=np.float32,
+    )
+    buf.advantages_ = raw
+    buf.returns_ = raw.copy()
+
+    batches = list(buf.minibatches(batch_size=512, shuffle=False))
+
+    # Ataraxos policy selection still keeps only the two |A|=100 samples.
+    # The value path, however, emits all four samples in both rows. The weak
+    # second row is value-only instead of disappearing from the epoch.
+    assert len(batches) == T
+    assert [int(batch.actions.shape[0]) for batch in batches] == [2, 0]
+    assert batches[0].value_only_mask.tolist() == [False, False]
+    assert batches[1].value_only_mask.tolist() == []
+    assert torch.equal(batches[0].value_returns.cpu(), torch.from_numpy(raw[0]))
+    assert torch.equal(batches[1].value_returns.cpu(), torch.from_numpy(raw[1]))
+    assert buf._last_n_policy == 2
+    assert buf._last_n_value == T * N
+
+
 def test_gpu_tensor_rollout_selector_is_device_independent():
     """Exercise the GPU buffer's tensor selector without requiring CUDA."""
     import torch

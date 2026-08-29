@@ -546,6 +546,20 @@ class JunqiNet(nn.Module):
             "value": value,
         }
 
+    def forward_value(
+        self,
+        obs_spatial: Tensor,
+        obs_global: Tensor,
+    ) -> Tensor:
+        """Training-only value path that skips the large action head.
+
+        This reuses the exact encoder and value head from :meth:`forward`.
+        It adds no parameters and does not change the public forward inputs,
+        outputs, state dict, or checkpoint compatibility.
+        """
+        cls, _cells = self._encode(obs_spatial, obs_global)
+        return self._value(cls)
+
     @torch.no_grad()
     def act(
         self,
