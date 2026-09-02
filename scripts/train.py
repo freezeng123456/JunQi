@@ -233,11 +233,13 @@ def train(cfg: TrainConfig) -> None:
     world_size, global_rank, _local_rank = _init_distributed(cfg)
     is_rank0 = global_rank == 0
     is_distributed = world_size > 1
-    if is_distributed and cfg.rollout.storage_mode == "compact_history":
-        raise ValueError(
-            "rollout.storage_mode=compact_history currently supports "
-            "single-GPU training only"
-        )
+
+    # ``compact_history`` is process-local: every DDP rank owns a distinct
+    # GpuRollout, CUDA device, history allocation, and minibatch reconstruction
+    # stream.  No history tensor is shared or reduced across ranks; DDP only
+    # synchronises the gradients produced from each rank's reconstructed
+    # minibatches.  Keeping the optimized storage path enabled is important for
+    # large H20 rollouts, where ``full_obs`` would consume most of each GPU.
 
     # ---- Reproducibility ----
     torch.manual_seed(cfg.seed)

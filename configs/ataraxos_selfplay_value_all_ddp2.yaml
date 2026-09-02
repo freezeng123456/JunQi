@@ -1,0 +1,13 @@
+# Two-rank H20 continuation profile for the current 10.8M Ataraxos run.
+#
+# ``env.num_envs`` is per rank in scripts/train.py.  Halving it from 2048 to
+# 1024 preserves the existing global 2048-env rollout, the global all-valid
+# value batch, and checkpoint/rollout schedule semantics when world_size=2.
+# Both ranks retain the compact-history engineering path; model forward I/O and
+# checkpoint structure are unchanged.
+extends: ataraxos_selfplay_value_all.yaml
+
+env:
+  num_envs: 1024
+
+save_dir: exps/ataraxos_selfplay_value_all_ddp2
