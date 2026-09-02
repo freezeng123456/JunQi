@@ -21,6 +21,9 @@ namespace {
 
 constexpr int OBSERVER_BELIEF_STRIDE = NUM_TRACKED_TYPES * NUM_CELLS;
 constexpr int CM_OBSERVER_STRIDE = CM_NUM_PIDS;
+// Public/theory-of-mind combat-memory channels read the adjacent opponents'
+// observer slices.  Retain all four slices so reconstruction is input-exact.
+constexpr int CM_HISTORY_STRIDE = NUM_SEATS * CM_OBSERVER_STRIDE;
 
 template <typename T>
 __global__ void snapshot_observer_slice_kernel(
@@ -193,22 +196,22 @@ DeviceRolloutHistory::DeviceRolloutHistory(int steps, int envs)
   ALLOC_HISTORY(d_history_count, 1, int32_t);
   ALLOC_HISTORY(d_observer_belief, OBSERVER_BELIEF_STRIDE, float);
 
-  ALLOC_HISTORY(d_cm_direct_lo, CM_OBSERVER_STRIDE, uint64_t);
-  ALLOC_HISTORY(d_cm_direct_hi, CM_OBSERVER_STRIDE, uint64_t);
-  ALLOC_HISTORY(d_cm_direct_type, CM_OBSERVER_STRIDE, uint16_t);
-  ALLOC_HISTORY(d_cm_last_direct_step, CM_OBSERVER_STRIDE, int16_t);
-  ALLOC_HISTORY(d_cm_direct_other_count, CM_OBSERVER_STRIDE, int16_t);
-  ALLOC_HISTORY(d_cm_chain_lo, CM_OBSERVER_STRIDE, uint64_t);
-  ALLOC_HISTORY(d_cm_chain_hi, CM_OBSERVER_STRIDE, uint64_t);
-  ALLOC_HISTORY(d_cm_chain_type, CM_OBSERVER_STRIDE, uint16_t);
-  ALLOC_HISTORY(d_cm_last_chain_step, CM_OBSERVER_STRIDE, int16_t);
-  ALLOC_HISTORY(d_cm_eaten_by_pid_lo, CM_OBSERVER_STRIDE, uint64_t);
-  ALLOC_HISTORY(d_cm_eaten_by_pid_hi, CM_OBSERVER_STRIDE, uint64_t);
-  ALLOC_HISTORY(d_cm_rank_floor, CM_OBSERVER_STRIDE, int8_t);
-  ALLOC_HISTORY(d_cm_rank_floor_step, CM_OBSERVER_STRIDE, int16_t);
-  ALLOC_HISTORY(d_cm_is_gongb, CM_OBSERVER_STRIDE, bool);
-  ALLOC_HISTORY(d_cm_not_gongb, CM_OBSERVER_STRIDE, bool);
-  ALLOC_HISTORY(d_cm_attacked_by_known_gongb, CM_OBSERVER_STRIDE, bool);
+  ALLOC_HISTORY(d_cm_direct_lo, CM_HISTORY_STRIDE, uint64_t);
+  ALLOC_HISTORY(d_cm_direct_hi, CM_HISTORY_STRIDE, uint64_t);
+  ALLOC_HISTORY(d_cm_direct_type, CM_HISTORY_STRIDE, uint16_t);
+  ALLOC_HISTORY(d_cm_last_direct_step, CM_HISTORY_STRIDE, int16_t);
+  ALLOC_HISTORY(d_cm_direct_other_count, CM_HISTORY_STRIDE, int16_t);
+  ALLOC_HISTORY(d_cm_chain_lo, CM_HISTORY_STRIDE, uint64_t);
+  ALLOC_HISTORY(d_cm_chain_hi, CM_HISTORY_STRIDE, uint64_t);
+  ALLOC_HISTORY(d_cm_chain_type, CM_HISTORY_STRIDE, uint16_t);
+  ALLOC_HISTORY(d_cm_last_chain_step, CM_HISTORY_STRIDE, int16_t);
+  ALLOC_HISTORY(d_cm_eaten_by_pid_lo, CM_HISTORY_STRIDE, uint64_t);
+  ALLOC_HISTORY(d_cm_eaten_by_pid_hi, CM_HISTORY_STRIDE, uint64_t);
+  ALLOC_HISTORY(d_cm_rank_floor, CM_HISTORY_STRIDE, int8_t);
+  ALLOC_HISTORY(d_cm_rank_floor_step, CM_HISTORY_STRIDE, int16_t);
+  ALLOC_HISTORY(d_cm_is_gongb, CM_HISTORY_STRIDE, bool);
+  ALLOC_HISTORY(d_cm_not_gongb, CM_HISTORY_STRIDE, bool);
+  ALLOC_HISTORY(d_cm_attacked_by_known_gongb, CM_HISTORY_STRIDE, bool);
 
 #undef ALLOC_HISTORY
 }
@@ -321,19 +324,8 @@ void DeviceRolloutHistory::snapshot(
   SNAPSHOT_ROWS(d_history_write_idx, state.d_history_write_idx, 1, int32_t);
   SNAPSHOT_ROWS(d_history_count, state.d_history_count, 1, int32_t);
 
-#undef SNAPSHOT_ROWS
-
-  launch_snapshot_observer_slice(
-      belief,
-      acting_seats,
-      d_observer_belief,
-      num_envs,
-      step,
-      OBSERVER_BELIEF_STRIDE);
-
-#define SNAPSHOT_CM(destination, source, T)                                     \
-  launch_snapshot_observer_slice(                                               \
-      source, acting_seats, destination, num_envs, step, CM_OBSERVER_STRIDE)
+#define SNAPSHOT_CM(destination, source, T)                                    \
+  SNAPSHOT_ROWS(destination, source, CM_HISTORY_STRIDE, T)
 
   SNAPSHOT_CM(d_cm_direct_lo, state.d_cm_direct_lo, uint64_t);
   SNAPSHOT_CM(d_cm_direct_hi, state.d_cm_direct_hi, uint64_t);
@@ -359,6 +351,17 @@ void DeviceRolloutHistory::snapshot(
       bool);
 
 #undef SNAPSHOT_CM
+
+#undef SNAPSHOT_ROWS
+
+  launch_snapshot_observer_slice(
+      belief,
+      acting_seats,
+      d_observer_belief,
+      num_envs,
+      step,
+      OBSERVER_BELIEF_STRIDE);
+
   KERNEL_CHECK();
 }
 
@@ -447,24 +450,8 @@ RolloutHistoryReconstruction DeviceRolloutHistory::reconstruct(
       int32_t);
   GATHER_ROWS(d_history_count, replay_state->d_history_count, 1, int32_t);
 
-#undef GATHER_ROWS
-
-  launch_gather_observer_slice(
-      d_observer_belief,
-      flat_indices,
-      acting_seats,
-      d_replay_belief,
-      batch_size,
-      OBSERVER_BELIEF_STRIDE);
-
 #define GATHER_CM(source, destination, T)                                      \
-  launch_gather_observer_slice(                                                 \
-      source,                                                                   \
-      flat_indices,                                                             \
-      acting_seats,                                                             \
-      destination,                                                              \
-      batch_size,                                                               \
-      CM_OBSERVER_STRIDE)
+  GATHER_ROWS(source, destination, CM_HISTORY_STRIDE, T)
 
   GATHER_CM(d_cm_direct_lo, replay_state->d_cm_direct_lo, uint64_t);
   GATHER_CM(d_cm_direct_hi, replay_state->d_cm_direct_hi, uint64_t);
@@ -505,6 +492,17 @@ RolloutHistoryReconstruction DeviceRolloutHistory::reconstruct(
       bool);
 
 #undef GATHER_CM
+
+#undef GATHER_ROWS
+
+  launch_gather_observer_slice(
+      d_observer_belief,
+      flat_indices,
+      acting_seats,
+      d_replay_belief,
+      batch_size,
+      OBSERVER_BELIEF_STRIDE);
+
   KERNEL_CHECK();
 
   build_observation_single_seat(

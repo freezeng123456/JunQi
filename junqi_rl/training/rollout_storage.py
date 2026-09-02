@@ -38,7 +38,7 @@ _COMPACT_CORE_BYTES = (
     + 2 * 4  # history write index / count
 )
 _OBSERVER_BELIEF_BYTES = 12 * 289 * 4
-_OBSERVER_COMBAT_MEMORY_BYTES = (
+_ALL_OBSERVERS_COMBAT_MEMORY_BYTES = 4 * (
     6 * 120 * 8  # six uint64 pid bitmaps
     + 2 * 120 * 2  # direct/chain type uint16
     + 4 * 120 * 2  # four int16 counters/steps
@@ -48,7 +48,7 @@ _OBSERVER_COMBAT_MEMORY_BYTES = (
 COMPACT_HISTORY_BYTES_PER_TRANSITION = (
     _COMPACT_CORE_BYTES
     + _OBSERVER_BELIEF_BYTES
-    + _OBSERVER_COMBAT_MEMORY_BYTES
+    + _ALL_OBSERVERS_COMBAT_MEMORY_BYTES
 )
 
 

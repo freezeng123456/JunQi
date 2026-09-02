@@ -49,7 +49,9 @@ def _ddp_compact_history_worker(
         num_envs = 2
         num_steps = 2
         rollout = GpuRollout(num_envs=num_envs, device_id=rank)
-        rollout.reset(seed_base=700 + rank * 100)
+        # Seed 800 reaches a public combat-memory feature on the second step.
+        # This catches accidental acting-observer-only history snapshots.
+        rollout.reset(seed_base=800)
         history = rollout.create_rollout_history(num_steps)
 
         expected_spatial = []
