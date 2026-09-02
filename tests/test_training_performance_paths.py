@@ -112,7 +112,7 @@ def test_distributed_ppo_still_aligns_minibatch_count(monkeypatch) -> None:
     assert metrics["train/num_updates"] == 2.0
 
 
-def test_compact_history_rejects_ddp_until_index_plans_are_shared(
+def test_distributed_fixed_timestep_plan_streams_compact_history(
     monkeypatch,
 ) -> None:
     trainer = object.__new__(PPOTrainer)
@@ -122,12 +122,38 @@ def test_compact_history_rejects_ddp_until_index_plans_are_shared(
     )
     trainer._nan_skip_count = 0
     trainer._grad_nan_skip_count = 0
+    trainer.device = torch.device("cpu")
+    trainer.num_rollout = 0
+    trainer._policy_unwrapped = object()
+    trainer.ema = _FakeEMA()
     trainer._sync_collect_policy = lambda: None
-    rollout = SimpleNamespace(uses_compact_history=True)
+    consumed: list[int] = []
+
+    class Rollout:
+        uses_compact_history = True
+        minibatch_group = "timestep"
+        value_sample_scope = "all_valid"
+
+        def minibatches(self, *_args, **_kwargs):
+            yield from range(3)
+
+        def stats(self):
+            return {}
+
+    def update_step(batch_index: int) -> dict[str, object]:
+        consumed.append(batch_index)
+        return {
+            "train/test_loss": torch.tensor(float(batch_index)),
+            "train/batch_size": 2,
+        }
+
+    trainer._update_step = update_step
     monkeypatch.setattr(ppo_module, "_is_distributed", lambda: True)
 
-    with pytest.raises(RuntimeError, match="single-GPU"):
-        trainer.train_epoch(rollout)
+    metrics = trainer.train_epoch(Rollout())
+
+    assert consumed == [0, 1, 2]
+    assert metrics["train/num_updates"] == 3.0
 
 
 def test_h20_observation_storage_matches_bfloat16_compute() -> None:
