@@ -103,7 +103,17 @@ echo "[launch] extra args:  $*"
 # --standalone: torchrun spins up the rendezvous server itself; no etcd needed.
 # --nproc_per_node: number of GPU processes for this node.
 # --master_port: keeps multiple concurrent DDP groups from clobbering each other.
-exec torchrun \
+PYTHON_BIN="${PYTHON_EXECUTABLE:-python3}"
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+    echo "[launch] Python interpreter not found: $PYTHON_BIN"
+    exit 1
+fi
+echo "[launch] Python:      $PYTHON_BIN"
+
+# Invoke the module through the selected interpreter instead of relying on a
+# torchrun console-script shebang, which is often stale after a shared conda
+# environment is moved or mounted on another host.
+exec "$PYTHON_BIN" -m torch.distributed.run \
     --standalone \
     --nproc_per_node="$NPROC" \
     --master_port="$MASTER_PORT" \
