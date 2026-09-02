@@ -54,6 +54,8 @@ configure_cmd = [
     CUDA_SRC,
     "-B", BUILD_DIR,
     f"-Dpybind11_DIR={PYBIND11_DIR}",
+    # Keep CMake on the same conda Python that invoked this build script.
+    f"-DPython3_EXECUTABLE={PYTHON_EXEC}",
     f"-DCMAKE_CUDA_ARCHITECTURES={CUDA_ARCH}",
     f"-DCMAKE_CUDA_COMPILER=/jizhicfs/yuyechen/miniconda3/envs/cl/bin/nvcc",
     f"-DCMAKE_INSTALL_PREFIX={INSTALL_TO}",

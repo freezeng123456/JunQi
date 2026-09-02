@@ -104,6 +104,22 @@ def test_value_all_config_only_decouples_value_sampling() -> None:
     assert _dataclass_to_dict(value_all) == expected
 
 
+def test_ddp2_value_all_config_preserves_global_rollout_size() -> None:
+    value_all = load_config(
+        _args(ROOT / "configs" / "ataraxos_selfplay_value_all.yaml")
+    )
+    ddp2 = load_config(
+        _args(ROOT / "configs" / "ataraxos_selfplay_value_all_ddp2.yaml")
+    )
+
+    expected = _dataclass_to_dict(value_all)
+    expected["env"]["num_envs"] = value_all.env.num_envs // 2
+    expected["save_dir"] = "exps/ataraxos_selfplay_value_all_ddp2"
+    assert ddp2.rollout.storage_mode == "compact_history"
+    assert ddp2.env.num_envs * 2 == value_all.env.num_envs
+    assert _dataclass_to_dict(ddp2) == expected
+
+
 def test_all_valid_value_scope_requires_timestep_minibatches() -> None:
     cfg = TrainConfig()
     cfg.ppo.value_sample_scope = "all_valid"

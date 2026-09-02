@@ -20,20 +20,20 @@ def test_full_observation_storage_matches_tensor_schema() -> None:
     assert estimate.bytes_per_transition == 239_246
 
 
-def test_compact_history_accounts_for_observer_slices_only() -> None:
+def test_compact_history_accounts_for_all_combat_memory_observers() -> None:
     estimate = estimate_rollout_storage(
         num_envs=1,
         steps_per_env=1,
         storage_mode="compact_history",
     )
 
-    assert COMPACT_HISTORY_BYTES_PER_TRANSITION == 24_203
-    assert estimate.observation_bytes == 24_203
+    assert COMPACT_HISTORY_BYTES_PER_TRANSITION == 47_243
+    assert estimate.observation_bytes == 47_243
     assert estimate.legal_bytes == 0
-    assert estimate.bytes_per_transition == 24_229
+    assert estimate.bytes_per_transition == 47_269
 
 
-def test_compact_history_reduces_baseline_rollout_by_about_tenfold() -> None:
+def test_compact_history_reduces_baseline_rollout_by_about_fivefold() -> None:
     full = estimate_rollout_storage(
         num_envs=128,
         steps_per_env=512,
@@ -46,8 +46,8 @@ def test_compact_history_reduces_baseline_rollout_by_about_tenfold() -> None:
     )
 
     assert full.total_gib == pytest.approx(14.60, abs=0.02)
-    assert compact.total_gib == pytest.approx(1.48, abs=0.02)
-    assert compact.total_bytes / full.total_bytes < 0.11
+    assert compact.total_gib == pytest.approx(2.89, abs=0.02)
+    assert compact.total_bytes / full.total_bytes < 0.20
 
 
 @pytest.mark.parametrize("storage_mode", ["full_obs", "compact_history"])

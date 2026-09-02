@@ -880,11 +880,6 @@ class PPOTrainer:
         separate chunk path is retained. All gradients accumulate before one
         clip/optimizer step, preserving timestep-step semantics.
         """
-        if _is_distributed():
-            raise RuntimeError(
-                "value_sample_scope='all_valid' currently supports single-GPU "
-                "PPO only; DDP needs matched multi-backward chunk scheduling"
-            )
         cfg = self.cfg
         temp = self._get_temperature()
         self._policy_for_train.eval()
@@ -919,6 +914,13 @@ class PPOTrainer:
             policy_value_indices is not None
             and n_value <= value_chunk_size
         )
+        distributed = _is_distributed()
+        if distributed and not shared_encoder:
+            raise RuntimeError(
+                "distributed value_sample_scope='all_valid' requires each "
+                "rank's value row to fit value_minibatch_size so every rank "
+                "executes one matched backward pass"
+            )
 
         zero = torch.zeros((), device=self.device)
         policy_loss = zero
@@ -1082,13 +1084,19 @@ class PPOTrainer:
                         value_sp, value_gl,
                     )
                     policy_total = zero
-                if (
+                bad_forward = (
                     bool((~torch.isfinite(value_pred)).any())
                     or (
                         n_policy
                         and bool((~torch.isfinite(new_log_probs_all)).any())
                     )
-                ):
+                )
+                bad_forward_any = torch.tensor(
+                    int(bad_forward), device=self.device, dtype=torch.long,
+                )
+                if distributed:
+                    dist.all_reduce(bad_forward_any, op=dist.ReduceOp.MAX)
+                if int(bad_forward_any.item()) != 0:
                     self.optimizer.zero_grad(set_to_none=True)
                     self._nan_skip_count += 1
                     self.num_train_step += 1
@@ -1166,6 +1174,29 @@ class PPOTrainer:
 
         if self._scaler is not None:
             self._scaler.unscale_(self.optimizer)
+        if distributed:
+            # The fused shared policy/value entrypoint is intentionally called
+            # on the unwrapped model.  Reduce its accumulated gradients once,
+            # after backward and unscale, to match DDP's averaged-gradient
+            # semantics without retaining one reconstructed batch per step.
+            world_size = float(_world_size())
+            gradients: list[Tensor] = []
+            for parameter in self._policy_unwrapped.parameters():
+                if parameter.grad is None:
+                    parameter.grad = torch.zeros_like(parameter)
+                gradients.append(parameter.grad)
+            flat_gradient = torch.cat(
+                [gradient.reshape(-1) for gradient in gradients], dim=0,
+            )
+            dist.all_reduce(flat_gradient, op=dist.ReduceOp.SUM)
+            flat_gradient.div_(world_size)
+            offset = 0
+            for gradient in gradients:
+                numel = gradient.numel()
+                gradient.copy_(
+                    flat_gradient.narrow(0, offset, numel).view_as(gradient)
+                )
+                offset += numel
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self._policy_unwrapped.parameters(), cfg.max_grad_norm,
         )
@@ -1174,6 +1205,8 @@ class PPOTrainer:
             device=self.device,
             dtype=torch.long,
         )
+        if distributed:
+            dist.all_reduce(bad_grad, op=dist.ReduceOp.MAX)
         if int(bad_grad.item()) != 0:
             self.optimizer.zero_grad(set_to_none=True)
             if self._scaler is not None:
@@ -1523,14 +1556,6 @@ class PPOTrainer:
         cfg = self.cfg
         all_metrics: list[dict] = []
         self._sync_collect_policy()
-        if _is_distributed() and getattr(
-            rollout,
-            "uses_compact_history",
-            False,
-        ):
-            raise RuntimeError(
-                "compact_history currently supports single-GPU PPO only"
-            )
 
         for _ in range(cfg.num_epochs_per_rollout):
             batches = rollout.minibatches(
@@ -1538,7 +1563,11 @@ class PPOTrainer:
                 shuffle=True,
                 rng=rng,
             )
-            if _is_distributed():
+            fixed_batch_count = (
+                getattr(rollout, "minibatch_group", None) == "timestep"
+                and getattr(rollout, "value_sample_scope", None) == "all_valid"
+            )
+            if _is_distributed() and not fixed_batch_count:
                 # DDP ranks must execute the same number of backward passes.
                 # Materialise only in distributed mode so we can all-reduce
                 # the local batch counts and truncate to the minimum.
