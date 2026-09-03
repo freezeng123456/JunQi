@@ -58,6 +58,9 @@ ppo:
   temperature_coef: 0.1
   temperature_decay: 0.3
   temperature_floor: 0.0
+  # Keep the current exploration target explicit. This is the public-code
+  # style flat legal-action magnet, not the paper's piece-then-destination rho.
+  magnet_shape: uniform_legal
   # Split collect ``policy.act`` so 2048 envs fit the ~10M net.
   act_chunk_size: 256
   max_grad_norm: 0.267
