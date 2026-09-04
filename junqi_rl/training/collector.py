@@ -28,7 +28,7 @@ Legal mask construction
 ~~~~~~~~~~~~~~~~~~~~~~~
 The environment exposes ``legal_action_ids`` per seat (world-frame).  The
 collector rotates them to canonical frame and builds a dense bool mask over
-the 83,521-dim action space.  Rotation is performed using a pre-computed
+the 16,641-dim compact action space.  Rotation is performed using a pre-computed
 LUT (see :mod:`junqi_rl.action_lut`) — one NumPy fancy-index per env,
 replacing the old per-action Python loop.
 

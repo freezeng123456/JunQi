@@ -774,7 +774,7 @@ def collect_rollout_gpu_v2(
         obs_sp_t, obs_gl_t = rollout_world.build_acting_seat_observation_torch(acting_t)
 
         # ---- Legal mask (GPU kernel, canonical frame, zero CPU) -------------
-        lm_t = rollout_world.legal_mask_canonical_torch_device(acting_t)  # (N, 83521) bool
+        lm_t = rollout_world.legal_mask_canonical_torch_device(acting_t)  # (N, 16641) bool
 
         # ---- Policy inference (GPU autocast for Tensor Core speedup) --------
         # dtype is configurable (defaults to bf16; see resolution at function

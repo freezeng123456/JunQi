@@ -14,7 +14,8 @@ Design contract (see `docs/ARCHITECTURE.md` §4 and ADR-106, ADR-118):
     (top); `left_side_enemy` occupies canonical x in [0, 5]; `right_side_enemy`
     occupies canonical x in [11, 16].
 
-  * 256 spatial channels, 28 global scalars.  Exact layout is pinned in the
+  * `OBS_CHANNELS` spatial channels (412 as of the CombatMemory v6 layout)
+    and `OBS_GLOBAL_DIMS` global scalars (28).  Exact layout is pinned in the
     `CHANNEL_LAYOUT` / `GLOBAL_LAYOUT` module-level constants below; changes
     require an ADR.
 
@@ -392,8 +393,8 @@ class ObservationBuilder:
 
     Owns 3 pre-allocated NumPy buffers:
 
-      * ``_world``     (256, 17, 17) float32 — world-frame scratch.
-      * ``_canonical`` (256, 17, 17) float32 — canonical-frame output.
+      * ``_world``     (OBS_CHANNELS, 17, 17) float32 — world-frame scratch.
+      * ``_canonical`` (OBS_CHANNELS, 17, 17) float32 — canonical-frame output.
       * ``_global``    (28,)         float32 — global feature vector.
 
     :meth:`build` zeros the buffers, runs the 16 vectorized writers, runs a
@@ -559,8 +560,8 @@ class ObservationBuilder:
         state: GameState,
         belief: BeliefTensor,
         observer: Seat,
-        world_buf: np.ndarray,        # scratch (256, 17, 17) float32
-        canonical_out: np.ndarray,    # final   (256, 17, 17) float32
+        world_buf: np.ndarray,        # scratch (OBS_CHANNELS, 17, 17) float32
+        canonical_out: np.ndarray,    # final   (OBS_CHANNELS, 17, 17) float32
         global_out: np.ndarray,       # final   (28,)          float32
     ) -> None:
         """Core assembly logic used by every public entry point."""
