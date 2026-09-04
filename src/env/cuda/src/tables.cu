@@ -64,6 +64,7 @@ __constant__ int16_t ENG_RAIL_CELLS[ENG_NUM_RAIL];
 __constant__ int8_t  ENG_RAIL_TO_IDX[289];
 __constant__ int8_t  ENG_RAIL_ADJ[ENG_NUM_RAIL * ENG_ADJ_WIDTH];
 __constant__ int8_t  CURVE_RAIL_OF[289];
+__constant__ bool    CURVE_ARC_FLAT[289];
 
 // ---------------------------------------------------------------------------
 // Board geometry (replicated from junqi_core.rail_topology)
@@ -408,6 +409,16 @@ void init_tables() {
         CUDA_CHECK(cudaMemcpyToSymbol(ON_BOARD_FLAT,   g_props.on_board,      289));
         CUDA_CHECK(cudaMemcpyToSymbol(NINE_GRID_FLAT,  g_props.is_nine_grid,  289));
         CUDA_CHECK(cudaMemcpyToSymbol(CURVE_RAIL_OF,   g_props.curve_rail,    289));
+    }
+    {
+        // The 8 cells adjoining an arc link, derived from the same SPC_EDGES
+        // the rail graph is built from.
+        bool arc[289] = {false};
+        for (const auto& e : SPC_EDGES) {
+            arc[flat(e.first.first,  e.first.second)]  = true;
+            arc[flat(e.second.first, e.second.second)] = true;
+        }
+        CUDA_CHECK(cudaMemcpyToSymbol(CURVE_ARC_FLAT, arc, sizeof(arc)));
     }
     {
         static int16_t rays[289 * 4 * STRAIGHT_RAY_LEN];

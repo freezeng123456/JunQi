@@ -48,13 +48,13 @@ import numpy as np
 
 from .board import (
     BOARD_SIZE,
-    cell_info,
     is_camp,
     is_nine_grid,
     is_railway,
     is_stronghold,
 )
 from .info_model import NUM_TRACKED_TYPES, TRACKED_TYPES, BeliefTensor
+from .rail_topology import CURVE_ARC_CELLS
 from .rotation import rotate_planes
 from .rules import (
     MAX_NUM_MOVES,
@@ -293,21 +293,21 @@ def _build_board_static_world() -> np.ndarray:
     canonical frame.  A plane that is not rotation-invariant would encode the
     observer's seat identity, which the canonical frame exists to remove.
 
-    That rules out a one-hot-per-curve encoding: ``rot90`` permutes the four
-    corner curves in a 4-cycle (1 -> 4 -> 3 -> 2), so "curve 1" would light up
-    a different corner for each observer.  Plane 4 therefore marks the union
-    of all four curves, which is rotation-invariant and is what movement
-    generation actually keys on.  Plane 5 is reserved; distinguishing
-    individual curves needs one plane per curve, which would change
-    ``OBS_CHANNELS``.
+    Plane 4 marks the 8 cells that adjoin a curved (arc) rail link, one pair
+    per board corner.  That is the only rail information the railway plane
+    does not already carry: every other rail run is straight, and the arc is
+    the sole place a non-engineer may leave one.
 
-    The ``is_railway`` guard is required, not redundant.  ``CURVE_RAIL_OF``
-    faithfully reproduces the legacy ``InitCurveRail`` loop, which tags two
-    headquarters-row cells per curve that are not railway at all; see the note
-    in :mod:`junqi_core.rail_topology`.  Move generation never sees them
-    because it checks ``is_railway`` on both endpoints before consulting the
-    curve id, so this plane must apply the same filter.  The result is
-    4 curves x 10 rail cells = 40.
+    It is deliberately *not* ``CURVE_RAIL_OF > 0``.  That id groups the two
+    straight runs meeting at each corner so ``_same_curve_rail`` can join
+    them, which covers 40 rail cells; 32 of those are ordinary straight rail
+    that the railway plane has already marked, so encoding them here would
+    just restate it.  A one-hot per curve id is wrong for a second reason:
+    ``rot90`` permutes the four corner curves in a 4-cycle (1 -> 4 -> 3 -> 2),
+    so "curve 1" would light a different corner for each observer.  The arc
+    set is rotation-invariant.
+
+    Plane 5 is reserved.
     """
     planes = np.zeros((6, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
     for y in range(BOARD_SIZE):
@@ -320,7 +320,7 @@ def _build_board_static_world() -> np.ndarray:
                 planes[2, y, x] = 1.0
             if is_nine_grid(x, y):
                 planes[3, y, x] = 1.0
-            if is_railway(x, y) and cell_info(x, y).curve_rail != 0:
+            if CURVE_ARC_CELLS[y * BOARD_SIZE + x]:
                 planes[4, y, x] = 1.0
     return planes
 

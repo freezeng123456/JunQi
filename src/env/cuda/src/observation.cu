@@ -471,15 +471,12 @@ __global__ void observation_kernel(
         if (STRONGHOLD_FLAT[f]) spatial[(CH_BOARD_STATIC + 1) * PLANE + off] = 1.0f;
         if (RAIL_FLAT[f])       spatial[(CH_BOARD_STATIC + 2) * PLANE + off] = 1.0f;
         if (NINE_GRID_FLAT[f])  spatial[(CH_BOARD_STATIC + 3) * PLANE + off] = 1.0f;
-        // Plane 4 marks the union of all four corner curves, matching
-        // _build_board_static_world() on the CPU.  Per-curve one-hot planes
-        // would not survive the canonical rotation (rot90 permutes the curve
-        // ids), so the id itself is deliberately not encoded here.  The
-        // RAIL_FLAT guard is required: CURVE_RAIL_OF mirrors the legacy
-        // InitCurveRail loop, which also tags two non-railway headquarters
-        // cells per curve.  40 cells light up, not 48.
-        if (RAIL_FLAT[f] && CURVE_RAIL_OF[f] != 0)
-            spatial[(CH_BOARD_STATIC + 4) * PLANE + off] = 1.0f;
+        // Plane 4 marks the 8 cells adjoining an arc rail link, matching
+        // _build_board_static_world() on the CPU.  Not CURVE_RAIL_OF: that id
+        // spans 40 rail cells, 32 of which are ordinary straight rail already
+        // covered by RAIL_FLAT.  A per-curve one-hot would also break the
+        // canonical rotation, which permutes the curve ids.
+        if (CURVE_ARC_FLAT[f]) spatial[(CH_BOARD_STATIC + 4) * PLANE + off] = 1.0f;
         // Plane 5 is reserved and stays 0.
     }
 

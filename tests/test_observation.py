@@ -152,14 +152,15 @@ _BOARD_STATIC_PLANES: tuple[tuple[str, int], ...] = (
     ("stronghold", 8),
     ("railway", 73),
     ("nine_grid", 9),
-    # 4 curves x 10 rail cells.  NOT 48: CURVE_RAIL_OF mirrors the legacy
-    # InitCurveRail loop, which also tags two headquarters cells per curve
-    # that carry no rail.  See test_curve_rail_plane_is_a_subset_of_railway.
-    ("curve_rail", 40),
+    # Two arc endpoints per board corner.  Not 40 (CURVE_RAIL_OF filtered to
+    # rail) and not 48 (CURVE_RAIL_OF raw): the arc is a property of an edge,
+    # and the 32 further cells CURVE_RAIL_OF groups with it are ordinary
+    # straight rail that the railway plane already marks.
+    ("curve_arc", 8),
     ("reserved", 0),
 )
 _CH_RAILWAY = 2
-_CH_CURVE_RAIL = 4
+_CH_CURVE_ARC = 4
 
 
 def test_board_static_planes_have_expected_occupancy() -> None:
@@ -172,23 +173,38 @@ def test_board_static_planes_have_expected_occupancy() -> None:
         )
 
 
-def test_curve_rail_plane_is_a_subset_of_railway() -> None:
-    """A curve-rail move needs both endpoints to be rail, so the curve plane
-    may never light a cell the railway plane leaves dark.
+def test_curve_arc_plane_marks_exactly_the_arc_endpoints() -> None:
+    """The arc plane must carry only what the railway plane does not.
 
-    ``CURVE_RAIL_OF`` alone does not satisfy this: it reproduces the legacy
-    ``InitCurveRail`` loop, whose ``j % 5 == 4`` test also matches slot 29 and
-    pairs it with slot 25, tagging two headquarters cells per curve. Move
-    generation filters them out via ``is_railway``; so must the observation.
+    An arc is a property of an edge: each board corner has one diagonal rail
+    link, and its two endpoints are the only cells where a non-engineer may
+    leave a straight rail run. ``CURVE_RAIL_OF`` is a coarser thing — it
+    groups the two straight runs meeting at a corner so ``_same_curve_rail``
+    can join them — so using it here would restate 32 ordinary rail cells the
+    railway plane has already marked, and 8 headquarters cells that carry no
+    rail at all.
     """
     static = _obs_for(_random_opening(), Seat.SOUTH).channel("board_static")
-    curve = static[_CH_CURVE_RAIL] > 0
+    arc = static[_CH_CURVE_ARC] > 0
     railway = static[_CH_RAILWAY] > 0
-    leaked = curve & ~railway
+
+    leaked = arc & ~railway
     assert not leaked.any(), (
-        f"{int(leaked.sum())} curve_rail cells are not railway cells: "
+        f"{int(leaked.sum())} arc cells are not railway cells: "
         f"{[(int(x), int(y)) for y, x in zip(*np.where(leaked))]}"
     )
+
+    # Cross-check against the rail graph itself: an arc cell is exactly a rail
+    # cell with a diagonal rail neighbour.
+    from junqi_core.rail_topology import RAIL_ADJ
+
+    expected = set()
+    for f, nbrs in enumerate(RAIL_ADJ):
+        for n in nbrs:
+            if abs(f % 17 - n % 17) == 1 and abs(f // 17 - n // 17) == 1:
+                expected.add((f % 17, f // 17))
+    got = {(int(x), int(y)) for y, x in zip(*np.where(arc))}
+    assert got == expected, f"arc plane {sorted(got)} != graph {sorted(expected)}"
 
 
 @pytest.mark.parametrize("observer", list(ALL_SEATS))

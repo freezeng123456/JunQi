@@ -104,8 +104,20 @@ extern __constant__ int8_t  ENG_RAIL_ADJ[ENG_NUM_RAIL * ENG_ADJ_WIDTH];
 // inner corners).  On the rail graph these are connected via the
 // AddSpcNode diagonal edges, so curve-rail BFS is just "rail BFS where
 // every step must stay on the same curve".
+// NOTE: only 10 of each 12 are railway — the legacy InitCurveRail loop also
+// tags two headquarters cells per curve.  Always pair this with RAIL_FLAT.
 // ---------------------------------------------------------------------------
 extern __constant__ int8_t CURVE_RAIL_OF[289];
+
+// ---------------------------------------------------------------------------
+// CURVE_ARC_FLAT[flat]        = true for the 8 cells that adjoin an
+//                               AddSpcNode diagonal (arc) link, two per board
+//                               corner.  The arc belongs to the edge, not the
+//                               cell: these are the only points where a
+//                               non-engineer may leave a straight rail run.
+//                               Mirrors junqi_core.rail_topology.CURVE_ARC_CELLS.
+// ---------------------------------------------------------------------------
+extern __constant__ bool CURVE_ARC_FLAT[289];
 
 // Host functions
 void init_tables();
