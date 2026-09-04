@@ -55,7 +55,12 @@ from junqi_core.observation import (
 from junqi_core.rotation import canonical_to_world, world_to_canonical
 from junqi_core.rules import ALL_SEATS, Seat, ShowMode
 from junqi_core.setup import generate_random_setup
-from junqi_core.state import Action, GameState, MoveResult
+from junqi_core.state import (
+    Action,
+    GameState,
+    MoveResult,
+    classify_termination,
+)
 from junqi_core.board import (
     NUM_ON_BOARD_CELLS,
     COMPACT_TO_FLAT,
@@ -172,7 +177,9 @@ class JunqiStepInfo:
     winner_team
         0, 1, or None.  Defined only when ``terminated and not draw``.
     termination_reason
-        Terminal reason string (``state.termination_reason``) or None.
+        Why the game ended, or None while it is still running.  Either
+        ``"max_num_moves"`` for the env-level move cap, or one of the labels
+        from :func:`junqi_core.state.classify_termination`.
     """
 
     acting_seat: Seat
@@ -308,7 +315,8 @@ class JunqiEnv:
             ),
             termination_reason=(
                 "max_num_moves" if forced_draw
-                else getattr(new_state, "termination_reason", None)
+                else classify_termination(new_state, result) if done
+                else None
             ),
         )
         return obs, reward, done, info
@@ -367,7 +375,8 @@ class JunqiEnv:
             ),
             termination_reason=(
                 "max_num_moves" if forced_draw
-                else getattr(new_state, "termination_reason", None)
+                else classify_termination(new_state, result) if done
+                else None
             ),
         )
         return reward, done, info

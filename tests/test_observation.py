@@ -141,6 +141,90 @@ def test_board_static_is_constant_across_games() -> None:
     assert np.array_equal(a, b)
 
 
+# Plane order of the board_static group, with the exact number of cells each
+# one must light up.  Pinning the counts is what makes this test non-vacuous:
+# the curve_rail plane was silently all-zero for a long time because it was
+# read through ``getattr(info, "curve_rail_id", 0)`` while the attribute is
+# named ``curve_rail``, and every other check on this group (cross-observer
+# equality, CPU/GPU parity) is satisfied by two zero planes.
+_BOARD_STATIC_PLANES: tuple[tuple[str, int], ...] = (
+    ("camp", 20),
+    ("stronghold", 8),
+    ("railway", 73),
+    ("nine_grid", 9),
+    # Two arc endpoints per board corner.  Not 40 (CURVE_RAIL_OF filtered to
+    # rail) and not 48 (CURVE_RAIL_OF raw): the arc is a property of an edge,
+    # and the 32 further cells CURVE_RAIL_OF groups with it are ordinary
+    # straight rail that the railway plane already marks.
+    ("curve_arc", 8),
+    ("reserved", 0),
+)
+_CH_RAILWAY = 2
+_CH_CURVE_ARC = 4
+
+
+def test_board_static_planes_have_expected_occupancy() -> None:
+    static = _obs_for(_random_opening(), Seat.SOUTH).channel("board_static")
+    assert static.shape[0] == len(_BOARD_STATIC_PLANES)
+    for idx, (name, expected) in enumerate(_BOARD_STATIC_PLANES):
+        assert int(static[idx].sum()) == expected, (
+            f"board_static plane {idx} ({name}) lit {int(static[idx].sum())} "
+            f"cells, expected {expected}"
+        )
+
+
+def test_curve_arc_plane_marks_exactly_the_arc_endpoints() -> None:
+    """The arc plane must carry only what the railway plane does not.
+
+    An arc is a property of an edge: each board corner has one diagonal rail
+    link, and its two endpoints are the only cells where a non-engineer may
+    leave a straight rail run. ``CURVE_RAIL_OF`` is a coarser thing — it
+    groups the two straight runs meeting at a corner so ``_same_curve_rail``
+    can join them — so using it here would restate 32 ordinary rail cells the
+    railway plane has already marked, and 8 headquarters cells that carry no
+    rail at all.
+    """
+    static = _obs_for(_random_opening(), Seat.SOUTH).channel("board_static")
+    arc = static[_CH_CURVE_ARC] > 0
+    railway = static[_CH_RAILWAY] > 0
+
+    leaked = arc & ~railway
+    assert not leaked.any(), (
+        f"{int(leaked.sum())} arc cells are not railway cells: "
+        f"{[(int(x), int(y)) for y, x in zip(*np.where(leaked))]}"
+    )
+
+    # Cross-check against the rail graph itself: an arc cell is exactly a rail
+    # cell with a diagonal rail neighbour.
+    from junqi_core.rail_topology import RAIL_ADJ
+
+    expected = set()
+    for f, nbrs in enumerate(RAIL_ADJ):
+        for n in nbrs:
+            if abs(f % 17 - n % 17) == 1 and abs(f // 17 - n // 17) == 1:
+                expected.add((f % 17, f // 17))
+    got = {(int(x), int(y)) for y, x in zip(*np.where(arc))}
+    assert got == expected, f"arc plane {sorted(got)} != graph {sorted(expected)}"
+
+
+@pytest.mark.parametrize("observer", list(ALL_SEATS))
+def test_board_static_planes_are_rotation_invariant(observer: Seat) -> None:
+    """Each plane must be unchanged by 90-degree rotation.
+
+    The stack is built in the world frame and then rotated into the
+    observer's canonical frame, so a plane that is not rotation-invariant
+    encodes the observer's seat identity.  A one-hot-per-curve encoding fails
+    here: rot90 permutes the four corner curves in a 4-cycle.
+    """
+    static = _obs_for(_random_opening(), observer).channel("board_static")
+    for idx, (name, _) in enumerate(_BOARD_STATIC_PLANES):
+        for k in (1, 2, 3):
+            assert np.array_equal(np.rot90(static[idx], k), static[idx]), (
+                f"board_static plane {idx} ({name}) changes under rot90(k={k}); "
+                f"it would leak the observer's seat into a canonical feature"
+            )
+
+
 # ===========================================================================
 # C. Canonical-frame geometry (core promise of ADR-111 rename)
 # ===========================================================================

@@ -150,7 +150,25 @@ assert NUM_RAIL_CELLS == 73, (
 #             ChessPos[i][j].eCurveRail           = i + 1
 #             ChessPos[(i+1)%4][j-4].eCurveRail   = i + 1
 #
-# This produces a set of 12-cell "L-shaped" rail groups at the 4 inner corners.
+# This produces a set of 12-cell "L-shaped" groups at the 4 inner corners.
+#
+# CAUTION — only 10 of those 12 cells are railway.  Slots 0..24 form the 5x5
+# grid whose perimeter carries the rail; slots 25..29 are the headquarters row
+# and carry none.  The legacy loop runs to j < 30, so `j % 5 == 4` also picks
+# up j = 29, and its partner `j - 4` picks up slot 25 — two headquarters cells
+# per curve.  Reproducing that is deliberate: this module mirrors the legacy
+# engine and must not silently diverge from it.
+#
+# It is harmless for move generation, which checks `is_railway` on both
+# endpoints before it ever consults the curve id (see
+# `junqi_core.move_gen.is_legal_move`).  Any *other* consumer must apply the
+# same filter, or it will pick up 48 cells where the board only has 40.
+#
+# Note also what this id does and does not mean geometrically.  It groups the
+# two straight rail runs that meet at a board corner so that
+# `_same_curve_rail` can let a non-engineer travel between them.  It does not
+# say those cells are curved: the arc itself is a single edge per corner, and
+# the cells adjoining one are `CURVE_ARC_CELLS` further down.
 
 _curve_of: list[int] = [CURVE_RAIL_NONE] * NC
 
@@ -230,6 +248,32 @@ _adj_map = _build_rail_adjacency()
 RAIL_ADJ: Final[tuple[tuple[int, ...], ...]] = tuple(
     _adj_map.get(f, ()) for f in range(NC)
 )
+
+
+def _build_curve_arc_cells() -> np.ndarray:
+    """Cells that adjoin a curved (arc) rail link — the 8 corner endpoints.
+
+    The arc is the property of an *edge*, not of a cell: each board corner has
+    exactly one, the diagonal `_SPC_EDGES` link, and it is the only place a
+    non-engineer may leave a straight rail run.  Everything else on the rail
+    network is straight, so these 8 cells are the whole of the rail topology
+    that ``IS_RAILWAY`` does not already say.
+
+    Derived from the adjacency graph rather than from ``_SPC_EDGES`` directly,
+    so it stays true to whatever the graph actually contains.
+    """
+    out = np.zeros(NC, dtype=bool)
+    for f, nbrs in enumerate(RAIL_ADJ):
+        fx, fy = f % BOARD_SIZE, f // BOARD_SIZE
+        for n in nbrs:
+            nx, ny = n % BOARD_SIZE, n // BOARD_SIZE
+            if abs(fx - nx) == 1 and abs(fy - ny) == 1:
+                out[f] = True
+                break
+    return out
+
+
+CURVE_ARC_CELLS: Final[np.ndarray] = _build_curve_arc_cells()
 
 
 # Sanity check: connectedness

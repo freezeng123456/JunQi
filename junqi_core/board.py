@@ -29,9 +29,16 @@ Coordinate formulas replicated from legacy_engine/src/junqi.c::SetChess:
 NineGrid (center 3×3 on a 2-step grid):
   (x, y) = (10 - (i%3)*2, 6 + (i//3)*2)  for i ∈ [0,8]
 
-Curve rails (4 special segments): per legacy observation, the 4 curved
-railway pieces connect the corners of the central rail ring. We enumerate
-them below (see `CURVE_RAIL_CELLS`).
+Curve rails: one arc at each of the four inner corners where the arms of the
+cross meet, drawn on the board as a curved link between the two front-line
+end cells (e.g. NORTH's leftmost front cell and WEST's topmost front cell).
+The arc is the only place a piece other than the engineer may leave a
+straight rail run; a right-angle turn is engineer-only.
+
+`CellInfo.curve_rail` does not label the arc itself. It carries the legacy
+``eCurveRail`` id, which groups the two straight runs meeting at a corner so
+that `move_gen._same_curve_rail` can join them. For the arc as such, see
+`rail_topology.CURVE_ARC_CELLS`.
 """
 
 from __future__ import annotations

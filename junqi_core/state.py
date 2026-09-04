@@ -1812,6 +1812,41 @@ def _recompute_zobrist(
 
 
 # ===========================================================================
+# Termination classification
+# ===========================================================================
+
+
+def classify_termination(
+    state: GameState, last_result: MoveResult | None
+) -> str:
+    """Label why a game ended, given the terminal state and its last move.
+
+    Returns one of ``timeout`` / ``draw`` / ``flag_capture`` / ``q14_mutual``
+    / ``q12_chain`` / ``team_kill`` / ``unknown``.
+    """
+    if not state.terminated:
+        return "timeout"
+    if state.draw:
+        return "draw"
+    if last_result is None:
+        return "unknown"
+
+    if last_result.flag_captured:
+        return "flag_capture"
+    if len(last_result.seats_died_this_step) >= 2:
+        # Two seats dying on one action is either Q14 (both teams defeated
+        # simultaneously) or a Q12 chain. Opposite teams means Q14.
+        seat_teams = {s.team for s in last_result.seats_died_this_step}
+        if len(seat_teams) >= 2:
+            return "q14_mutual"
+        return "q12_chain"
+    if last_result.seats_died_this_step:
+        # A single death closing out the losing team
+        return "team_kill"
+    return "unknown"
+
+
+# ===========================================================================
 # Self-test (covers Q1, Q7, Q10, Q12, Q14 paths)
 # ===========================================================================
 

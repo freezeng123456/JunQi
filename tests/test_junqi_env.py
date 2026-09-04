@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -13,6 +14,7 @@ from junqi_core.observation import (
     ObservationTensor,
 )
 from junqi_core.rules import ALL_SEATS, Seat, ShowMode
+from junqi_core.state import classify_termination
 from junqi_rl.env import (
     JunqiEnv,
     JunqiStepInfo,
@@ -286,3 +288,142 @@ class TestActionFrameInvariant:
         canonical_ids = {rotate_action_id(int(a), seat) for a in world_ids}
         back = {unrotate_action_id(c, seat) for c in canonical_ids}
         assert back == set(int(x) for x in world_ids.tolist())
+
+
+# ---------------------------------------------------------------------------
+# 6. Termination reporting
+# ---------------------------------------------------------------------------
+
+
+class TestTerminationReason:
+    """``JunqiStepInfo.termination_reason`` used to be read off a GameState
+    attribute that does not exist, so it was None for every natural ending.
+    These tests pin that a finished game always reports a real reason and a
+    running game reports none.
+    """
+
+    _NATURAL_REASONS = {
+        "flag_capture", "team_kill", "q14_mutual", "q12_chain", "draw",
+    }
+
+    def _play_to_end(self, seed: int, max_steps: int = 4000):
+        rng = random.Random(seed)
+        env = JunqiEnv()
+        env.reset(seed=seed)
+        for _ in range(max_steps):
+            ids = env.legal_action_ids()
+            if len(ids) == 0:
+                return None
+            _, _, done, info = env.step(int(rng.choice(ids)))
+            if done:
+                return info
+        return None
+
+    def test_running_game_reports_no_reason(self) -> None:
+        rng = random.Random(0)
+        env = JunqiEnv()
+        env.reset(seed=0)
+        for _ in range(20):
+            ids = env.legal_action_ids()
+            _, _, done, info = env.step(int(rng.choice(ids)))
+            assert not done, "20 random opening moves should not end the game"
+            assert info.termination_reason is None
+
+    def test_finished_games_report_a_real_reason(self) -> None:
+        # Random self-play ends in roughly 600-1100 moves, so four seeds all
+        # reach a natural terminal state.
+        #
+        # Deliberately no assertion on *which* reasons turn up. Which endings
+        # random play happens to produce is a property of the rollouts, not of
+        # the code under test, and it shifts whenever the rules change — an
+        # earlier revision demanded two distinct reasons here and started
+        # failing the moment bomb combat was corrected. Coverage of the
+        # individual labels belongs in test_classify_termination_labels below,
+        # where the inputs are constructed rather than stumbled upon.
+        for seed in range(4):
+            info = self._play_to_end(seed)
+            assert info is not None, f"seed={seed}: game did not finish"
+            assert info.termination_reason is not None, (
+                f"seed={seed}: game ended but reported no termination reason"
+            )
+            assert info.termination_reason != "unknown", (
+                f"seed={seed}: termination reason not classified"
+            )
+            assert info.termination_reason in (
+                self._NATURAL_REASONS | {"max_num_moves"}
+            ), f"seed={seed}: unexpected reason {info.termination_reason!r}"
+
+    def test_forced_draw_reports_max_num_moves(self) -> None:
+        rng = random.Random(3)
+        env = JunqiEnv(max_num_moves=25)
+        env.reset(seed=3)
+        for _ in range(25):
+            ids = env.legal_action_ids()
+            _, _, done, info = env.step(int(rng.choice(ids)))
+            if done:
+                assert info.termination_reason == "max_num_moves"
+                assert info.draw
+                return
+        pytest.fail("max_num_moves cap did not trigger")
+
+
+# ---------------------------------------------------------------------------
+# 7. Termination classification, per label
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyTermination:
+    """Cover each label of ``classify_termination`` with constructed inputs.
+
+    The end-to-end test above can only report whichever endings random play
+    happens to reach, which drifts with any rules change. These pin the
+    classifier itself.
+    """
+
+    @staticmethod
+    def _state(terminated: bool = True, draw: bool = False):
+        return SimpleNamespace(terminated=terminated, draw=draw)
+
+    @staticmethod
+    def _result(flag_captured: bool = False, died: tuple[Seat, ...] = ()):
+        return SimpleNamespace(
+            flag_captured=flag_captured, seats_died_this_step=died
+        )
+
+    def test_still_running_is_timeout(self) -> None:
+        got = classify_termination(self._state(terminated=False), self._result())
+        assert got == "timeout"
+
+    def test_draw(self) -> None:
+        got = classify_termination(self._state(draw=True), self._result())
+        assert got == "draw"
+
+    def test_no_last_result_is_unknown(self) -> None:
+        assert classify_termination(self._state(), None) == "unknown"
+
+    def test_flag_capture_wins_over_deaths(self) -> None:
+        got = classify_termination(
+            self._state(), self._result(flag_captured=True, died=(Seat.SOUTH,))
+        )
+        assert got == "flag_capture"
+
+    def test_single_death_is_team_kill(self) -> None:
+        got = classify_termination(self._state(), self._result(died=(Seat.SOUTH,)))
+        assert got == "team_kill"
+
+    def test_two_deaths_on_opposite_teams_is_q14(self) -> None:
+        assert Seat.SOUTH.team != Seat.WEST.team
+        got = classify_termination(
+            self._state(), self._result(died=(Seat.SOUTH, Seat.WEST))
+        )
+        assert got == "q14_mutual"
+
+    def test_two_deaths_on_one_team_is_q12_chain(self) -> None:
+        assert Seat.SOUTH.team == Seat.NORTH.team
+        got = classify_termination(
+            self._state(), self._result(died=(Seat.SOUTH, Seat.NORTH))
+        )
+        assert got == "q12_chain"
+
+    def test_terminated_with_no_deaths_is_unknown(self) -> None:
+        assert classify_termination(self._state(), self._result()) == "unknown"
