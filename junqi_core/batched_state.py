@@ -27,8 +27,8 @@ Design notes
 from __future__ import annotations
 
 from collections.abc import Sequence
-from contextlib import suppress
 from dataclasses import dataclass, field
+from dataclasses import fields as dc_fields
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -62,73 +62,6 @@ from .rules import (
     siling_reveals_dst,
     siling_reveals_src,
 )
-
-# ---------------------------------------------------------------------------
-# Pre-built vectorised combat lookup table
-# COMBAT_EVENT_TABLE[src_type_val, dst_type_val] → Event.value (int8)
-# 0 = invalid combination (unused), MOVE=1, EAT=2, BOMB=3, KILLED=4
-# ---------------------------------------------------------------------------
-_NUM_PT = 14  # PieceType values 0..13
-
-def _build_combat_table() -> np.ndarray:
-    """Build a 14×14 int8 lookup: combat_result[attacker_val, defender_val]."""
-    tbl = np.zeros((_NUM_PT, _NUM_PT), dtype=np.int8)
-    for av in range(_NUM_PT):
-        a = PieceType(av)
-        if a in (PieceType.NONE, PieceType.DARK, PieceType.JUNQI, PieceType.DILEI):
-            continue  # invalid attacker
-        for dv in range(_NUM_PT):
-            d = PieceType(dv)
-            if d in (PieceType.NONE, PieceType.DARK):
-                continue  # invalid defender
-            with suppress(ValueError, AssertionError):
-                tbl[av, dv] = resolve_combat(a, d).value
-    return tbl
-
-_COMBAT_EVENT_TABLE: np.ndarray = _build_combat_table()
-
-# SILING reveal tables: 14×14 bool
-def _build_siling_tables() -> tuple[np.ndarray, np.ndarray]:
-    rs = np.zeros((_NUM_PT, _NUM_PT), dtype=bool)
-    rd = np.zeros((_NUM_PT, _NUM_PT), dtype=bool)
-    for av in range(_NUM_PT):
-        a = PieceType(av)
-        if a in (PieceType.NONE, PieceType.DARK, PieceType.JUNQI, PieceType.DILEI):
-            continue
-        for dv in range(_NUM_PT):
-            d = PieceType(dv)
-            if d in (PieceType.NONE, PieceType.DARK):
-                continue
-            try:
-                ev = resolve_combat(a, d)
-                rs[av, dv] = siling_reveals_src(a, d, ev)
-                rd[av, dv] = siling_reveals_dst(a, d, ev)
-            except (ValueError, AssertionError):
-                pass
-    return rs, rd
-
-_SILING_REVEALS_SRC_TABLE, _SILING_REVEALS_DST_TABLE = _build_siling_tables()
-
-# Death-reason table for KILLED event (src dies): 14×14 int8
-def _build_dr_killed_table() -> np.ndarray:
-    tbl = np.full((_NUM_PT, _NUM_PT), DeathReason.KILLED_BY_ENEMY.value, dtype=np.int8)
-    for av in range(_NUM_PT):
-        a = PieceType(av)
-        for dv in range(_NUM_PT):
-            d = PieceType(dv)
-            try:
-                ev = resolve_combat(a, d)
-                if ev == Event.KILLED:
-                    dr = classify_death_reason(
-                        own_piece=a, opponent_piece=d,
-                        event=ev, own_is_attacker=True,
-                    )
-                    tbl[av, dv] = dr.value
-            except (ValueError, AssertionError):
-                pass
-    return tbl
-
-_DR_KILLED_TABLE: np.ndarray = _build_dr_killed_table()
 
 
 def _build_cell_team_arr(
@@ -1346,34 +1279,20 @@ class BatchedGameState:
     # ==================================================================
 
     def clone(self) -> BatchedGameState:
-        """Return a deep copy of this batch."""
-        return BatchedGameState(
-            num_envs=self.num_envs,
-            alive=self.alive.copy(),
-            piece_type_arr=self.piece_type_arr.copy(),
-            piece_seat_arr=self.piece_seat_arr.copy(),
-            pos_x=self.pos_x.copy(),
-            pos_y=self.pos_y.copy(),
-            zero_x=self.zero_x.copy(),
-            zero_y=self.zero_y.copy(),
-            move_count_arr=self.move_count_arr.copy(),
-            active_eat_arr=self.active_eat_arr.copy(),
-            passive_surv_arr=self.passive_surv_arr.copy(),
-            death_reason_arr=self.death_reason_arr.copy(),
-            death_step_arr=self.death_step_arr.copy(),
-            death_loc_flat_arr=self.death_loc_flat_arr.copy(),
-            cell_piece_id=self.cell_piece_id.copy(),
-            cell_team_arr=self.cell_team_arr.copy(),
-            seat_dead_arr=self.seat_dead_arr.copy(),
-            seat_flag_revealed_arr=self.seat_flag_revealed_arr.copy(),
-            turn=self.turn.copy(),
-            zobrist=self.zobrist.copy(),
-            move_counter=self.move_counter.copy(),
-            moves_since_last_combat=self.moves_since_last_combat.copy(),
-            terminated=self.terminated.copy(),
-            winner_team=self.winner_team.copy(),
-            draw=self.draw.copy(),
-        )
+        """Return a deep copy of this batch.
+
+        Enumerates the dataclass fields rather than listing them by hand. The
+        hand-written version had fallen 16 fields behind — every ``cm_*``
+        CombatMemory column was missing, so a clone silently came back with
+        the empty arrays from their ``default_factory`` while the board and
+        counters copied correctly. Deriving the list means a new field is
+        copied the day it is added.
+        """
+        kwargs: dict[str, object] = {}
+        for f in dc_fields(self):
+            value = getattr(self, f.name)
+            kwargs[f.name] = value.copy() if isinstance(value, np.ndarray) else value
+        return BatchedGameState(**kwargs)  # type: ignore[arg-type]
 
     # ==================================================================
     # Repr
