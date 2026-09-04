@@ -32,6 +32,7 @@ from junqi_core.combat_memory import (
     is_in_seat_back_two_rows,
     next_floor_after_eat,
 )
+from junqi_core.observation import _pid_bit_masks, _popcount_pid_pair
 from junqi_core.rules import PieceType, Seat
 
 
@@ -285,3 +286,54 @@ class TestHelpers:
         for obs in range(NUM_OBSERVERS):
             assert cm.is_gongb[obs, 88]
             assert not cm.is_gongb[obs, 0]   # spot check uninvolved pid
+
+
+# ===========================================================================
+# Vectorised helpers behind the observation projection
+# ===========================================================================
+#
+# _write_combat_memory writes 156 of the 412 channels and is the dominant cost
+# of an observation build. Batching its popcounts collapsed sixteen NumPy
+# calls per build into five and a 30-iteration Python loop into one block,
+# which is an easy place to change results by accident. These pin the two
+# helpers that batching introduced against straightforward references.
+
+
+def test_popcount_pid_pair_matches_bit_count() -> None:
+    """Shape-preserving popcount must equal int.bit_count() elementwise."""
+    rng = np.random.default_rng(0)
+    for shape in [(0,), (1,), (17,), (34,), (12, 34), (4, 120)]:
+        lo = rng.integers(0, 2**64, size=shape, dtype=np.uint64)
+        hi = rng.integers(0, 2**64, size=shape, dtype=np.uint64)
+        got = _popcount_pid_pair(lo, hi)
+        want = np.array(
+            [int(a).bit_count() + int(b).bit_count()
+             for a, b in zip(lo.reshape(-1), hi.reshape(-1), strict=True)],
+            dtype=np.int16,
+        ).reshape(shape)
+        assert got.shape == want.shape, shape
+        assert got.dtype == np.int16, got.dtype
+        np.testing.assert_array_equal(got, want, err_msg=f"shape={shape}")
+
+    # Saturated words: 64 bits per half.
+    full = np.array([2**64 - 1], dtype=np.uint64)
+    assert int(_popcount_pid_pair(full, full)[0]) == 128
+
+
+def test_pid_bit_masks_are_single_bits_at_the_right_offset() -> None:
+    """One bit per pid, in the lo half below 64 and the hi half above."""
+    for pid_lo in (0, 30, 60, 90):
+        lo, hi = _pid_bit_masks(pid_lo, 30)
+        assert lo.dtype == np.uint64 and hi.dtype == np.uint64
+        # Exactly one bit set across the pair, per slot.
+        np.testing.assert_array_equal(
+            _popcount_pid_pair(lo, hi), np.ones(30, dtype=np.int16)
+        )
+        for s in range(30):
+            gp = pid_lo + s
+            if gp < 64:
+                assert lo[s] == np.uint64(1) << np.uint64(gp), (pid_lo, s)
+                assert hi[s] == np.uint64(0), (pid_lo, s)
+            else:
+                assert hi[s] == np.uint64(1) << np.uint64(gp - 64), (pid_lo, s)
+                assert lo[s] == np.uint64(0), (pid_lo, s)

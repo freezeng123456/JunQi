@@ -270,18 +270,48 @@ _SEAT_TEAM: Final[np.ndarray] = np.array(
 # ===========================================================================
 
 
+# Popcount of every byte value, so a uint64 popcount costs one table lookup
+# per byte plus a sum along the last axis.
+_POPCOUNT_BYTE: Final[np.ndarray] = np.array(
+    [bin(v).count("1") for v in range(256)], dtype=np.int16
+)
+
+
 def _popcount_pid_pair(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
-    """Popcount of (lo, hi) uint64 pair → number of pid bits set.
-    Used for the ``ge_*`` count thresholds.  Python loop version; the
-    only build-time cost scales with the enemy-pid count (≤ 60), so
-    the overhead is < 50 µs per build.
+    """Popcount of a (lo, hi) uint64 pair → number of pid bits set.
+
+    Shape-preserving, so callers can hand it a whole 2-D block of masks and
+    get one array back.  That is the point: NumPy charges roughly 5 us of
+    fixed overhead per call at these sizes, which dominated when the caller
+    invoked this sixteen times per observation build.
     """
-    flat_lo = lo.reshape(-1).astype(np.uint64, copy=False)
-    flat_hi = hi.reshape(-1).astype(np.uint64, copy=False)
-    out = np.empty(flat_lo.shape, dtype=np.int16)
-    for i in range(flat_lo.shape[0]):
-        out[i] = int(flat_lo[i]).bit_count() + int(flat_hi[i]).bit_count()
-    return out.reshape(lo.shape)
+    lo_u = np.ascontiguousarray(lo, dtype=np.uint64)
+    hi_u = np.ascontiguousarray(hi, dtype=np.uint64)
+    lo_bytes = lo_u.view(np.uint8).reshape(*lo_u.shape, 8)
+    hi_bytes = hi_u.view(np.uint8).reshape(*hi_u.shape, 8)
+    total: np.ndarray = _POPCOUNT_BYTE[lo_bytes].sum(axis=-1)
+    total += _POPCOUNT_BYTE[hi_bytes].sum(axis=-1)
+    return total.astype(np.int16, copy=False)
+
+
+def _pid_bit_masks(pid_lo: int, count: int) -> tuple[np.ndarray, np.ndarray]:
+    """Per-pid single-bit masks for ``count`` consecutive global pids.
+
+    Returns ``(lo_bits, hi_bits)``, each shape ``(count,)``.  A pid below 64
+    contributes to ``lo`` and zero to ``hi``, and vice versa, so callers can
+    always AND against both halves without branching on the observer.
+    """
+    gp = pid_lo + np.arange(count, dtype=np.int64)
+    in_lo = gp < 64
+    lo_bits = np.where(
+        in_lo, np.left_shift(np.uint64(1), np.where(in_lo, gp, 0).astype(np.uint64)),
+        np.uint64(0),
+    ).astype(np.uint64)
+    hi_bits = np.where(
+        ~in_lo, np.left_shift(np.uint64(1), np.where(in_lo, 0, gp - 64).astype(np.uint64)),
+        np.uint64(0),
+    ).astype(np.uint64)
+    return lo_bits, hi_bits
 
 
 
@@ -1426,55 +1456,48 @@ def _write_combat_memory(
         direct_lo = cm.direct_ate_my_pid_lo[observer_val, epids]
         direct_hi = cm.direct_ate_my_pid_hi[observer_val, epids]
 
-        # ---- Layer 3.1: cm_kill_mine_count[12] ----
-        # For each tracked-type t, compute popcount of (direct_lo, direct_hi)
-        # restricted to observer's pids of type t.  We build the per-type
-        # mask from state.piece_type_arr restricted to observer's 30 pids.
+        # Per-slot single-bit masks for the observer's own 30 pids. Both
+        # Layer 3.1 and 3.2 key off these.
         obs_pid_lo = observer_val * 30
-        obs_pid_hi_excl = obs_pid_lo + 30  # exclusive upper bound
-        my_types = state.piece_type_arr[obs_pid_lo:obs_pid_hi_excl]      # (30,)
-        # Tracked-type indices for each of the 30 observer pids.
-        my_type_idx = _PIECETYPE_TO_TRACKED_IDX[my_types]                 # (30,) int8
-        for t in range(NUM_TRACKED_TYPES):
-            # Build pid mask: 1 << (pid_global - 0) for pid_global in
-            # observer's pid range whose type == t.  All observer pids
-            # are < 64 except observer_val=2 (NORTH: pids 60..89) and
-            # observer_val=3 (EAST: pids 90..119) which spill into HI.
-            slot_indices = np.where(my_type_idx == t)[0]                  # local 0..29 indices
-            if slot_indices.size == 0:
-                continue
-            global_pids = (obs_pid_lo + slot_indices).astype(np.int64)
-            t_mask_lo = np.uint64(0)
-            t_mask_hi = np.uint64(0)
-            for gp in global_pids.tolist():
-                if gp < 64:
-                    t_mask_lo |= np.uint64(1) << np.uint64(gp)
-                else:
-                    t_mask_hi |= np.uint64(1) << np.uint64(gp - 64)
-            cnt_per_pid = _popcount_pid_pair(
-                direct_lo & t_mask_lo, direct_hi & t_mask_hi
-            ).astype(np.int32)                                            # (Nenemy,)
-            sel = cnt_per_pid > 0
-            if sel.any():
-                ix = np.where(sel)[0]
-                # Normalize to [0, 1] by /3 (saturating).
-                vals = np.minimum(cnt_per_pid[ix].astype(np.float32) / 3.0, 1.0)
-                out_kill_mine_count[t, ey[ix], ex[ix]] = vals
+        slot_lo, slot_hi = _pid_bit_masks(obs_pid_lo, 30)          # (30,) each
 
         # ---- Layer 3.2: cm_kill_mine_slot[30] ----
-        # Slot bit s: lit iff direct-pid bitmap covers observer's
-        # global pid (obs_pid_lo + s).
-        for s in range(30):
-            gp = obs_pid_lo + s
-            if gp < 64:
-                bit = np.uint64(1) << np.uint64(gp)
-                sel = (direct_lo & bit) != np.uint64(0)
-            else:
-                bit = np.uint64(1) << np.uint64(gp - 64)
-                sel = (direct_hi & bit) != np.uint64(0)
-            if sel.any():
-                ix = np.where(sel)[0]
-                out_kill_mine_slot[s, ey[ix], ex[ix]] = 1.0
+        # Slot s is lit where the direct-pid bitmap covers observer pid
+        # obs_pid_lo + s.  One (30, Nenemy) block instead of 30 passes.
+        slot_hit = (
+            (direct_lo[None, :] & slot_lo[:, None]) != np.uint64(0)
+        ) | (
+            (direct_hi[None, :] & slot_hi[:, None]) != np.uint64(0)
+        )
+        ss, si = np.nonzero(slot_hit)
+        out_kill_mine_slot[ss, ey[si], ex[si]] = 1.0
+
+        # ---- Layer 3.1: cm_kill_mine_count[12] ----
+        # Count, per tracked type t, how many of the observer's pieces of
+        # that type this enemy ate directly.  Folding the per-slot masks by
+        # type gives one mask per type, and the whole 12 x Nenemy popcount
+        # is then a single call — it used to be twelve, plus a Python loop
+        # per type to build each mask a bit at a time.
+        my_types = state.piece_type_arr[obs_pid_lo:obs_pid_lo + 30]
+        my_type_idx = _PIECETYPE_TO_TRACKED_IDX[my_types]          # (30,) int8
+        of_type = my_type_idx[None, :] == np.arange(
+            NUM_TRACKED_TYPES, dtype=np.int8
+        )[:, None]                                                  # (12, 30)
+        type_lo = np.bitwise_or.reduce(
+            np.where(of_type, slot_lo[None, :], np.uint64(0)), axis=1
+        )
+        type_hi = np.bitwise_or.reduce(
+            np.where(of_type, slot_hi[None, :], np.uint64(0)), axis=1
+        )
+        cnt_by_type = _popcount_pid_pair(
+            direct_lo[None, :] & type_lo[:, None],
+            direct_hi[None, :] & type_hi[:, None],
+        )                                                           # (12, Nenemy)
+        tt, ti = np.nonzero(cnt_by_type > 0)
+        # Saturating normalisation to [0, 1].
+        out_kill_mine_count[tt, ey[ti], ex[ti]] = np.minimum(
+            cnt_by_type[tt, ti].astype(np.float32) / 3.0, 1.0
+        )
 
         # ---- Layer 3.3: cm_recency[4] ----
         # Tau values (steps).  Larger tau decays slower.  We use
