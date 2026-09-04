@@ -969,24 +969,6 @@ def _write_turn_history(
 _ONEHOT_EPS: Final[float] = 1e-6
 
 
-def _exact_bucket(counter: int) -> int:
-    if counter <= 0:
-        return 0
-    if counter == 1:
-        return 1
-    if counter == 2:
-        return 2
-    return 3
-
-
-def _cumulative_top_bucket(counter: int) -> int:
-    if counter <= 0:
-        return 0
-    if counter >= 3:
-        return 3
-    return counter  # 1 or 2
-
-
 def _write_bucket_group(
     *,
     out: np.ndarray,

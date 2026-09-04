@@ -89,6 +89,35 @@ class TestConstruction:
         # original should be unmodified
         assert b.alive[0, 0] != c.alive[0, 0]
 
+    def test_clone_copies_every_field(self):
+        """Checking one array is not enough.
+
+        The hand-written clone had drifted 16 fields behind the dataclass —
+        every ``cm_*`` CombatMemory column was omitted, so a clone came back
+        with the empty arrays from their ``default_factory`` while the board
+        and counters copied fine. ``test_clone_is_independent`` only looks at
+        ``alive``, so it passed throughout.
+        """
+        import dataclasses
+
+        b = _batch_from_n(2)
+        c = b.clone()
+        for f in dataclasses.fields(b):
+            orig, copied = getattr(b, f.name), getattr(c, f.name)
+            if not isinstance(orig, np.ndarray):
+                assert orig == copied, f"{f.name}: {orig!r} != {copied!r}"
+                continue
+            assert orig.shape == copied.shape, (
+                f"{f.name}: shape {orig.shape} != {copied.shape}"
+            )
+            np.testing.assert_array_equal(
+                orig, copied, err_msg=f"{f.name} differs after clone"
+            )
+            if orig.size:
+                assert not np.shares_memory(orig, copied), (
+                    f"{f.name} is aliased, not copied"
+                )
+
 
 # ---------------------------------------------------------------------------
 # 2. Legal action parity

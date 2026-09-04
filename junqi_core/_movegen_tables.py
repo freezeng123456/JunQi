@@ -470,7 +470,7 @@ IS_CURVE_ACTIVE: Final[np.ndarray] = np.array([
 # ===========================================================================
 # 2-D padded lookup tables (Phase 0.4 M4 "plan D" vectorization)
 #
-# The SoA batch hot path in ``move_gen.generate_legal_action_ids`` works on
+# The SoA batch hot path in ``move_gen.generate_legal_action_ids_batch`` works on
 # arrays of size K (the number of mobile same-seat pieces).  It needs every
 # candidate-destination table in a FIXED-SHAPE padded int16 ndarray so
 # fancy indexing works in a single shot:

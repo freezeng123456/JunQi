@@ -23,7 +23,6 @@ Performance target: < 100 µs per `generate_legal_actions` call on CPU with
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Final
 
@@ -624,20 +623,6 @@ def has_any_legal_move(pieces: PieceMap, acting_seat: Seat) -> bool:
 # ===========================================================================
 
 
-def iter_legal_actions(
-    pieces: PieceMap,
-    acting_seat: Seat,
-) -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
-    """Lazily yield legal actions one at a time."""
-    for src, piece in pieces.items():
-        if not piece.alive:
-            continue
-        if piece.seat is not acting_seat:
-            continue
-        for dst in legal_moves_from(pieces, src, acting_seat):
-            yield (src, dst)
-
-
 # ===========================================================================
 # Phase 0.4 M4 / ADR-125 — SoA-based hot path.
 #
@@ -1012,121 +997,6 @@ def legal_dests_flat(
     return np.fromiter(dict.fromkeys(dests), dtype=np.int16, count=-1)
 
 
-def generate_legal_action_ids(
-    cell_piece_id: np.ndarray,           # (289,) int16
-    piece_seat_arr: np.ndarray,          # (num_pids,) int8
-    piece_type_arr: np.ndarray,          # (num_pids,) int8
-    alive: np.ndarray,                   # (num_pids,) bool
-    pos_x: np.ndarray,                   # (num_pids,) int8
-    pos_y: np.ndarray,                   # (num_pids,) int8
-    acting_seat_val: int,
-) -> np.ndarray:
-    """Flat-action-id enumeration for ``acting_seat``.
-
-    Returns
-    -------
-    ndarray[K] int32, each entry = ``src_flat * 289 + dst_flat``.
-    """
-    empty, same_team_occ, enemy_attackable = _compute_occupancy_masks_soa(
-        cell_piece_id, piece_seat_arr, acting_seat_val
-    )
-    # Pre-compute the landable mask once per call; shared across pids.
-    landable = empty | enemy_attackable
-    # Pick this seat's alive & mobile piece ids, then filter in one pass:
-    #   - seat matches
-    #   - piece is alive
-    #   - piece type is mobile (not JUNQI / DILEI / …)
-    #   - src cell is not a stronghold
-    #   - src cell is on-board (pos_x / pos_y >= 0)
-    seat_mask = alive & (piece_seat_arr == acting_seat_val)
-    if not seat_mask.any():
-        return _EMPTY_INT32
-    pids = np.nonzero(seat_mask)[0]
-    pt_vals = piece_type_arr[pids].astype(np.intp, copy=False)
-    # Filter immobile types at the vector level.
-    mobile = ~_T.IS_IMMOBILE_TYPE[pt_vals]
-    if not mobile.any():
-        return _EMPTY_INT32
-    pids = pids[mobile]
-    pt_vals = pt_vals[mobile]
-    # Compute src_flat for each surviving pid in one vectorized op.
-    sx_arr = pos_x[pids].astype(np.intp, copy=False)
-    sy_arr = pos_y[pids].astype(np.intp, copy=False)
-    on_board = (sx_arr >= 0) & (sy_arr >= 0)
-    if not on_board.all():
-        pids = pids[on_board]
-        pt_vals = pt_vals[on_board]
-        sx_arr = sx_arr[on_board]
-        sy_arr = sy_arr[on_board]
-    src_flats = sy_arr * BOARD_SIZE + sx_arr
-    # Filter out stronghold src cells at the vector level.
-    not_stronghold = ~_T.IS_STRONGHOLD_FLAT[src_flats]
-    if not not_stronghold.all():
-        pids = pids[not_stronghold]
-        pt_vals = pt_vals[not_stronghold]
-        src_flats = src_flats[not_stronghold]
-    if pids.size == 0:
-        return _EMPTY_INT32
-
-    # Hot inner loop: one call per remaining pid.  We already know every
-    # surviving pid is mobile and sits on a valid non-stronghold cell, so
-    # legal_dests_flat never returns early from those guards.
-    parts: list[np.ndarray] = []
-    pids_list = pids.tolist()
-    src_flats_list = src_flats.tolist()
-    pt_vals_list = pt_vals.tolist()
-    for i in range(len(pids_list)):
-        src_flat = src_flats_list[i]
-        tv = pt_vals_list[i]
-        dests = legal_dests_flat(
-            pids_list[i], src_flat, tv, acting_seat_val,
-            empty, same_team_occ, enemy_attackable, landable,
-        )
-        if dests.size == 0:
-            continue
-        parts.append(src_flat * NUM_CELLS + dests.astype(np.int32, copy=False))
-
-    if not parts:
-        return _EMPTY_INT32
-    return np.concatenate(parts)
-
-
-def has_any_legal_move_soa(
-    cell_piece_id: np.ndarray,
-    piece_seat_arr: np.ndarray,
-    piece_type_arr: np.ndarray,
-    alive: np.ndarray,
-    pos_x: np.ndarray,
-    pos_y: np.ndarray,
-    acting_seat_val: int,
-) -> bool:
-    """Short-circuit version of :func:`generate_legal_action_ids`."""
-    empty, _same, enemy_attackable = _compute_occupancy_masks_soa(
-        cell_piece_id, piece_seat_arr, acting_seat_val
-    )
-    landable = empty | enemy_attackable
-    mask = alive & (piece_seat_arr == acting_seat_val)
-    pids = np.nonzero(mask)[0]
-    for pid in pids.tolist():
-        tv = int(piece_type_arr[pid])
-        if _T.IS_IMMOBILE_TYPE[tv]:
-            continue
-        sx = int(pos_x[pid])
-        sy = int(pos_y[pid])
-        if sx < 0 or sy < 0:
-            continue
-        src_flat = sy * BOARD_SIZE + sx
-        if _T.IS_STRONGHOLD_FLAT[src_flat]:
-            continue
-        dests = legal_dests_flat(
-            pid, src_flat, tv, acting_seat_val,
-            empty, _same, enemy_attackable, landable,
-        )
-        if dests.size > 0:
-            return True
-    return False
-
-
 # ===========================================================================
 # Plan D — fully vectorized batch legal-action generator.
 #
@@ -1188,7 +1058,7 @@ def generate_legal_action_ids_batch(
     pos_y: np.ndarray,
     acting_seat_val: int,
 ) -> np.ndarray:
-    """Vectorized version of :func:`generate_legal_action_ids`.
+    """Vectorized SoA generator of legal action ids.
 
     Returns ``ndarray[K] int32`` of flat action ids
     ``src_flat * 289 + dst_flat``.  Set-equivalent to the PieceMap-based
