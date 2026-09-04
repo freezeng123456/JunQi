@@ -339,9 +339,14 @@ class CombatMemoryState:
 def apply_path_revealed_gongb(cm: CombatMemoryState, pid: int) -> None:
     """Mark ``pid`` as a publicly-revealed GONGB.
 
-    Triggered by the engine when a piece walks a path that ONLY a GONGB
-    can legally take (curve rail / multi-hop rail BFS / etc.).  Update is
-    written to ALL four observers because the geometry is public.
+    Triggered by the engine when a piece walks a path that ONLY a GONGB can
+    legally take: a rail route that turns a right angle, or one that routes
+    around a blocker.  ``move_gen.move_requires_gongb`` is the authority.
+    Update is written to ALL four observers because the geometry is public.
+
+    Crossing an arc is **not** such a path.  The arc is precisely where a
+    non-engineer may leave a straight rail run (其它棋子在铁路线上只能直走或
+    经过弧形线，不能转直角弯), so an engineer that uses one must stay hidden.
     """
     cm.is_gongb[:, pid] = True
 
