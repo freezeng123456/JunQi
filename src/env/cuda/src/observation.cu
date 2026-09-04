@@ -474,8 +474,12 @@ __global__ void observation_kernel(
         // Plane 4 marks the union of all four corner curves, matching
         // _build_board_static_world() on the CPU.  Per-curve one-hot planes
         // would not survive the canonical rotation (rot90 permutes the curve
-        // ids), so the id itself is deliberately not encoded here.
-        if (CURVE_RAIL_OF[f] != 0) spatial[(CH_BOARD_STATIC + 4) * PLANE + off] = 1.0f;
+        // ids), so the id itself is deliberately not encoded here.  The
+        // RAIL_FLAT guard is required: CURVE_RAIL_OF mirrors the legacy
+        // InitCurveRail loop, which also tags two non-railway headquarters
+        // cells per curve.  40 cells light up, not 48.
+        if (RAIL_FLAT[f] && CURVE_RAIL_OF[f] != 0)
+            spatial[(CH_BOARD_STATIC + 4) * PLANE + off] = 1.0f;
         // Plane 5 is reserved and stays 0.
     }
 

@@ -297,9 +297,17 @@ def _build_board_static_world() -> np.ndarray:
     corner curves in a 4-cycle (1 -> 4 -> 3 -> 2), so "curve 1" would light up
     a different corner for each observer.  Plane 4 therefore marks the union
     of all four curves, which is rotation-invariant and is what movement
-    generation actually keys on (a rail cell where an engineer may turn).
-    Plane 5 is reserved; distinguishing individual curves needs one plane per
-    curve, which would change ``OBS_CHANNELS``.
+    generation actually keys on.  Plane 5 is reserved; distinguishing
+    individual curves needs one plane per curve, which would change
+    ``OBS_CHANNELS``.
+
+    The ``is_railway`` guard is required, not redundant.  ``CURVE_RAIL_OF``
+    faithfully reproduces the legacy ``InitCurveRail`` loop, which tags two
+    headquarters-row cells per curve that are not railway at all; see the note
+    in :mod:`junqi_core.rail_topology`.  Move generation never sees them
+    because it checks ``is_railway`` on both endpoints before consulting the
+    curve id, so this plane must apply the same filter.  The result is
+    4 curves x 10 rail cells = 40.
     """
     planes = np.zeros((6, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
     for y in range(BOARD_SIZE):
@@ -312,7 +320,7 @@ def _build_board_static_world() -> np.ndarray:
                 planes[2, y, x] = 1.0
             if is_nine_grid(x, y):
                 planes[3, y, x] = 1.0
-            if cell_info(x, y).curve_rail != 0:
+            if is_railway(x, y) and cell_info(x, y).curve_rail != 0:
                 planes[4, y, x] = 1.0
     return planes
 

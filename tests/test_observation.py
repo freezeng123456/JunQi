@@ -152,9 +152,14 @@ _BOARD_STATIC_PLANES: tuple[tuple[str, int], ...] = (
     ("stronghold", 8),
     ("railway", 73),
     ("nine_grid", 9),
-    ("curve_rail", 48),
+    # 4 curves x 10 rail cells.  NOT 48: CURVE_RAIL_OF mirrors the legacy
+    # InitCurveRail loop, which also tags two headquarters cells per curve
+    # that carry no rail.  See test_curve_rail_plane_is_a_subset_of_railway.
+    ("curve_rail", 40),
     ("reserved", 0),
 )
+_CH_RAILWAY = 2
+_CH_CURVE_RAIL = 4
 
 
 def test_board_static_planes_have_expected_occupancy() -> None:
@@ -165,6 +170,25 @@ def test_board_static_planes_have_expected_occupancy() -> None:
             f"board_static plane {idx} ({name}) lit {int(static[idx].sum())} "
             f"cells, expected {expected}"
         )
+
+
+def test_curve_rail_plane_is_a_subset_of_railway() -> None:
+    """A curve-rail move needs both endpoints to be rail, so the curve plane
+    may never light a cell the railway plane leaves dark.
+
+    ``CURVE_RAIL_OF`` alone does not satisfy this: it reproduces the legacy
+    ``InitCurveRail`` loop, whose ``j % 5 == 4`` test also matches slot 29 and
+    pairs it with slot 25, tagging two headquarters cells per curve. Move
+    generation filters them out via ``is_railway``; so must the observation.
+    """
+    static = _obs_for(_random_opening(), Seat.SOUTH).channel("board_static")
+    curve = static[_CH_CURVE_RAIL] > 0
+    railway = static[_CH_RAILWAY] > 0
+    leaked = curve & ~railway
+    assert not leaked.any(), (
+        f"{int(leaked.sum())} curve_rail cells are not railway cells: "
+        f"{[(int(x), int(y)) for y, x in zip(*np.where(leaked))]}"
+    )
 
 
 @pytest.mark.parametrize("observer", list(ALL_SEATS))

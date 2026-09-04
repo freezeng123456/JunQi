@@ -150,7 +150,20 @@ assert NUM_RAIL_CELLS == 73, (
 #             ChessPos[i][j].eCurveRail           = i + 1
 #             ChessPos[(i+1)%4][j-4].eCurveRail   = i + 1
 #
-# This produces a set of 12-cell "L-shaped" rail groups at the 4 inner corners.
+# This produces a set of 12-cell "L-shaped" groups at the 4 inner corners.
+#
+# CAUTION — only 10 of those 12 cells are railway.  Slots 0..24 form the 5x5
+# grid whose perimeter carries the rail; slots 25..29 are the headquarters row
+# and carry none.  The legacy loop runs to j < 30, so `j % 5 == 4` also picks
+# up j = 29, and its partner `j - 4` picks up slot 25 — two headquarters cells
+# per curve.  Reproducing that is deliberate: this module mirrors the legacy
+# engine and must not silently diverge from it.
+#
+# It is harmless for move generation, which checks `is_railway` on both
+# endpoints before it ever consults the curve id (see
+# `junqi_core.move_gen.is_legal_move`).  Any *other* consumer must apply the
+# same filter, or it will pick up 48 cells where the board only has 40 curve
+# rail cells.  `CURVE_RAIL_CELLS` below is that filtered view.
 
 _curve_of: list[int] = [CURVE_RAIL_NONE] * NC
 
@@ -172,6 +185,12 @@ for _cid in range(1, 5):
 
 
 CURVE_RAIL_OF: Final[np.ndarray] = np.array(_curve_of, dtype=np.int8)
+
+# The legacy-faithful tagging above intersected with the actual rail set: the
+# 40 cells (4 curves x 10) on which a curve-rail move can really happen.  Use
+# this rather than ``CURVE_RAIL_OF > 0`` unless you specifically want legacy
+# parity on the headquarters cells.
+CURVE_RAIL_CELLS: Final[np.ndarray] = (CURVE_RAIL_OF > 0) & IS_RAILWAY.astype(bool)
 
 
 # ---------------------------------------------------------------------------
