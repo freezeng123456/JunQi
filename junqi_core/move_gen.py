@@ -1729,9 +1729,11 @@ def has_legal_moves_soa(
 
     # Fast path: check if any orthogonal neighbor is empty.
     # This avoids building full occupancy masks (the expensive part).
-    occupied = np.zeros(NUM_CELLS + 1, dtype=bool)
+    occupied = np.ones(NUM_CELLS + 1, dtype=bool)
     occupied[:NUM_CELLS] = (cell_piece_id >= 0)
-    # sentinel at NUM_CELLS is False (off-board)
+    # The pad slot at NUM_CELLS means "no neighbour that way" — off the board.
+    # It must read as unusable, not as empty, or a piece with fewer than four
+    # orthogonal neighbours reports a move it cannot make.
 
     adj = _ADJ_STRAIGHT_PAD[src_flats]  # (K, 4), sentinel=289=NUM_CELLS
     # Check if any adjacent cell is empty (not occupied)
