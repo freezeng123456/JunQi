@@ -8,6 +8,9 @@ bin/
 # Editor/IDE files
 .vscode/
 .idea/
+.settings/
+.cproject
+.project
 *.swp
 *.swo
 *~
@@ -54,6 +57,7 @@ Thumbs.db
 exps/*/*.pt
 exps/**/*.pt
 exps/*/train*.log
+exps/*/diag_*.log
 exps/*/log.*
 exps/*/logs/
 # launcher artifacts (per-run state, not source)
