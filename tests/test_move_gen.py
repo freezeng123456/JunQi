@@ -311,3 +311,87 @@ def test_plain_rail_and_road_moves_do_not_reveal_engineer() -> None:
 
     assert not move_requires_gongb({(8, 5): _gongb()}, (8, 5), (10, 5))  # straight rail
     assert not move_requires_gongb({(8, 3): _gongb()}, (8, 3), (8, 4))   # one road step
+
+
+# ===========================================================================
+# has_legal_moves_soa — must agree with the scalar reference
+# ===========================================================================
+#
+# This predicate decides Q12: a seat with no legal move is eliminated. The
+# batched engine calls it every turn (batched_state.py) while GameState uses
+# the scalar has_any_legal_move, so a disagreement means the two engines play
+# out different games from the same position.
+#
+# It had no test of its own. Its fast path read the adjacency pad slot — the
+# marker for "no neighbour that way, off the board" — as an empty cell, so any
+# piece with fewer than four orthogonal neighbours reported a move it could
+# not make. 237 of 289 cells have at least one such slot, so the fast path
+# said "has moves" almost unconditionally. That is invisible except in exactly
+# the position the function exists to detect.
+
+
+def _soa_args(state):
+    return (
+        state.cell_piece_id, state.piece_seat_arr, state.piece_type_arr,
+        state.alive, state.pos_x, state.pos_y,
+    )
+
+
+def _pieces_from_state(state) -> PieceMap:
+    import numpy as np
+
+    from junqi_core.rules import ALL_SEATS
+
+    return {
+        (int(state.pos_x[p]), int(state.pos_y[p])): PieceRef(
+            ALL_SEATS[int(state.piece_seat_arr[p])],
+            PieceType(int(state.piece_type_arr[p])),
+        )
+        for p in np.nonzero(state.alive)[0]
+    }
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3])
+def test_has_legal_moves_soa_matches_scalar_and_generator(seed: int) -> None:
+    """Walk a whole game and cross-check both predicates against the generator."""
+    import random
+
+    from junqi_core.move_gen import has_legal_moves_soa
+    from junqi_core.rules import ALL_SEATS, ShowMode
+    from junqi_core.setup import generate_random_setup
+    from junqi_core.state import Action, GameState
+
+    rng = random.Random(seed)
+    state = GameState.new_game(
+        generate_random_setup(random.Random(seed)), show_mode=ShowMode.BRIGHT
+    )
+    checked = 0
+    for _ in range(700):
+        # legal_action_ids short-circuits to empty once the game is over
+        # (state.py), so it is only a valid oracle while play continues.
+        if state.terminated:
+            break
+        for seat in ALL_SEATS:
+            if state.seat_dead_arr[seat.value]:
+                continue
+            truth = len(state.legal_action_ids(seat)) > 0
+            soa = has_legal_moves_soa(*_soa_args(state), seat.value)
+            scalar = has_any_legal_move(_pieces_from_state(state), seat)
+            checked += 1
+            assert soa == truth, (
+                f"seed={seed} seat={seat.name}: has_legal_moves_soa said {soa}, "
+                f"generator says {truth}"
+            )
+            assert scalar == truth, (
+                f"seed={seed} seat={seat.name}: has_any_legal_move said {scalar}, "
+                f"generator says {truth}"
+            )
+        ids = state.legal_action_ids()
+        if len(ids) == 0:
+            break
+        act = int(rng.choice(ids))
+        s, d = divmod(act, 289)
+        state.step_inplace(
+            Action(seat=state.turn, src=(s % 17, s // 17), dst=(d % 17, d // 17))
+        )
+    assert checked > 100, f"seed={seed}: only {checked} positions checked"
