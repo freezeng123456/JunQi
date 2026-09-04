@@ -286,3 +286,74 @@ class TestActionFrameInvariant:
         canonical_ids = {rotate_action_id(int(a), seat) for a in world_ids}
         back = {unrotate_action_id(c, seat) for c in canonical_ids}
         assert back == set(int(x) for x in world_ids.tolist())
+
+
+# ---------------------------------------------------------------------------
+# 6. Termination reporting
+# ---------------------------------------------------------------------------
+
+
+class TestTerminationReason:
+    """``JunqiStepInfo.termination_reason`` used to be read off a GameState
+    attribute that does not exist, so it was None for every natural ending.
+    These tests pin that a finished game always reports a real reason and a
+    running game reports none.
+    """
+
+    _NATURAL_REASONS = {
+        "flag_capture", "team_kill", "q14_mutual", "q12_chain", "draw",
+    }
+
+    def _play_to_end(self, seed: int, max_steps: int = 4000):
+        rng = random.Random(seed)
+        env = JunqiEnv()
+        env.reset(seed=seed)
+        for _ in range(max_steps):
+            ids = env.legal_action_ids()
+            if len(ids) == 0:
+                return None
+            _, _, done, info = env.step(int(rng.choice(ids)))
+            if done:
+                return info
+        return None
+
+    def test_running_game_reports_no_reason(self) -> None:
+        rng = random.Random(0)
+        env = JunqiEnv()
+        env.reset(seed=0)
+        for _ in range(20):
+            ids = env.legal_action_ids()
+            _, _, done, info = env.step(int(rng.choice(ids)))
+            assert not done, "20 random opening moves should not end the game"
+            assert info.termination_reason is None
+
+    def test_finished_games_report_a_real_reason(self) -> None:
+        # Random self-play ends in roughly 600-1100 moves, so four seeds all
+        # reach a natural terminal state and between them cover more than one
+        # reason.
+        seen: set[str] = set()
+        for seed in range(4):
+            info = self._play_to_end(seed)
+            assert info is not None, f"seed={seed}: game did not finish"
+            assert info.termination_reason is not None, (
+                f"seed={seed}: game ended but reported no termination reason"
+            )
+            assert info.termination_reason != "unknown", (
+                f"seed={seed}: termination reason not classified"
+            )
+            seen.add(info.termination_reason)
+        assert seen <= self._NATURAL_REASONS | {"max_num_moves"}, seen
+        assert len(seen) >= 2, f"expected varied termination reasons, got {seen}"
+
+    def test_forced_draw_reports_max_num_moves(self) -> None:
+        rng = random.Random(3)
+        env = JunqiEnv(max_num_moves=25)
+        env.reset(seed=3)
+        for _ in range(25):
+            ids = env.legal_action_ids()
+            _, _, done, info = env.step(int(rng.choice(ids)))
+            if done:
+                assert info.termination_reason == "max_num_moves"
+                assert info.draw
+                return
+        pytest.fail("max_num_moves cap did not trigger")
