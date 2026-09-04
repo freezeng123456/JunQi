@@ -141,6 +141,50 @@ def test_board_static_is_constant_across_games() -> None:
     assert np.array_equal(a, b)
 
 
+# Plane order of the board_static group, with the exact number of cells each
+# one must light up.  Pinning the counts is what makes this test non-vacuous:
+# the curve_rail plane was silently all-zero for a long time because it was
+# read through ``getattr(info, "curve_rail_id", 0)`` while the attribute is
+# named ``curve_rail``, and every other check on this group (cross-observer
+# equality, CPU/GPU parity) is satisfied by two zero planes.
+_BOARD_STATIC_PLANES: tuple[tuple[str, int], ...] = (
+    ("camp", 20),
+    ("stronghold", 8),
+    ("railway", 73),
+    ("nine_grid", 9),
+    ("curve_rail", 48),
+    ("reserved", 0),
+)
+
+
+def test_board_static_planes_have_expected_occupancy() -> None:
+    static = _obs_for(_random_opening(), Seat.SOUTH).channel("board_static")
+    assert static.shape[0] == len(_BOARD_STATIC_PLANES)
+    for idx, (name, expected) in enumerate(_BOARD_STATIC_PLANES):
+        assert int(static[idx].sum()) == expected, (
+            f"board_static plane {idx} ({name}) lit {int(static[idx].sum())} "
+            f"cells, expected {expected}"
+        )
+
+
+@pytest.mark.parametrize("observer", list(ALL_SEATS))
+def test_board_static_planes_are_rotation_invariant(observer: Seat) -> None:
+    """Each plane must be unchanged by 90-degree rotation.
+
+    The stack is built in the world frame and then rotated into the
+    observer's canonical frame, so a plane that is not rotation-invariant
+    encodes the observer's seat identity.  A one-hot-per-curve encoding fails
+    here: rot90 permutes the four corner curves in a 4-cycle.
+    """
+    static = _obs_for(_random_opening(), observer).channel("board_static")
+    for idx, (name, _) in enumerate(_BOARD_STATIC_PLANES):
+        for k in (1, 2, 3):
+            assert np.array_equal(np.rot90(static[idx], k), static[idx]), (
+                f"board_static plane {idx} ({name}) changes under rot90(k={k}); "
+                f"it would leak the observer's seat into a canonical feature"
+            )
+
+
 # ===========================================================================
 # C. Canonical-frame geometry (core promise of ADR-111 rename)
 # ===========================================================================

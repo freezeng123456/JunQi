@@ -471,7 +471,12 @@ __global__ void observation_kernel(
         if (STRONGHOLD_FLAT[f]) spatial[(CH_BOARD_STATIC + 1) * PLANE + off] = 1.0f;
         if (RAIL_FLAT[f])       spatial[(CH_BOARD_STATIC + 2) * PLANE + off] = 1.0f;
         if (NINE_GRID_FLAT[f])  spatial[(CH_BOARD_STATIC + 3) * PLANE + off] = 1.0f;
-        // curve_rail planes (4,5) are always 0 in this kernel.
+        // Plane 4 marks the union of all four corner curves, matching
+        // _build_board_static_world() on the CPU.  Per-curve one-hot planes
+        // would not survive the canonical rotation (rot90 permutes the curve
+        // ids), so the id itself is deliberately not encoded here.
+        if (CURVE_RAIL_OF[f] != 0) spatial[(CH_BOARD_STATIC + 4) * PLANE + off] = 1.0f;
+        // Plane 5 is reserved and stays 0.
     }
 
     // --------------------------------------------------------------------

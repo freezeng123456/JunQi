@@ -285,7 +285,21 @@ def _popcount_pid_pair(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
 
 
 def _build_board_static_world() -> np.ndarray:
-    """Compute the (6, 17, 17) board-topology plane stack once at import."""
+    """Compute the (6, 17, 17) board-topology plane stack once at import.
+
+    Every plane here must be invariant under 90-degree rotation, because the
+    stack is built in the world frame and then rotated into each observer's
+    canonical frame.  A plane that is not rotation-invariant would encode the
+    observer's seat identity, which the canonical frame exists to remove.
+
+    That rules out a one-hot-per-curve encoding: ``rot90`` permutes the four
+    corner curves in a 4-cycle (1 -> 4 -> 3 -> 2), so "curve 1" would light up
+    a different corner for each observer.  Plane 4 therefore marks the union
+    of all four curves, which is rotation-invariant and is what movement
+    generation actually keys on (a rail cell where an engineer may turn).
+    Plane 5 is reserved; distinguishing individual curves needs one plane per
+    curve, which would change ``OBS_CHANNELS``.
+    """
     planes = np.zeros((6, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
     for y in range(BOARD_SIZE):
         for x in range(BOARD_SIZE):
@@ -297,12 +311,8 @@ def _build_board_static_world() -> np.ndarray:
                 planes[2, y, x] = 1.0
             if is_nine_grid(x, y):
                 planes[3, y, x] = 1.0
-            info = cell_info(x, y)
-            curve_id = getattr(info, "curve_rail_id", 0)
-            if curve_id == 1:
+            if cell_info(x, y).curve_rail != 0:
                 planes[4, y, x] = 1.0
-            if curve_id == 2:
-                planes[5, y, x] = 1.0
     return planes
 
 
