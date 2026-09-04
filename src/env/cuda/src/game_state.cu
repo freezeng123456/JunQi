@@ -1061,12 +1061,14 @@ static constexpr int32_t MAX_NUM_MOVES_BETWEEN_ATTACKS_CONST = 200;
 // Caller must guarantee attacker is mobile and defender != NONE/DARK.
 // ---------------------------------------------------------------------------
 __device__ inline int8_t gpu_resolve_combat(int8_t a, int8_t d) {
+    // Bomb (either side) — mutual death against anything, mine and flag
+    // included. Must precede the flag and mine branches; the ordering is the
+    // rule itself. Mirrors rules.resolve_combat and legacy CompareChess.
+    if (a == PT_ZHADAN || d == PT_ZHADAN) return EV_BOMB;
     // Flag capture.
     if (d == PT_JUNQI) return EV_EAT;
     // Mine: only GONGB eats; everyone else dies.
     if (d == PT_DILEI) return (a == PT_GONGB) ? EV_EAT : EV_KILLED;
-    // Bomb (either side).
-    if (a == PT_ZHADAN || d == PT_ZHADAN) return EV_BOMB;
     // Both ranked combatants — compare by rank (lower = stronger).
     if (a == d) return EV_BOMB;
     if (a <  d) return EV_EAT;

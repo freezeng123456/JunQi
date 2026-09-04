@@ -104,3 +104,76 @@ def test_combat_golden(case_name: str, doc: dict) -> None:
         f"{case_name}: flag_captured mismatch — rule={got_captured}, "
         f"golden={expected['flag_captured']}"
     )
+
+
+# ===========================================================================
+# Exhaustive table check against the legacy authority
+# ===========================================================================
+#
+# The golden files above are a hand-picked sample: ten battle cases out of the
+# 120 valid (attacker, defender) pairs, with no bomb-vs-mine and no
+# bomb-vs-flag among them. That gap let resolve_combat disagree with the rules
+# on both of those pairs for a long time. This test closes it by comparing
+# every pair against a transcription of the authoritative legacy resolver.
+
+_NONE, _DARK, _JUNQI, _DILEI, _ZHADAN, _SILING = 0, 1, 2, 3, 4, 5
+_GONGB = 13
+
+
+def _legacy_compare_chess(a: int, d: int) -> str:
+    """Transcription of legacy_gui/src/rule.c::CompareChess.
+
+    Kept as a literal port, branch for branch and in the same order, so a
+    reviewer can diff it against the C by eye. The ordering carries the rule:
+    ZHADAN is tested first because a bomb dies together with anything it
+    touches, the flag and the mine included.
+    """
+    if d == _NONE:
+        return "MOVE"
+    if d == _ZHADAN or a == _ZHADAN:
+        return "BOMB"
+    if d == _JUNQI:
+        return "EAT"
+    if d == _DILEI:
+        return "EAT" if a == _GONGB else "KILLED"
+    assert _SILING <= d <= _GONGB and _SILING <= a <= _GONGB
+    if a == d:
+        return "BOMB"
+    return "EAT" if a < d else "KILLED"
+
+
+_ATTACKERS = [p for p in PieceType if p.value >= _ZHADAN]   # mobile pieces
+_DEFENDERS = [p for p in PieceType if p.value >= _JUNQI]    # anything on board
+
+
+@pytest.mark.parametrize(
+    "attacker,defender",
+    [(a, d) for a in _ATTACKERS for d in _DEFENDERS],
+    ids=lambda p: p.name if isinstance(p, PieceType) else "",
+)
+def test_combat_matches_legacy_table(
+    attacker: PieceType, defender: PieceType
+) -> None:
+    got = resolve_combat(attacker, defender).name
+    want = _legacy_compare_chess(attacker.value, defender.value)
+    assert got == want, (
+        f"{attacker.name} attacking {defender.name}: "
+        f"resolve_combat says {got}, legacy CompareChess says {want}"
+    )
+
+
+def test_bomb_dies_with_everything() -> None:
+    """炸弹和敌方任何棋子相遇则同归于尽，包括军旗和地雷.
+
+    Spelled out separately from the table sweep because these two pairs are
+    the ones that were wrong, and because the flag pair also decides games:
+    a surviving bomb would take the flag cell and win outright.
+    """
+    for other in _DEFENDERS:
+        assert resolve_combat(PieceType.ZHADAN, other) is Event.BOMB, (
+            f"ZHADAN attacking {other.name} must be mutual death"
+        )
+    for attacker in _ATTACKERS:
+        assert resolve_combat(attacker, PieceType.ZHADAN) is Event.BOMB, (
+            f"{attacker.name} attacking ZHADAN must be mutual death"
+        )
