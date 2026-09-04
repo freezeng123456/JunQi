@@ -203,17 +203,34 @@ When a piece moves onto a cell occupied by an enemy piece, combat resolves **ato
 
 Let `A = src.type` (attacker, always the moving piece) and `B = dst.type` (defender).
 
-| Condition | Outcome | Attacker | Defender |
-|-----------|---------|----------|----------|
-| `B == JUNQI` | **FLAG_CAPTURED** → defender's team surrenders (§5.2) | Moves to `dst` | Removed |
-| `A == GONGB` && `B == DILEI` | **EAT** | Moves to `dst` | Removed |
-| `A ∈ [SILING..GONGB]` && `B == DILEI` (A != GONGB) | **KILLED** | Removed | Stays |
-| `A == ZHADAN` or `B == ZHADAN` | **BOMB** (mutual death) | Removed | Removed |
-| `A == B` (same rank) | **BOMB** (mutual death) | Removed | Removed |
-| `A < B` (A is stronger, lower enum value) | **EAT** | Moves to `dst` | Removed |
-| `A > B` (A is weaker) | **KILLED** | Removed | Stays |
+**The rows are ordered, and the order is part of the rule.** Evaluate top to
+bottom and take the first match.
 
-**Authoritative source**: `legacy_engine/src/junqi.c::JudgeChess` / `PlayResult` and `event.c::CanEatChess`.
+| # | Condition | Outcome | Attacker | Defender |
+|--:|-----------|---------|----------|----------|
+| 1 | `A == ZHADAN` or `B == ZHADAN` | **BOMB** (mutual death) | Removed | Removed |
+| 2 | `B == JUNQI` | **FLAG_CAPTURED** → defender's team surrenders (§5.2) | Moves to `dst` | Removed |
+| 3 | `A == GONGB` && `B == DILEI` | **EAT** | Moves to `dst` | Removed |
+| 4 | `B == DILEI` (A != GONGB) | **KILLED** | Removed | Stays |
+| 5 | `A == B` (same rank) | **BOMB** (mutual death) | Removed | Removed |
+| 6 | `A < B` (A is stronger, lower enum value) | **EAT** | Moves to `dst` | Removed |
+| 7 | `A > B` (A is weaker) | **KILLED** | Removed | Stays |
+
+Row 1 comes first because 炸弹和敌方任何棋子相遇则同归于尽，**包括军旗和地雷**.
+A bomb never survives and never carries off the flag; it takes whatever it
+touches down with it. Note that `flag_captured` is decided by `B == JUNQI`
+alone, independent of the event, so a bomb reaching the flag still ends the
+defender's game — it just does not leave a piece standing on the stronghold.
+
+> An earlier revision of this table listed the flag and mine rows first and
+> restricted row 4 to `A ∈ [SILING..GONGB]`, which made rows 1 and 4 disagree
+> about `ZHADAN` vs `DILEI`. The implementation resolved that ambiguity the
+> wrong way for both `ZHADAN` vs `DILEI` and `ZHADAN` vs `JUNQI`.
+
+**Authoritative source**: `legacy_gui/src/rule.c::CompareChess`, which tests
+`ZHADAN` before the flag and the mine for exactly this reason.
+`tests/test_combat_rules.py::test_combat_matches_legacy_table` compares all
+120 valid `(A, B)` pairs against a literal transcription of it.
 
 ### 3.2 SILING Flag-Reveal Rule (Q7)
 

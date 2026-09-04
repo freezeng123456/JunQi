@@ -485,17 +485,21 @@ def resolve_combat(
     if attacker.is_immobile:
         raise ValueError(f"immobile attacker {attacker!r} cannot initiate combat")
 
-    # Flag capture: any piece eats the flag.
+    # Bomb: mutual death against ANYTHING, including the mine and the flag.
+    # This must be tested before the flag and mine branches — the ordering is
+    # the rule, not an implementation detail. 炸弹和敌方任何棋子相遇则同归于
+    # 尽，包括军旗. Matches legacy_gui/src/rule.c::CompareChess, which tests
+    # ZHADAN first for the same reason.
+    if attacker.is_bomb or defender.is_bomb:
+        return Event.BOMB
+
+    # Flag capture: any (non-bomb) piece eats the flag.
     if defender.is_flag:
         return Event.EAT
 
     # Mine: only engineer eats it; everyone else dies.
     if defender.is_mine:
         return Event.EAT if attacker.is_engineer else Event.KILLED
-
-    # Bomb: mutual death regardless of direction.
-    if attacker.is_bomb or defender.is_bomb:
-        return Event.BOMB
 
     # Both ranked combatants — compare by rank (smaller enum = stronger).
     if not (attacker.is_ranked_combatant and defender.is_ranked_combatant):
