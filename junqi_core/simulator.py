@@ -31,7 +31,7 @@ from typing import Any
 from .info_model import BeliefTensor
 from .rules import ALL_SEATS, Seat, ShowMode
 from .setup import generate_random_setup
-from .state import Action, GameState, MoveResult
+from .state import Action, GameState, MoveResult, classify_termination
 
 # ===========================================================================
 # Trace dataclass
@@ -160,47 +160,15 @@ def simulate_random_game(
     trace.winner_team = state.winner_team
     trace.draw = state.draw
     trace.terminal_hash = state.state_hash()
-    trace.termination_reason = _classify_termination(state, trace)
+    trace.termination_reason = classify_termination(
+        state, trace.results[-1] if trace.results else None
+    )
 
     if track_beliefs:
         for s, b in beliefs.items():
             trace.terminal_beliefs[s] = b
 
     return trace
-
-
-# ===========================================================================
-# Termination classification
-# ===========================================================================
-
-
-def _classify_termination(state: GameState, trace: GameTrace) -> str:
-    """Label why the game ended — for stress-test coverage analysis."""
-    if not state.terminated:
-        return "timeout"
-    if state.draw:
-        return "draw"
-    if not trace.results:
-        return "unknown"
-
-    last = trace.results[-1]
-    if last.flag_captured:
-        return "flag_capture"
-    if len(last.seats_died_this_step) >= 2:
-        # Could be Q14 (simultaneous both-team defeats via same action) or
-        # a Q12 chain triggered by the same step.
-        # Distinguish by checking whether both teams were already one-away
-        # from defeat before the step.
-        # Heuristic: if the last action was combat (EAT/BOMB/KILLED) AND two
-        # seats died AND they are on opposite teams, it's likely Q14.
-        seat_teams = {s.team for s in last.seats_died_this_step}
-        if len(seat_teams) >= 2:
-            return "q14_mutual"
-        return "q12_chain"
-    if last.seats_died_this_step:
-        # A single death closing out the losing team
-        return "team_kill"
-    return "unknown"
 
 
 # ===========================================================================

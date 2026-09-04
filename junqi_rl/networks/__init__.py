@@ -3,9 +3,10 @@
 Networks
 --------
 JunqiNet
-    Main policy + value network.  Input: 256-channel 17×17 spatial tensor
+    Main policy + value network.  Input: 412-channel 17×17 spatial tensor
     (canonical frame) + 28-dim global vector.  Output: policy logits over the
-    83,521-dim flat action space + scalar (or categorical) value estimate.
+    16,641-dim compact action space (129 on-board cells, src × dst) + scalar
+    (or categorical) value estimate.
 
 TransformerBlock
     Pre-norm residual transformer layer with multi-head self-attention and

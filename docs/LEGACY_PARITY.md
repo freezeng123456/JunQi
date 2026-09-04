@@ -33,14 +33,18 @@ Each row below is tagged with one of:
 |---|---|---|---|
 | Same-rank BOMB | `rules.resolve_combat(a, b) → BOMB if a==b` | `PlayResult()` in `junqi.c`: compares ranks and flags same-rank as BOMB | ✅ |
 | JUNQI as dst | src EATs if src is mobile | `CanEatChess()` in `event.c`: `pLineup->type==JUNQI` → EAT always | ✅ |
-| ZHADAN triggers BOMB | Both-die regardless of rank | `event.c` tests `ZHADAN` at the src-side via `CheckBombEvent()` → `BOMB` | ✅ |
-| DILEI as defender | attacker=GONGB → EAT; else KILLED | `event.c` `CanEatChess()`: GONGB branch vs non-GONGB; `pLineup->mx_type` comparison | ✅ |
+| ZHADAN triggers BOMB | Both-die regardless of rank, **checked before the flag and mine branches** | `rule.c::CompareChess()` tests `ZHADAN` first | ✅ |
+| DILEI as defender | attacker=GONGB → EAT; else KILLED — **but only once ZHADAN has been ruled out** | `rule.c::CompareChess()`: the `DILEI` branch is unreachable for a bomb | ✅ |
+| ZHADAN vs DILEI | BOMB | BOMB | ✅ |
+| ZHADAN vs JUNQI | BOMB (the bomb does not survive to hold the flag; `flag_captured` is still set, so the defender surrenders) | BOMB | ✅ |
 | Rank order (SILING<JUNZH<…<GONGB) | `PieceType` IntEnum values | `enum ChessType { JUNQI, DILEI, ZHADAN, SILING, JUNZH, SHIZH, LVZH, TUANZH, YINGZH, LIANZH, PAIZH, GONGB }` (value 2..13) | ✅ same ordering |
 
-**Critical cross-check**: `junqi_core/rules.py::resolve_combat()` unit
-tests (`tests/test_combat_rules.py`, 31 cases) match the cases exercised
-by `legacy_engine/src/event.c::CanEatChess()` + `ProEatEvent()`. Any new
-combat variant MUST be added to both suites simultaneously.
+**Critical cross-check**: `tests/test_combat_rules.py` sweeps all 120 valid
+`(attacker, defender)` pairs against a literal transcription of
+`legacy_gui/src/rule.c::CompareChess()`. The earlier hand-picked golden
+sample covered ten pairs and missed both bomb-vs-mine and bomb-vs-flag, which
+is how the two branches above came to disagree while both were marked ✅.
+Prefer extending the sweep over adding individual cases.
 
 ---
 

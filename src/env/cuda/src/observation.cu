@@ -471,7 +471,13 @@ __global__ void observation_kernel(
         if (STRONGHOLD_FLAT[f]) spatial[(CH_BOARD_STATIC + 1) * PLANE + off] = 1.0f;
         if (RAIL_FLAT[f])       spatial[(CH_BOARD_STATIC + 2) * PLANE + off] = 1.0f;
         if (NINE_GRID_FLAT[f])  spatial[(CH_BOARD_STATIC + 3) * PLANE + off] = 1.0f;
-        // curve_rail planes (4,5) are always 0 in this kernel.
+        // Plane 4 marks the 8 cells adjoining an arc rail link, matching
+        // _build_board_static_world() on the CPU.  Not CURVE_RAIL_OF: that id
+        // spans 40 rail cells, 32 of which are ordinary straight rail already
+        // covered by RAIL_FLAT.  A per-curve one-hot would also break the
+        // canonical rotation, which permutes the curve ids.
+        if (CURVE_ARC_FLAT[f]) spatial[(CH_BOARD_STATIC + 4) * PLANE + off] = 1.0f;
+        // Plane 5 is reserved and stays 0.
     }
 
     // --------------------------------------------------------------------

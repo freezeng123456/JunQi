@@ -3,40 +3,42 @@
 Architecture overview
 ---------------------
 The network maps a canonical-frame observation to a policy distribution over
-the flat 83,521-action space and a scalar (or categorical) value estimate.
+the compact 16,641-action space and a scalar (or categorical) value estimate.
 
 Input
 ~~~~~
-* ``obs_spatial``  : float32 tensor ``(B, OBS_CHANNELS, 17, 17)``  — 256 channels
+* ``obs_spatial``  : float32 tensor ``(B, OBS_CHANNELS, 17, 17)``  — 412 channels
 * ``obs_global``   : float32 tensor ``(B, OBS_GLOBAL_DIMS)``        — 28 scalars
-* ``legal_mask``   : bool tensor    ``(B, FLAT_ACTION_DIM)``         — 83,521 bits
+* ``legal_mask``   : bool tensor    ``(B, FLAT_ACTION_DIM)``         — 16,641 bits
 
 Pipeline
 ~~~~~~~~
-1. **CNN stem** — 3 conv layers compress (256, 17, 17) → (D, 17, 17),
+1. **CNN stem** — 3 conv layers compress (412, 17, 17) → (C, 17, 17),
    keeping spatial resolution to preserve board topology.
 
-2. **Positional patch embedding** — reshape (D, 17, 17) → (289, D), add
-   learnable positional embeddings (one per board cell).
+2. **Positional patch embedding** — reshape (C, 17, 17) → (289, C), keep the
+   129 on-board cells, project to (129, D), add learnable positional
+   embeddings (one per on-board cell).
 
 3. **Global token injection** — project ``obs_global`` (28,) → (1, D) and
-   prepend as a CLS token; sequence length becomes 290.
+   prepend as a CLS token; sequence length becomes 130.
 
 4. **Transformer trunk** — L layers of pre-norm self-attention + FFN
    (default L=6, D=256, 8 heads).
 
 5. **Heads**:
-   - *Policy head*: For each of the 289 cell tokens, project to D/8 keys and
-     queries; build (289, 289) cross-attention map → reshape to (83,521)
-     logits; apply legal mask.
+   - *Policy head*: For each of the 129 cell tokens, project to
+     ``action_key_dim`` keys and queries; build the (129, 129) src-by-dst
+     score map → reshape to (16,641) logits; apply legal mask.
    - *Value head*: Read from CLS token; project to 1 scalar or N_VF_CAT
      categorical bins (default: scalar).
 
 Action space
 ~~~~~~~~~~~~
-``action_id = src_flat * 289 + dst_flat``  where ``src_flat = sy * 17 + sx``.
-The model outputs logits in **canonical** frame.  Callers must convert to
-world frame with ``unrotate_action_id`` before passing to ``JunqiEnv.step``.
+``action_id = compact_src * 129 + compact_dst`` over the 129 on-board cells.
+The model outputs logits in **canonical** frame.  Callers must convert to the
+world frame (``src_flat * 289 + dst_flat``) with ``unrotate_action_id`` before
+passing to ``JunqiEnv.step``.
 
 See also
 --------
@@ -83,7 +85,7 @@ class JunqiNetConfig:
     """All hyper-parameters for :class:`JunqiNet`.
 
     Defaults mirror Ataraxos ``MoveTransformerConfig`` scaled to the
-    larger 4-player board (17×17 vs 10×10) and 83,521-action space.
+    larger 4-player board (17×17 vs 10×10) and 16,641-action space.
     """
 
     # CNN stem
@@ -238,7 +240,7 @@ class JunqiNet(nn.Module):
     -------------------------
     ``action``         : int32 tensor  (B,)          canonical-frame action id
     ``action_log_prob``: float tensor  (B,)          log-prob of chosen action
-    ``log_probs``      : float tensor  (B, 83521)    full log-prob distribution
+    ``log_probs``      : float tensor  (B, 16641)    full log-prob distribution
     ``value``          : float tensor  (B,) or (B, N_VF_CAT)   value estimate
     """
 
@@ -293,7 +295,7 @@ class JunqiNet(nn.Module):
         # -- Policy head -------------------------------------------------------
         # Bilinear action logits: for each (src, dst) pair the score is
         #   score[b, src, dst] = q[b, src] · k[b, dst]^T / sqrt(key_dim)
-        # which is then flattened to (B, 289*289) = (B, 83521).
+        # which is then flattened to (B, 129*129) = (B, 16641).
         Kd = cfg.action_key_dim
         self.q_proj = nn.Linear(D, Kd, bias=False)
         self.k_proj = nn.Linear(D, Kd, bias=False)
@@ -566,7 +568,7 @@ class JunqiNet(nn.Module):
         values      : float  (B,) or (B, N_VF_CAT)
         """
         cls, cells = self._encode(obs_spatial, obs_global)
-        logits = self._policy_logits(cells, legal_mask)  # (B, 83521), illegal=-inf
+        logits = self._policy_logits(cells, legal_mask)  # (B, 16641), illegal=-inf
 
         logits_f = logits.float()
         u = torch.rand_like(logits_f).clamp_(1e-10, 1.0)

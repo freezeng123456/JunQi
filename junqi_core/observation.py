@@ -14,7 +14,8 @@ Design contract (see `docs/ARCHITECTURE.md` §4 and ADR-106, ADR-118):
     (top); `left_side_enemy` occupies canonical x in [0, 5]; `right_side_enemy`
     occupies canonical x in [11, 16].
 
-  * 256 spatial channels, 28 global scalars.  Exact layout is pinned in the
+  * `OBS_CHANNELS` spatial channels (412 as of the CombatMemory v6 layout)
+    and `OBS_GLOBAL_DIMS` global scalars (28).  Exact layout is pinned in the
     `CHANNEL_LAYOUT` / `GLOBAL_LAYOUT` module-level constants below; changes
     require an ADR.
 
@@ -47,13 +48,13 @@ import numpy as np
 
 from .board import (
     BOARD_SIZE,
-    cell_info,
     is_camp,
     is_nine_grid,
     is_railway,
     is_stronghold,
 )
 from .info_model import NUM_TRACKED_TYPES, TRACKED_TYPES, BeliefTensor
+from .rail_topology import CURVE_ARC_CELLS
 from .rotation import rotate_planes
 from .rules import (
     MAX_NUM_MOVES,
@@ -285,7 +286,29 @@ def _popcount_pid_pair(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
 
 
 def _build_board_static_world() -> np.ndarray:
-    """Compute the (6, 17, 17) board-topology plane stack once at import."""
+    """Compute the (6, 17, 17) board-topology plane stack once at import.
+
+    Every plane here must be invariant under 90-degree rotation, because the
+    stack is built in the world frame and then rotated into each observer's
+    canonical frame.  A plane that is not rotation-invariant would encode the
+    observer's seat identity, which the canonical frame exists to remove.
+
+    Plane 4 marks the 8 cells that adjoin a curved (arc) rail link, one pair
+    per board corner.  That is the only rail information the railway plane
+    does not already carry: every other rail run is straight, and the arc is
+    the sole place a non-engineer may leave one.
+
+    It is deliberately *not* ``CURVE_RAIL_OF > 0``.  That id groups the two
+    straight runs meeting at each corner so ``_same_curve_rail`` can join
+    them, which covers 40 rail cells; 32 of those are ordinary straight rail
+    that the railway plane has already marked, so encoding them here would
+    just restate it.  A one-hot per curve id is wrong for a second reason:
+    ``rot90`` permutes the four corner curves in a 4-cycle (1 -> 4 -> 3 -> 2),
+    so "curve 1" would light a different corner for each observer.  The arc
+    set is rotation-invariant.
+
+    Plane 5 is reserved.
+    """
     planes = np.zeros((6, BOARD_SIZE, BOARD_SIZE), dtype=np.float32)
     for y in range(BOARD_SIZE):
         for x in range(BOARD_SIZE):
@@ -297,12 +320,8 @@ def _build_board_static_world() -> np.ndarray:
                 planes[2, y, x] = 1.0
             if is_nine_grid(x, y):
                 planes[3, y, x] = 1.0
-            info = cell_info(x, y)
-            curve_id = getattr(info, "curve_rail_id", 0)
-            if curve_id == 1:
+            if CURVE_ARC_CELLS[y * BOARD_SIZE + x]:
                 planes[4, y, x] = 1.0
-            if curve_id == 2:
-                planes[5, y, x] = 1.0
     return planes
 
 
@@ -382,8 +401,8 @@ class ObservationBuilder:
 
     Owns 3 pre-allocated NumPy buffers:
 
-      * ``_world``     (256, 17, 17) float32 — world-frame scratch.
-      * ``_canonical`` (256, 17, 17) float32 — canonical-frame output.
+      * ``_world``     (OBS_CHANNELS, 17, 17) float32 — world-frame scratch.
+      * ``_canonical`` (OBS_CHANNELS, 17, 17) float32 — canonical-frame output.
       * ``_global``    (28,)         float32 — global feature vector.
 
     :meth:`build` zeros the buffers, runs the 16 vectorized writers, runs a
@@ -549,8 +568,8 @@ class ObservationBuilder:
         state: GameState,
         belief: BeliefTensor,
         observer: Seat,
-        world_buf: np.ndarray,        # scratch (256, 17, 17) float32
-        canonical_out: np.ndarray,    # final   (256, 17, 17) float32
+        world_buf: np.ndarray,        # scratch (OBS_CHANNELS, 17, 17) float32
+        canonical_out: np.ndarray,    # final   (OBS_CHANNELS, 17, 17) float32
         global_out: np.ndarray,       # final   (28,)          float32
     ) -> None:
         """Core assembly logic used by every public entry point."""

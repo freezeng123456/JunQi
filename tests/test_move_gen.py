@@ -241,6 +241,79 @@ def test_non_gongb_diagonal_not_camp_still_illegal() -> None:
 
 
 # ===========================================================================
+# move_requires_gongb — engineer identity must not leak
+# ===========================================================================
+#
+# apply_path_revealed_gongb broadcasts "this piece is an engineer" to all four
+# observers, and move_requires_gongb is what gates it. Getting it wrong in the
+# permissive direction outs an engineer for a move any piece could have made,
+# which is a straight information leak in a hidden-piece game.
+#
+# The rule: 其它棋子在铁路线上只能直走或经过弧形线，不能转直角弯. So crossing
+# an arc reveals nothing; turning a right angle, or routing around a blocker,
+# reveals an engineer. combat_memory's docstring used to list "curve rail"
+# among the engineer-only paths, hence these tests.
+
+# One arc per inner corner, as built into the rail graph by _SPC_EDGES.
+_ARCS = (
+    ((6, 5), (5, 6)),
+    ((10, 5), (11, 6)),
+    ((5, 10), (6, 11)),
+    ((11, 10), (10, 11)),
+)
+
+
+def _gongb(seat: Seat = Seat.NORTH) -> PieceRef:
+    return PieceRef(seat, PieceType.GONGB)
+
+
+def _paizh(seat: Seat = Seat.NORTH) -> PieceRef:
+    return PieceRef(seat, PieceType.PAIZH)
+
+
+@pytest.mark.parametrize("src,dst", [(a, b) for pair in _ARCS for a, b in (pair, pair[::-1])])
+def test_arc_crossing_does_not_reveal_engineer(
+    src: tuple[int, int], dst: tuple[int, int]
+) -> None:
+    from junqi_core.move_gen import move_requires_gongb
+
+    assert is_legal_move({src: _paizh()}, src, dst, Seat.NORTH), (
+        f"premise: a non-engineer must be able to cross the arc {src}->{dst}"
+    )
+    assert not move_requires_gongb({src: _gongb()}, src, dst), (
+        f"{src}->{dst} crosses an arc, which any piece may do; flagging it "
+        f"engineer-only would publicly out the engineer"
+    )
+
+
+def test_arc_reachable_run_does_not_reveal_engineer() -> None:
+    """Not just the two arc cells — the whole run either side of one."""
+    from junqi_core.move_gen import move_requires_gongb
+
+    src, dst = (6, 3), (3, 6)  # down NORTH's left column, across the arc, into WEST
+    assert is_legal_move({src: _paizh()}, src, dst, Seat.NORTH)
+    assert not move_requires_gongb({src: _gongb()}, src, dst)
+
+
+def test_right_angle_turn_reveals_engineer() -> None:
+    from junqi_core.move_gen import move_requires_gongb
+
+    src, dst = (8, 5), (6, 3)  # front row into the left column, square corner at (6,5)
+    assert not is_legal_move({src: _paizh()}, src, dst, Seat.NORTH), (
+        "premise: a non-engineer must not be able to turn a right angle"
+    )
+    assert is_legal_move({src: _gongb()}, src, dst, Seat.NORTH)
+    assert move_requires_gongb({src: _gongb()}, src, dst)
+
+
+def test_plain_rail_and_road_moves_do_not_reveal_engineer() -> None:
+    from junqi_core.move_gen import move_requires_gongb
+
+    assert not move_requires_gongb({(8, 5): _gongb()}, (8, 5), (10, 5))  # straight rail
+    assert not move_requires_gongb({(8, 3): _gongb()}, (8, 3), (8, 4))   # one road step
+
+
+# ===========================================================================
 # has_legal_moves_soa — must agree with the scalar reference
 # ===========================================================================
 #
