@@ -858,7 +858,7 @@ def collect_rollout_gpu_v2(
         # envs that were ALREADY terminated at start of step t ("stale rows"),
         # on the theory that step_device_torch skips them and the obs we
         # computed is from a post-game state. Empirical instrumentation
-        # (tools/_archive/audit/debug_collector_logic — N=16 T=2048 rollout)
+        # (one-off N=16 T=2048 rollout, script not kept)
         # showed stale row count is exactly 0: ``reset_terminated_device``
         # at the END of every step flips d_terminated back to False before
         # the next iteration reads it, so ``done_t`` is never True at the

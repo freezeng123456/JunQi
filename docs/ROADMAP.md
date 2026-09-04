@@ -40,7 +40,7 @@
   4. ✅ 将直线铁路前缀计算从 cumprod 改为迭代 prefix-AND (省去大量临时数组分配)
   5. ✅ 将 `has_legal_moves_soa` 增加快速路径: 先检查正交邻居是否空闲 (覆盖 99%+ case)
   6. ✅ 消除 `rotation.py` import-time `print()` 副作用
-  7. ✅ 归档 7 个根目录 `profile_*.py` 探索脚本到 `tools/_archive/`
+  7. ✅ 移除 7 个根目录 `profile_*.py` 探索脚本 (曾先归档到 `tools/_archive/`, 见 D-08)
 - **实测数字**: 从 16.6k → **25.7k env·steps/s** @ N=1024 (1.55× 加速)
 - **目标调整**: 原 50k 目标基于简化的 4×16-cycle 铁路拓扑. 正确实现 (73-node 单连通分量 + 4 条曲线铁路) 后, CPU 路径固有复杂度增加. 吞吐目标下调至 25k, GPU 管道 (1.15M env·steps/s) 不受影响.
 - **新增 tables**: `_movegen_tables.CURVE_CHAIN_RAYS_PAD`, `IS_CURVE_ACTIVE`
@@ -272,7 +272,7 @@
 | D-05 | `configs/*.yaml` 实验配置归档 | 中 | 现有 `configs/` 是空目录 |
 | D-06 | Type hints 覆盖率 | 低 | Core 已基本完整, RL 层有缺口 |
 | D-07 | `junqi_core.rotation` import-time self-check 关静默 | 低 | 跟 T-14 一起做 |
-| D-08 | 清理 `profile_*.py`, `tools/debug_*.py` 等探索脚本 | 低 | 应归档到 `tools/_archive/` 或删除 |
+| D-08 | 清理 `profile_*.py`, `tools/debug_*.py` 等探索脚本 | ✅ 完成 | `tools/_archive/` 及一次性 bench/debug 脚本已删除 |
 
 ---
 
