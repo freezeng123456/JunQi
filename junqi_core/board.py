@@ -390,30 +390,6 @@ def eight_neighbors(x: int, y: int) -> tuple[tuple[int, int], ...]:
     return tuple(result)
 
 
-def nine_grid_rail_neighbors(x: int, y: int) -> tuple[tuple[int, int], ...]:
-    """Extra 'jump' neighbors for NineGrid cells (step of 2, not 1).
-
-    Used by the engineer pathing algorithm in legacy `CanMovetoJunqi` for the
-    nine-grid's diagonal rail shortcuts. For non-nine-grid cells this returns ().
-    """
-    if not is_nine_grid(x, y):
-        return ()
-    result: list[tuple[int, int]] = []
-    for dy in (-2, 0, 2):
-        for dx in (-2, 0, 2):
-            if dx == 0 and dy == 0:
-                continue
-            nx, ny = x + dx, y + dy
-            if is_on_board(nx, ny):
-                result.append((nx, ny))
-    return tuple(result)
-
-
-# ===========================================================================
-# Self-check at import time (fail loudly if topology is broken)
-# ===========================================================================
-
-
 def _self_check() -> None:
     # Seat count invariant: 4 × 30 = 120 seat cells + 9 nine-grid = 129 on-board cells.
     on_board = sum(1 for ci in CELL_TABLE if ci.is_on_board)

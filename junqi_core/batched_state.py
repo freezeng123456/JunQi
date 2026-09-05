@@ -7,7 +7,6 @@ without per-environment Python loops in the hot-path.
 Milestone targets (ADR-123, Phase 1a M1):
   - ``step_batch``            : ≥50 000 plays/sec aggregate at N=1024
   - ``legal_action_ids_batch``: ≥500 000 actions/sec aggregate at N=1024
-  - ``to_game_states``        : round-trip fidelity (test parity)
 
 Design notes
 ------------
@@ -1217,62 +1216,6 @@ class BatchedGameState:
     # ==================================================================
     # Conversion back to list of game states
     # ==================================================================
-
-    def to_game_states(self) -> list[GameState]:
-        """Reconstruct a list of :class:`GameState` objects from this batch.
-
-        Useful for testing round-trip fidelity.  This is NOT a hot path.
-        """
-        from .rules import Seat as _Seat
-        from .rules import ShowMode
-        from .state import GameState
-
-        states: list[GameState] = []
-        for i in range(self.num_envs):
-            # We rebuild a GameState with only SoA columns set (no dict state).
-            # The dict state (pieces, info, etc.) is NOT reconstructed here —
-            # we create a minimal shell sufficient for SoA-based API calls
-            # (legal_action_ids, observation building via builder).
-            # Full reconstruction would require reversing all the dict logic.
-            gs = object.__new__(GameState)
-            # Scalars
-            gs.turn = _Seat(int(self.turn[i]))
-            gs.move_counter = int(self.move_counter[i])
-            gs.moves_since_last_combat = int(self.moves_since_last_combat[i])
-            gs.terminated = bool(self.terminated[i])
-            gs.winner_team = None if self.winner_team[i] < 0 else int(self.winner_team[i])
-            gs.draw = bool(self.draw[i])
-            gs.zobrist = int(self.zobrist[i])
-            gs.show_mode = ShowMode.HALF_DARK
-            gs.rules_version = "1.1.0"
-            gs.debug_include_private = False
-            # SoA columns (copy)
-            gs.alive = self.alive[i].copy()
-            gs.piece_type_arr = self.piece_type_arr[i].copy()
-            gs.piece_seat_arr = self.piece_seat_arr[i].copy()
-            gs.pos_x = self.pos_x[i].copy()
-            gs.pos_y = self.pos_y[i].copy()
-            gs.zero_x = self.zero_x[i].copy()
-            gs.zero_y = self.zero_y[i].copy()
-            gs.move_count_arr = self.move_count_arr[i].copy()
-            gs.active_eat_arr = self.active_eat_arr[i].copy()
-            gs.passive_surv_arr = self.passive_surv_arr[i].copy()
-            gs.death_reason_arr = self.death_reason_arr[i].copy()
-            gs.death_step_arr = self.death_step_arr[i].copy()
-            gs.death_loc_flat_arr = self.death_loc_flat_arr[i].copy()
-            gs.cell_piece_id = self.cell_piece_id[i].copy()
-            gs.seat_dead_arr = self.seat_dead_arr[i].copy()
-            gs.seat_flag_revealed_arr = self.seat_flag_revealed_arr[i].copy()
-            # Dict state: set minimal non-None values (no pieces dict)
-            gs.pieces = {}
-            gs.info = {_Seat(s): type('SeatInfo', (), {'dead': bool(self.seat_dead_arr[i, s]),
-                                                         'flag_revealed': bool(self.seat_flag_revealed_arr[i, s])})()
-                       for s in range(4)}
-            gs.zero_board = {}
-            gs.piece_state = {}
-            gs.deaths = {}
-            states.append(gs)
-        return states
 
     # ==================================================================
     # Clone
