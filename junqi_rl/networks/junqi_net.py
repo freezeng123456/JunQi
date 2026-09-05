@@ -48,7 +48,7 @@ ADR-119 (flat action encoding), ADR-102 (canonical rotation), ADR-106 (obs layou
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
@@ -58,9 +58,13 @@ from torch.distributions import Categorical
 
 from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
 from junqi_core.board import (
-    NUM_ON_BOARD_CELLS,
     COMPACT_ACTION_DIM,
+    COMPACT_RAIL_DEGREE,
+    COMPACT_RAIL_NEIGHBORS,
+    COMPACT_ROAD_DEGREE,
+    COMPACT_ROAD_NEIGHBORS,
     COMPACT_TO_FLAT,
+    NUM_ON_BOARD_CELLS,
 )
 
 
@@ -187,6 +191,14 @@ class CNNStem(nn.Module):
     Uses residual blocks with GELU activations.  The spatial resolution is
     preserved throughout (padding='same') so that the output can be
     directly unrolled into 289 board-cell tokens.
+
+    Retained for :class:`~junqi_rl.networks.belief_net.BeliefNet`, whose head
+    predicts a type distribution at all 289 encoding positions.  The move
+    policy uses :class:`GraphStem` instead: it works on the 129 real cells and
+    over the board's own road and rail graphs, which a padded convolution
+    cannot represent.  BeliefNet has the same off-board problem and would
+    benefit from the same treatment, but changing it also moves the label
+    shape in belief_ppo, and it is disabled in the production config.
     """
 
     def __init__(
@@ -223,6 +235,114 @@ class CNNStem(nn.Module):
 # ---------------------------------------------------------------------------
 
 
+class GraphStem(nn.Module):
+    """Per-cell embedding plus neighbour aggregation over the board's own graphs.
+
+    Replaces a 3x3 convolutional stem over the 17x17 encoding. That encoding
+    holds 160 positions that are not on the board, and a padded convolution
+    both spends 55% of its work on them and folds their zeros into the
+    features of real cells: for the 81 on-board cells whose window overlaps
+    the void, "my neighbour is off the board" becomes indistinguishable from
+    "my neighbour is an empty square".
+
+    Junqi's connectivity is not a grid either. Two graphs describe it, and
+    they disagree with each other and with Euclidean distance:
+
+      * road, degree 0 to 8 -- one orthogonal step plus the diagonals a camp
+        allows, so a camp's neighbourhood is twice a plain cell's
+      * rail, degree 0 to 4 -- long-range and sparse; a single rail move can
+        cross the board, which a 7x7 receptive field cannot express at all
+
+    So aggregate along each graph separately and combine. Off-board cells are
+    absent from every neighbour list rather than present as zeros, and rail
+    reachability becomes part of the stem instead of something the transformer
+    has to rediscover from learned position embeddings.
+
+    Padded neighbour slots index one past the last cell; a zero row is
+    appended before gathering so they contribute nothing, and the sum is
+    divided by the true degree (floored at one for the cells with none).
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        num_layers: int = 3,
+        ffn_factor: int = 4,
+    ) -> None:
+        super().__init__()
+        self.embed = nn.Linear(in_channels, out_channels)
+        self.self_lin = nn.ModuleList()
+        self.road_lin = nn.ModuleList()
+        self.rail_lin = nn.ModuleList()
+        self.ffn = nn.ModuleList()
+        self.norm_msg = nn.ModuleList()
+        self.norm_ffn = nn.ModuleList()
+        for _ in range(num_layers):
+            self.self_lin.append(nn.Linear(out_channels, out_channels, bias=False))
+            self.road_lin.append(nn.Linear(out_channels, out_channels, bias=False))
+            self.rail_lin.append(nn.Linear(out_channels, out_channels, bias=False))
+            # A 3x3 convolution carries nine weights per channel pair; a
+            # neighbour mean carries one. Without something to make up the
+            # difference the stem is ~5x smaller than the one it replaces, and
+            # an Elo comparison could not separate the graph structure from
+            # the lost capacity. Give each round a transformer-style FFN.
+            self.ffn.append(
+                nn.Sequential(
+                    nn.Linear(out_channels, ffn_factor * out_channels),
+                    nn.GELU(),
+                    nn.Linear(ffn_factor * out_channels, out_channels),
+                )
+            )
+            self.norm_msg.append(nn.LayerNorm(out_channels))
+            self.norm_ffn.append(nn.LayerNorm(out_channels))
+
+        self.register_buffer(
+            "road_nb",
+            torch.from_numpy(COMPACT_ROAD_NEIGHBORS.astype("int64")),
+            persistent=False,
+        )
+        self.register_buffer(
+            "rail_nb",
+            torch.from_numpy(COMPACT_RAIL_NEIGHBORS.astype("int64")),
+            persistent=False,
+        )
+        self.register_buffer(
+            "road_deg",
+            torch.from_numpy(COMPACT_ROAD_DEGREE.astype("float32"))
+            .clamp_min(1.0)
+            .view(1, -1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "rail_deg",
+            torch.from_numpy(COMPACT_RAIL_DEGREE.astype("float32"))
+            .clamp_min(1.0)
+            .view(1, -1, 1),
+            persistent=False,
+        )
+
+    @staticmethod
+    def _aggregate(h: Tensor, neighbors: Tensor, degree: Tensor) -> Tensor:
+        """Mean of each cell's neighbours. ``h`` is (B, 129, C)."""
+        B, _, C = h.shape
+        padded = torch.cat([h, h.new_zeros(B, 1, C)], dim=1)   # (B, 130, C)
+        gathered = padded[:, neighbors]                        # (B, 129, deg, C)
+        return gathered.sum(dim=2) / degree
+
+    def forward(self, x: Tensor) -> Tensor:  # (B, 129, C_in) -> (B, 129, C_out)
+        h = self.embed(x)
+        for self_lin, road_lin, rail_lin, ffn, norm_msg, norm_ffn in zip(
+            self.self_lin, self.road_lin, self.rail_lin,
+            self.ffn, self.norm_msg, self.norm_ffn, strict=True,
+        ):
+            road = self._aggregate(h, self.road_nb, self.road_deg)
+            rail = self._aggregate(h, self.rail_nb, self.rail_deg)
+            h = norm_msg(h + F.gelu(self_lin(h) + road_lin(road) + rail_lin(rail)))
+            h = norm_ffn(h + ffn(h))
+        return h
+
+
 class JunqiNet(nn.Module):
     """Policy + value network for 4-player 四国军棋.
 
@@ -257,10 +377,12 @@ class JunqiNet(nn.Module):
 
         D = cfg.embed_dim
 
-        # -- CNN stem ----------------------------------------------------------
-        self.cnn = CNNStem(OBS_CHANNELS, cfg.cnn_channels, cfg.cnn_layers)
+        # -- Graph stem --------------------------------------------------------
+        self.stem = GraphStem(
+            OBS_CHANNELS, cfg.cnn_channels, cfg.cnn_layers, cfg.ff_factor
+        )
 
-        # Project CNN output channels to embed_dim (may be a no-op if equal)
+        # Project stem output channels to embed_dim (may be a no-op if equal)
         if cfg.cnn_channels != D:
             self.patch_proj: nn.Module = nn.Linear(cfg.cnn_channels, D)
         else:
@@ -346,14 +468,13 @@ class JunqiNet(nn.Module):
         B = obs_spatial.size(0)
         D = self.cfg.embed_dim
 
-        # CNN stem → (B, cnn_channels, 17, 17)
-        feat = self.cnn(obs_spatial)
+        # Take the 129 on-board cells first, so nothing downstream ever sees
+        # the 160 encoding positions that are not on the board.
+        cells = obs_spatial.permute(0, 2, 3, 1).reshape(B, NUM_CELLS, -1)
+        cells = cells[:, self.on_board_idx]      # (B, 129, OBS_CHANNELS)
 
-        # Flatten spatial → (B, 289, cnn_channels)
-        feat = feat.permute(0, 2, 3, 1).reshape(B, NUM_CELLS, -1)
-
-        # Extract only 129 on-board cells → (B, 129, cnn_channels)
-        feat = feat[:, self.on_board_idx]
+        # Graph stem → (B, 129, cnn_channels)
+        feat = self.stem(cells)
 
         # Project to embed_dim → (B, 129, D)
         cell_tokens = self.patch_proj(feat)  # type: ignore[operator]

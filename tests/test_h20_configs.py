@@ -91,8 +91,14 @@ def test_junqi_net_builds(mod, exp):
     # Print so we can eyeball the per-exp param counts
     print(f"  {exp}: JunqiNet = {n_params:,} params "
           f"(depth={cfg.net.depth}, embed={cfg.net.embed_dim})")
-    # Min sanity bound: must be at least ~1M (baseline) and at most ~20M
-    assert 900_000 < n_params < 20_000_000, (
+    # Sanity bound only. Deliberately wide: the count tracks OBS_CHANNELS and
+    # the stem, both of which have moved. Compacting piece_id took the input
+    # from 412 channels to 317, and GraphStem replaced the convolutional stem
+    # — a 3x3 kernel carries nine weights per channel pair where neighbour
+    # aggregation carries one, so the stem shrank even after gaining an FFN
+    # per round. Pinning a tight lower bound here just re-fails on every such
+    # change without telling anyone anything.
+    assert 500_000 < n_params < 20_000_000, (
         f"{exp}: JunqiNet param count {n_params:,} seems wrong"
     )
 
