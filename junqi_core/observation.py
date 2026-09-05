@@ -1507,7 +1507,17 @@ def _write_combat_memory(
         # is then a single call — it used to be twelve, plus a Python loop
         # per type to build each mask a bit at a time.
         my_types = state.piece_type_arr[obs_pid_lo:obs_pid_lo + 30]
-        my_type_idx = _PIECETYPE_TO_TRACKED_IDX[my_types]          # (30,) int8
+        # piece_type_arr holds -1 at the five unused camp-slot pids, and
+        # indexing a NumPy table with -1 wraps to its last entry rather than
+        # erroring: those slots came out labelled GONGB. Harmless so far,
+        # because a camp pid never has a bit set in a direct-eat bitmap and so
+        # contributes nothing to the AND below, but it put phantom pids in one
+        # type's mask. Clamp the lookup and keep the untracked marker.
+        my_type_idx = np.where(
+            my_types >= 0,
+            _PIECETYPE_TO_TRACKED_IDX[np.maximum(my_types, 0)],
+            np.int8(-1),
+        )                                                           # (30,) int8
         of_type = my_type_idx[None, :] == np.arange(
             NUM_TRACKED_TYPES, dtype=np.int8
         )[:, None]                                                  # (12, 30)

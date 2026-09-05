@@ -338,3 +338,45 @@ def test_pid_bit_masks_are_single_bits_at_the_right_offset() -> None:
             else:
                 assert hi[s] == np.uint64(1) << np.uint64(gp - 64), (pid_lo, s)
                 assert lo[s] == np.uint64(0), (pid_lo, s)
+
+
+def test_tracked_idx_lookup_does_not_wrap_on_unused_pids() -> None:
+    """piece_type_arr is -1 at camp-slot pids; the lookup must not wrap.
+
+    A NumPy table indexed with -1 returns its last entry rather than
+    raising, so the five unused camp-slot pids per seat came out labelled as
+    the last tracked type (GONGB) and joined that type's pid mask in
+    _write_combat_memory. It never changed an output, because a camp pid has
+    no bit in any direct-eat bitmap and so contributes nothing to the AND,
+    but the mask was wrong and the next reader of it would not be so lucky.
+    """
+    import random
+
+    from junqi_core.rules import CAMP_INDICES, ShowMode
+    from junqi_core.setup import generate_random_setup
+    from junqi_core.state import GameState
+
+    assert int(_PIECETYPE_TO_TRACKED_IDX[-1]) == int(
+        _PIECETYPE_TO_TRACKED_IDX[len(_PIECETYPE_TO_TRACKED_IDX) - 1]
+    ), "premise: -1 wraps to the last entry"
+
+    state = GameState.new_game(
+        generate_random_setup(random.Random(0)), show_mode=ShowMode.BRIGHT
+    )
+    for seat_val in range(4):
+        types = state.piece_type_arr[seat_val * 30:seat_val * 30 + 30]
+        for slot in sorted(CAMP_INDICES):
+            assert types[slot] < 0, (
+                f"seat {seat_val} slot {slot}: expected an unused pid, "
+                f"got type {int(types[slot])}"
+            )
+        clamped = np.where(
+            types >= 0,
+            _PIECETYPE_TO_TRACKED_IDX[np.maximum(types, 0)],
+            np.int8(-1),
+        )
+        for slot in sorted(CAMP_INDICES):
+            assert clamped[slot] == -1, (
+                f"seat {seat_val} slot {slot} must stay untracked, "
+                f"got {int(clamped[slot])}"
+            )
