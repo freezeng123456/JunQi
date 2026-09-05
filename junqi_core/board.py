@@ -444,6 +444,80 @@ _self_check()
 # ===========================================================================
 
 
+# ===========================================================================
+# Compact-cell adjacency, for models that operate on the 129 on-board cells
+# ===========================================================================
+#
+# The board is not a grid.  A 3x3 convolution over the 17x17 encoding treats
+# the 160 off-board positions as zero-valued neighbours, which is wrong twice
+# over: it spends 55% of its work on cells that do not exist, and it makes
+# "my neighbour is off the board" indistinguishable from "my neighbour is an
+# empty square" for the 81 on-board cells whose window overlaps the void.
+#
+# The real connectivity is two graphs over the 129 playable cells:
+#
+#   road  -- one step, orthogonal, plus the diagonals a camp allows
+#   rail  -- the rail subgraph, including the four corner arcs and the
+#            NineGrid two-step links
+#
+# Both are exported padded to their maximum degree so a model can gather
+# neighbours without ragged tensors.  Padded slots hold NUM_ON_BOARD_CELLS,
+# one past the last valid index, so a consumer can append a zero row and
+# have the pad gather zeros.
+
+
+def _build_compact_adjacency() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    from .rail_topology import RAIL_ADJ
+
+    on_board = set(int(f) for f in COMPACT_TO_FLAT)
+    road: list[list[int]] = []
+    rail: list[list[int]] = []
+    for compact in range(NUM_ON_BOARD_CELLS):
+        flat = int(COMPACT_TO_FLAT[compact])
+        x, y = flat % BOARD_SIZE, flat // BOARD_SIZE
+        r: list[int] = []
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < BOARD_SIZE and 0 <= ny < BOARD_SIZE):
+                continue
+            nf = ny * BOARD_SIZE + nx
+            if nf in on_board:
+                r.append(int(FLAT_TO_COMPACT[nf]))
+        for dx, dy in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < BOARD_SIZE and 0 <= ny < BOARD_SIZE):
+                continue
+            nf = ny * BOARD_SIZE + nx
+            # A diagonal step exists only through a camp, on either end.
+            if nf in on_board and (is_camp(x, y) or is_camp(nx, ny)):
+                r.append(int(FLAT_TO_COMPACT[nf]))
+        road.append(sorted(r))
+        rail.append(sorted(
+            int(FLAT_TO_COMPACT[int(v)]) for v in RAIL_ADJ[flat] if int(v) in on_board
+        ))
+
+    def pad(adj: list[list[int]]) -> tuple[np.ndarray, np.ndarray]:
+        width = max(len(a) for a in adj)
+        out = np.full((NUM_ON_BOARD_CELLS, width), NUM_ON_BOARD_CELLS, dtype=np.int16)
+        deg = np.zeros(NUM_ON_BOARD_CELLS, dtype=np.int16)
+        for i, a in enumerate(adj):
+            out[i, :len(a)] = a
+            deg[i] = len(a)
+        return out, deg
+
+    road_nb, road_deg = pad(road)
+    rail_nb, rail_deg = pad(rail)
+    return road_nb, road_deg, rail_nb, rail_deg
+
+
+(
+    COMPACT_ROAD_NEIGHBORS,
+    COMPACT_ROAD_DEGREE,
+    COMPACT_RAIL_NEIGHBORS,
+    COMPACT_RAIL_DEGREE,
+) = _build_compact_adjacency()
+
+
 def _print_summary() -> None:  # pragma: no cover
     print(f"Board: {BOARD_SIZE}×{BOARD_SIZE} = {NUM_CELLS} cells")
     print(f"On-board cells: {sum(1 for ci in CELL_TABLE if ci.is_on_board)}")
