@@ -401,7 +401,7 @@ __device__ static __forceinline__ void cm_rotate(
 //   [301..303]  cm_my_kill_count_ge    (3)
 //   [304]       cm_my_is_gongb
 //   [305]       cm_my_dilei_candidate
-static constexpr int CH_CM_BASE                  = 256;
+static constexpr int CH_CM_BASE                  = 161;
 static constexpr int CH_CM_KILL_MINE_TYPE        = CH_CM_BASE +   0;
 static constexpr int CH_CM_KILL_MINE_GE          = CH_CM_BASE +  12;
 static constexpr int CH_CM_KILL_OTHER_GE         = CH_CM_BASE +  15;

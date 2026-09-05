@@ -82,11 +82,17 @@ def _quiet_others(*, exclude):
 
 
 class TestLayout:
-    def test_obs_channels_is_352(self):
-        assert OBS_CHANNELS == 412
+    def test_cm_tail_is_the_last_50_channels(self):
+        # See the note in test_observation_combat_memory_v6 about relative
+        # rather than absolute offsets.
+        assert CHANNEL_LAYOUT["cm_kill_mine_type"].start == (
+            CHANNEL_LAYOUT["move_history"].stop
+        )
 
     def test_pre_cm_prefix_unchanged(self):
-        assert CHANNEL_LAYOUT["move_history"].stop == 256
+        assert CHANNEL_LAYOUT["move_history"].stop == (
+            CHANNEL_LAYOUT["cm_kill_mine_type"].start
+        )
 
     def test_v4_group_sizes(self):
         sizes = {

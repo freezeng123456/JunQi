@@ -7,13 +7,13 @@ the compact 16,641-action space and a scalar (or categorical) value estimate.
 
 Input
 ~~~~~
-* ``obs_spatial``  : float32 tensor ``(B, OBS_CHANNELS, 17, 17)``  — 412 channels
+* ``obs_spatial``  : float32 tensor ``(B, OBS_CHANNELS, 17, 17)``  — 317 channels
 * ``obs_global``   : float32 tensor ``(B, OBS_GLOBAL_DIMS)``        — 28 scalars
 * ``legal_mask``   : bool tensor    ``(B, FLAT_ACTION_DIM)``         — 16,641 bits
 
 Pipeline
 ~~~~~~~~
-1. **CNN stem** — 3 conv layers compress (412, 17, 17) → (C, 17, 17),
+1. **CNN stem** — 3 conv layers compress (OBS_CHANNELS, 17, 17) → (C, 17, 17),
    keeping spatial resolution to preserve board topology.
 
 2. **Positional patch embedding** — reshape (C, 17, 17) → (289, C), keep the

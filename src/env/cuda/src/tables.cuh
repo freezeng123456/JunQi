@@ -119,6 +119,16 @@ extern __constant__ int8_t CURVE_RAIL_OF[289];
 // ---------------------------------------------------------------------------
 extern __constant__ bool CURVE_ARC_FLAT[289];
 
+constexpr int SLOTS_PER_SEAT_DEV = 30;
+
+// ---------------------------------------------------------------------------
+// SLOT_TO_CHANNEL[slot]       = plane index within the observation's
+//                               piece_slot group, or -1 for the five camp
+//                               slots, which no legal setup ever occupies.
+//                               Mirrors junqi_core.observation._SLOT_TO_CHANNEL.
+// ---------------------------------------------------------------------------
+extern __constant__ int8_t SLOT_TO_CHANNEL[SLOTS_PER_SEAT_DEV];
+
 // Host functions
 void init_tables();
 void cleanup_tables();

@@ -14,7 +14,7 @@ Design contract (see `docs/ARCHITECTURE.md` §4 and ADR-106, ADR-118):
     (top); `left_side_enemy` occupies canonical x in [0, 5]; `right_side_enemy`
     occupies canonical x in [11, 16].
 
-  * `OBS_CHANNELS` spatial channels (412 as of the CombatMemory v6 layout)
+  * `OBS_CHANNELS` spatial channels (317 as of the compact piece-slot layout)
     and `OBS_GLOBAL_DIMS` global scalars (28).  Exact layout is pinned in the
     `CHANNEL_LAYOUT` / `GLOBAL_LAYOUT` module-level constants below; changes
     require an ADR.
@@ -57,8 +57,10 @@ from .info_model import NUM_TRACKED_TYPES, TRACKED_TYPES, BeliefTensor
 from .rail_topology import CURVE_ARC_CELLS
 from .rotation import rotate_planes
 from .rules import (
+    CAMP_INDICES,
     MAX_NUM_MOVES,
     MAX_NUM_MOVES_BETWEEN_ATTACKS,
+    SLOTS_PER_SEAT,
     DeathReason,
     PieceType,
     Seat,
@@ -88,7 +90,12 @@ _CH_ACTIVE_EAT_BUCKET_SIZE: Final[int] = 4 * 2
 _CH_PASSIVE_SURVIVE_BUCKET_SIZE: Final[int] = 4 * 2
 _CH_DEATH_REASON_SIZE: Final[int] = 3 * 4   # 3 me + 3 teammate + 3 left_enemy + 3 right_enemy
 _CH_DEAD_AT_ZERO_SIZE: Final[int] = 1 * 2
-_CH_PIECE_ID_SIZE: Final[int] = 120  # one-hot per piece_id (4 seats × 30 slots)
+# One-hot over the 25 non-camp seat slots.  A piece's identity is
+# ``seat * 30 + slot``; the seat is already recoverable at every occupied
+# cell from piece_own / prob_teammate / piece_{left,right}_side_enemy, so
+# only the slot needs its own planes.  The five camp slots never hold a
+# piece and get no channel.
+_CH_PIECE_SLOT_SIZE: Final[int] = 25
 _CH_MOVE_HISTORY_SIZE: Final[int] = 32  # src_dst_planes: 32-step history
 
 # --- CombatMemory v4 channel group sizes ---
@@ -118,7 +125,7 @@ _CH_MOVE_HISTORY_SIZE: Final[int] = 32  # src_dst_planes: 32-step history
 #     combat_memory.py reverse projection).
 #       cm_eaten_by_pid[60]  channels 0..29 = (observer+1)%4 (left enemy)
 #                            channels 30..59 = (observer+3)%4 (right enemy)
-# OBS_CHANNELS = 256 + 50 + 46 + 60 = 412.
+# OBS_CHANNELS = 161 + 50 + 46 + 60 = 317.
 _CH_CM_KILL_MINE_TYPE_SIZE:    Final[int] = NUM_TRACKED_TYPES  # 12, multi-hot
 _CH_CM_KILL_MINE_GE_SIZE:      Final[int] = 3                  # ≥1 / ≥2 / ≥3
 _CH_CM_KILL_OTHER_GE_SIZE:     Final[int] = 3                  # ≥1 / ≥2 / ≥3
@@ -163,7 +170,7 @@ def _layout_slices() -> dict[str, slice]:
         ("passive_survive_bucket", _CH_PASSIVE_SURVIVE_BUCKET_SIZE),
         ("death_reason", _CH_DEATH_REASON_SIZE),
         ("dead_at_zero", _CH_DEAD_AT_ZERO_SIZE),
-        ("piece_id", _CH_PIECE_ID_SIZE),
+        ("piece_slot", _CH_PIECE_SLOT_SIZE),
         ("move_history", _CH_MOVE_HISTORY_SIZE),
         # ---- CombatMemory v4 tail (50 ch); pre-CM indices [0, 256) preserved ----
         # Layer 1 (45 ch) — projected to enemy alive pieces.
@@ -197,8 +204,8 @@ def _layout_slices() -> dict[str, slice]:
 
 CHANNEL_LAYOUT: Final[dict[str, slice]] = _layout_slices()
 OBS_CHANNELS: Final[int] = sum(s.stop - s.start for s in CHANNEL_LAYOUT.values())
-assert OBS_CHANNELS == 412, (
-    f"Channel layout must sum to 412, got {OBS_CHANNELS}"
+assert OBS_CHANNELS == 317, (
+    f"Channel layout must sum to 317, got {OBS_CHANNELS}"
 )
 
 _GLOB_REMAINING_LEFT_SIZE: Final[int] = NUM_TRACKED_TYPES
@@ -259,6 +266,24 @@ _DEATH_REASON_TO_IDX: Final[np.ndarray] = (
 )()
 
 # Seat-value -> team (0/1); used for ours-vs-theirs bit masks.
+# Seat slot -> plane index within the ``piece_slot`` group.  The five camp
+# slots cannot hold a piece, so they map to -1 and get no plane; the other 25
+# take consecutive indices in slot order.
+def _build_slot_to_channel() -> np.ndarray:
+    out = np.full(SLOTS_PER_SEAT, -1, dtype=np.int16)
+    nxt = 0
+    for slot in range(SLOTS_PER_SEAT):
+        if slot in CAMP_INDICES:
+            continue
+        out[slot] = nxt
+        nxt += 1
+    assert nxt == _CH_PIECE_SLOT_SIZE, (nxt, _CH_PIECE_SLOT_SIZE)
+    return out
+
+
+_SLOT_TO_CHANNEL: Final[np.ndarray] = _build_slot_to_channel()
+
+
 _SEAT_TEAM: Final[np.ndarray] = np.array(
     [s.team for s in (Seat.SOUTH, Seat.WEST, Seat.NORTH, Seat.EAST)],
     dtype=np.int8,
@@ -545,7 +570,7 @@ class ObservationBuilder:
         out_spatial: np.ndarray,
         out_global: np.ndarray,
     ) -> None:
-        """Fill ``(N, 412, 17, 17)`` + ``(N, 28)`` buffers in place.
+        """Fill ``(N, OBS_CHANNELS, 17, 17)`` + ``(N, 28)`` buffers in place.
 
         Each index ``i`` is equivalent to::
 
@@ -779,9 +804,9 @@ class ObservationBuilder:
             obs_team=obs_team,
         )
 
-        # --- 17. piece_id (120 one-hot planes, one per piece_id) ----------
-        _write_piece_id(
-            out=world_buf[CHANNEL_LAYOUT["piece_id"]],
+        # --- 17. piece_slot (25 one-hot planes, one per non-camp slot) ----
+        _write_piece_slot(
+            out=world_buf[CHANNEL_LAYOUT["piece_slot"]],
             live_pids=live_pids,
             lx=lx,
             ly=ly,
@@ -1155,25 +1180,28 @@ def _write_dead_at_zero(
     out[ch, zy.astype(np.intp, copy=False), zx.astype(np.intp, copy=False)] = 1.0
 
 
-def _write_piece_id(
+def _write_piece_slot(
     out: np.ndarray,
     live_pids: np.ndarray,
     lx: np.ndarray,
     ly: np.ndarray,
 ) -> None:
-    """(120, H, W): one-hot per live piece_id.
+    """(25, H, W): one-hot over the live piece's non-camp seat slot.
 
-    Each live piece ``p`` writes 1.0 at ``out[p, ly, lx]`` where ``p`` is
-    the piece_id (0..119).  Dead pieces contribute nothing (their channels
-    remain zero).
+    A piece's identity is ``seat * 30 + slot``.  Which seat owns an occupied
+    cell is already readable off ``piece_own`` / ``prob_teammate`` /
+    ``piece_{left,right}_side_enemy``, so these planes carry the remaining
+    factor and the pair reconstructs the full piece_id.  That identity is
+    public: everyone can watch a cell and follow the piece across moves even
+    though its TYPE stays hidden.
 
-    piece_id is public information: all players can observe *which cell* a
-    piece occupies and track its identity across moves even though the
-    piece TYPE is hidden.
+    Camp slots hold no piece in any legal setup, so the 30 slots compact to
+    25 planes via ``_SLOT_TO_CHANNEL``.
     """
     if live_pids.size == 0:
         return
-    out[live_pids, ly, lx] = 1.0
+    ch = _SLOT_TO_CHANNEL[live_pids % SLOTS_PER_SEAT]
+    out[ch, ly, lx] = 1.0
 
 
 def _write_move_history(
@@ -1735,14 +1763,15 @@ ObservationBuilder.build_observations_batch_torch = (  # type: ignore[attr-defin
 
 def _self_check() -> None:
     """Verify layout invariants at import time."""
-    assert OBS_CHANNELS == 412
+    assert OBS_CHANNELS == 317
     assert OBS_GLOBAL_DIMS == 28
     assert CHANNEL_LAYOUT["move_bucket"].stop - CHANNEL_LAYOUT["move_bucket"].start == 8
     assert CHANNEL_LAYOUT["active_eat_bucket"].stop - CHANNEL_LAYOUT["active_eat_bucket"].start == 8
     assert CHANNEL_LAYOUT["passive_survive_bucket"].stop - CHANNEL_LAYOUT["passive_survive_bucket"].start == 8
     assert CHANNEL_LAYOUT["death_reason"].stop - CHANNEL_LAYOUT["death_reason"].start == 12
     assert CHANNEL_LAYOUT["dead_at_zero"].stop - CHANNEL_LAYOUT["dead_at_zero"].start == 2
-    assert CHANNEL_LAYOUT["piece_id"].stop - CHANNEL_LAYOUT["piece_id"].start == 120
+    assert (CHANNEL_LAYOUT["piece_slot"].stop
+            - CHANNEL_LAYOUT["piece_slot"].start) == 25
     assert CHANNEL_LAYOUT["move_history"].stop - CHANNEL_LAYOUT["move_history"].start == 32
     # ---- CombatMemory v4 tail (50 channels) ----
     assert CHANNEL_LAYOUT["cm_kill_mine_type"].stop - CHANNEL_LAYOUT["cm_kill_mine_type"].start == 12
@@ -1763,8 +1792,10 @@ def _self_check() -> None:
     assert CHANNEL_LAYOUT["cm_recency"].stop - CHANNEL_LAYOUT["cm_recency"].start == 4
     # ---- CombatMemory v6 layer-4 (60 channels) ----
     assert CHANNEL_LAYOUT["cm_eaten_by_pid"].stop - CHANNEL_LAYOUT["cm_eaten_by_pid"].start == 60
-    # Sanity: pre-CombatMemory channels [0, 256) preserved bit-for-bit.
-    assert CHANNEL_LAYOUT["move_history"].stop == 256
+    # The CombatMemory groups start where move_history ends; compacting
+    # piece_id to piece_slot moved that boundary from 256 down to 161.
+    assert CHANNEL_LAYOUT["move_history"].stop == 161
+    assert CHANNEL_LAYOUT["cm_kill_mine_type"].start == 161
     running = 0
     for _name, sl in CHANNEL_LAYOUT.items():
         assert sl.start == running
