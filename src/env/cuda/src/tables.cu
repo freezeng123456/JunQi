@@ -64,6 +64,7 @@ __constant__ int16_t ENG_RAIL_CELLS[ENG_NUM_RAIL];
 __constant__ int8_t  ENG_RAIL_TO_IDX[289];
 __constant__ int8_t  ENG_RAIL_ADJ[ENG_NUM_RAIL * ENG_ADJ_WIDTH];
 __constant__ int8_t  CURVE_RAIL_OF[289];
+__constant__ int8_t  SLOT_TO_CHANNEL[SLOTS_PER_SEAT_DEV];
 __constant__ bool    CURVE_ARC_FLAT[289];
 
 // ---------------------------------------------------------------------------
@@ -409,6 +410,18 @@ void init_tables() {
         CUDA_CHECK(cudaMemcpyToSymbol(ON_BOARD_FLAT,   g_props.on_board,      289));
         CUDA_CHECK(cudaMemcpyToSymbol(NINE_GRID_FLAT,  g_props.is_nine_grid,  289));
         CUDA_CHECK(cudaMemcpyToSymbol(CURVE_RAIL_OF,   g_props.curve_rail,    289));
+    }
+    {
+        // piece_slot plane index per seat slot; camp slots get -1. Derived
+        // from the same CAMP_IDX the board properties are built from.
+        int8_t slot_ch[SLOTS_PER_SEAT_DEV];
+        int8_t next_ch = 0;
+        for (int i = 0; i < SLOTS_PER_SEAT_DEV; ++i) {
+            bool is_camp_slot = false;
+            for (int ci : CAMP_IDX) if (i == ci) { is_camp_slot = true; break; }
+            slot_ch[i] = is_camp_slot ? (int8_t)-1 : next_ch++;
+        }
+        CUDA_CHECK(cudaMemcpyToSymbol(SLOT_TO_CHANNEL, slot_ch, sizeof(slot_ch)));
     }
     {
         // The 8 cells adjoining an arc link, derived from the same SPC_EDGES

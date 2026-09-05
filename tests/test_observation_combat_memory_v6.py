@@ -1,6 +1,6 @@
 """CombatMemory v6 (layer-4) reverse-projection channel tests.
 
-Validates the 60 new channels at indices [352, 412):
+Validates the 60 channels of the final cm_eaten_by_pid group:
   cm_eaten_by_pid[60]   for each of observer's 30 own pids, project onto
                         the cell (alive ⇒ current; dead ⇒ zero_pos) the
                         bitmap of which 60 enemy pids have directly OR
@@ -76,13 +76,19 @@ def _build_state(*, pieces, turn, show_mode=ShowMode.DARK, move_counter=0):
 
 
 class TestLayerFourLayout:
-    def test_obs_channels_is_412(self):
-        assert OBS_CHANNELS == 412
+    def test_layer4_is_the_final_group(self):
+        assert CHANNEL_LAYOUT["cm_eaten_by_pid"].stop == OBS_CHANNELS
 
     def test_layer4_offsets_and_sizes(self):
+        # Asserted relative to the neighbouring groups, not as absolute
+        # indices: the layout shifted once already (piece_id's 120 planes
+        # compacted to piece_slot's 25) and magic offsets meant editing
+        # four test files to restate the same invariant. What matters is
+        # that the group is the documented size and sits where the layout
+        # order says it does; observation.py self-checks contiguity.
         sl = CHANNEL_LAYOUT["cm_eaten_by_pid"]
-        assert sl.start == 352
-        assert sl.stop == 412
+        assert sl.start == CHANNEL_LAYOUT["cm_recency"].stop
+        assert sl.stop == OBS_CHANNELS
         assert sl.stop - sl.start == 60
 
 

@@ -1158,7 +1158,7 @@ class PPOTrainer:
                 # In the common single-GPU path, keeping this as a generator
                 # is important: RolloutBatch fields are index_select copies,
                 # not views. Eagerly retaining 30-60 observation batches can
-                # consume many GiB with the 412-channel observation schema.
+                # consume many GiB with the full observation schema.
                 materialized = list(batches)
                 n_local = torch.tensor(
                     len(materialized),

@@ -3,7 +3,7 @@
  * DeviceObservationBatch memory management + full 256-channel observation kernel.
  *
  * Observation layout per (env, observer_seat) pair:
- *   Spatial:  [NUM_OBS_CHANNELS=412, BOARD_SIZE=17, BOARD_SIZE=17]  float32
+ *   Spatial:  [NUM_OBS_CHANNELS=317, BOARD_SIZE=17, BOARD_SIZE=17]  float32
  *   Global:   [NUM_GLOBAL_DIMS=28]                                   float32
  *
  * Channel layout (mirrors junqi_core/observation.py CHANNEL_LAYOUT):
@@ -197,7 +197,7 @@ __global__ void observation_kernel(
     const int tid = threadIdx.x;
     const int BLK = blockDim.x;
 
-    const int SPATIAL_SZ = NUM_OBS_CHANNELS * BOARD_SIZE * BOARD_SIZE;  // 412*17*17
+    const int SPATIAL_SZ = NUM_OBS_CHANNELS * BOARD_SIZE * BOARD_SIZE;  // 317*17*17
 
     // Observer seat + relationships (kept in shared so every thread reads
     // the same values without redundant per-thread gmem loads).
@@ -296,8 +296,8 @@ __global__ void observation_kernel(
     constexpr int CH_SURV_BUCKET     = 82;
     constexpr int CH_DEATH_REASON    = 90;  // 12 ch: 3 me + 3 teammate + 3 left + 3 right
     constexpr int CH_DEAD_AT_ZERO    = 102;
-    constexpr int CH_PIECE_ID        = 104; // 120 ch: one-hot per piece_id (0..119)
-    constexpr int CH_MOVE_HIST       = 224; // 32 ch: src_dst_planes history
+    constexpr int CH_PIECE_SLOT      = 104; // 25 ch: one-hot per non-camp slot
+    constexpr int CH_MOVE_HIST       = 129; // 32 ch: src_dst_planes history
     constexpr int PLANE              = BOARD_SIZE * BOARD_SIZE;
 
     // --------------------------------------------------------------------
@@ -403,12 +403,16 @@ __global__ void observation_kernel(
                         spatial[(base + k) * PLANE + plane_off] = 1.0f;
                 }
 
-                // ch 107..226 : piece_id one-hot (120 channels).
-                // Each live piece p writes 1.0 at channel (CH_PIECE_ID + p).
-                // piece_id IS public information: all players can observe which
-                // cell a piece occupies and track its identity across moves,
-                // even though the piece TYPE is hidden.
-                spatial[(CH_PIECE_ID + p) * PLANE + plane_off] = 1.0f;
+                // ch 104..128 : one-hot over the piece's non-camp seat slot.
+                // Identity is seat * 30 + slot; the seat is already readable at
+                // this cell from piece_own / prob_teammate / piece_*_side_enemy,
+                // so only the slot needs planes. Camp slots never hold a piece
+                // and are mapped out by SLOT_TO_CHANNEL. Identity IS public:
+                // everyone can follow a piece across moves even though its TYPE
+                // stays hidden.
+                int slot_ch = SLOT_TO_CHANNEL[p % SLOTS_PER_SEAT_DEV];
+                if (slot_ch >= 0)
+                    spatial[(CH_PIECE_SLOT + slot_ch) * PLANE + plane_off] = 1.0f;
 
                 // Accumulate remaining_left/right (for global reduce).
                 if (ps == left_seat) {

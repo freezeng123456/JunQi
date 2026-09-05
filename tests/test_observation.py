@@ -76,7 +76,7 @@ def test_channel_layout_totals() -> None:
     # T7 / ADR-116: tail 32 channels for Ataraxos parity.
     # ADR-128 v4: tail 50 channels for CombatMemory.
     # ADR-129 v5: +46 channels for per-pid identity tail.
-    assert running == OBS_CHANNELS == 412
+    assert running == OBS_CHANNELS
 
     running = 0
     for name, sl in GLOBAL_LAYOUT.items():
@@ -389,3 +389,84 @@ def test_channel_name_covers_all_channels() -> None:
         channel_name(OBS_CHANNELS)
     with pytest.raises(IndexError):
         channel_name(-1)
+
+
+# ===========================================================================
+# piece_slot — compact identity must still identify every piece
+# ===========================================================================
+#
+# A piece's identity is ``seat * 30 + slot``. It used to get 120 one-hot
+# planes, one per global piece_id, each with at most a single lit cell — 0.13%
+# occupancy, and 20 of them structurally dead because camp slots never hold a
+# piece. Since the seat is already readable at every occupied cell from
+# piece_own / prob_teammate / piece_{left,right}_side_enemy, only the slot
+# needs planes, and only the 25 non-camp ones. These tests hold the layout to
+# the claim that made the cut safe: the pair still names the piece.
+
+
+def _seat_at_cells(obs: ObservationTensor, observer: Seat) -> dict[tuple[int, int], Seat]:
+    """Owner of every occupied cell, read only off the seat channels."""
+    teammate = observer.teammate
+    left = ALL_SEATS[(observer.value + 1) % 4]
+    right = ALL_SEATS[(observer.value + 3) % 4]
+    out: dict[tuple[int, int], Seat] = {}
+    for seat, group in (
+        (observer, "piece_own"),
+        (teammate, "prob_teammate"),
+        (left, "piece_left_side_enemy"),
+        (right, "piece_right_side_enemy"),
+        (teammate, "dark_teammate"),
+    ):
+        ys, xs = np.nonzero((obs.channel(group) != 0).any(axis=0))
+        for y, x in zip(ys, xs, strict=True):
+            out.setdefault((int(x), int(y)), seat)
+    return out
+
+
+@pytest.mark.parametrize("observer", list(ALL_SEATS))
+def test_piece_slot_plus_seat_reconstructs_piece_id(observer: Seat) -> None:
+    from junqi_core.observation import _SLOT_TO_CHANNEL
+    from junqi_core.rotation import world_to_canonical
+    from junqi_core.rules import SLOTS_PER_SEAT
+
+    channel_to_slot = {int(_SLOT_TO_CHANNEL[s]): s
+                       for s in range(SLOTS_PER_SEAT)
+                       if _SLOT_TO_CHANNEL[s] >= 0}
+
+    state = _random_opening(show_mode=ShowMode.BRIGHT)
+    obs = _obs_for(state, observer)
+    seat_at = _seat_at_cells(obs, observer)
+
+    got: dict[tuple[int, int], int] = {}
+    chs, ys, xs = np.nonzero(obs.channel("piece_slot") != 0)
+    for ch, y, x in zip(chs, ys, xs, strict=True):
+        seat = seat_at.get((int(x), int(y)))
+        assert seat is not None, (
+            f"piece_slot lit at ({x},{y}) but no seat channel covers it"
+        )
+        got[(int(x), int(y))] = seat.value * SLOTS_PER_SEAT + channel_to_slot[int(ch)]
+
+    want = {
+        world_to_canonical(int(state.pos_x[p]), int(state.pos_y[p]), observer): int(p)
+        for p in np.nonzero(state.alive)[0]
+    }
+    assert got == want, (
+        f"{observer.name}: identity not recoverable for "
+        f"{len(set(want.items()) - set(got.items()))} of {len(want)} pieces"
+    )
+
+
+def test_piece_slot_has_no_structurally_dead_plane() -> None:
+    """Every one of the 25 planes must be reachable by some piece.
+
+    The old 120-plane layout had 20 planes that no legal position could ever
+    light, one per camp slot per seat. Compacting is only worth doing if the
+    result has none.
+    """
+    from junqi_core.observation import _SLOT_TO_CHANNEL
+    from junqi_core.rules import CAMP_INDICES, SLOTS_PER_SEAT
+
+    reachable = {int(_SLOT_TO_CHANNEL[s]) for s in range(SLOTS_PER_SEAT)
+                 if s not in CAMP_INDICES}
+    assert reachable == set(range(25))
+    assert all(int(_SLOT_TO_CHANNEL[s]) == -1 for s in CAMP_INDICES)

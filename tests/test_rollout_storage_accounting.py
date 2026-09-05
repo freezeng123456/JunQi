@@ -15,9 +15,17 @@ def test_full_observation_storage_matches_tensor_schema() -> None:
         storage_mode="full_obs",
     )
 
-    assert estimate.observation_bytes == (412 * 17 * 17 + 28) * 2
-    assert estimate.legal_bytes == 256 * 4 + 4
-    assert estimate.bytes_per_transition == 239_246
+    # Derived from the layout rather than hardcoded: the channel count has
+    # moved once already (412 -> 317 when piece_id's 120 one-hot planes
+    # compacted to piece_slot's 25), and a magic total here just fails without
+    # saying what the schema now is.
+    from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
+
+    expected_obs = (OBS_CHANNELS * 17 * 17 + OBS_GLOBAL_DIMS) * 2
+    expected_legal = 256 * 4 + 4
+    assert estimate.observation_bytes == expected_obs
+    assert estimate.legal_bytes == expected_legal
+    assert estimate.bytes_per_transition == expected_obs + expected_legal + 26
 
 
 def test_compact_history_accounts_for_observer_slices_only() -> None:

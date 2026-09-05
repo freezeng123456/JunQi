@@ -106,7 +106,7 @@ class TestBitIdentity:
         assert obs_new.observer is observer
 
     def test_golden_hashes_still_match(self) -> None:
-        """The 12 deterministic v6/412-channel scenarios must all match."""
+        """The 12 deterministic golden scenarios must all match."""
         repo = Path(__file__).resolve().parent.parent
         golden_path = repo / "tests/golden/obs_hashes.json"
         if not golden_path.exists():

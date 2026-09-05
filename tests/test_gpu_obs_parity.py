@@ -135,7 +135,7 @@ def _cpu_obs_batch(
     """Build observation tensors using the Python ObservationBuilder.
 
     Returns (spatial, global_) with shapes
-      spatial : (N, 4, 412, 17, 17) float32
+      spatial : (N, 4, OBS_CHANNELS, 17, 17) float32
       global_ : (N, 4, 28)          float32
 
     Each slot ``(env_idx, seat_slot)`` uses observer = seat_slot

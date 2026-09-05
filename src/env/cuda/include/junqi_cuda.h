@@ -15,7 +15,7 @@ constexpr int NUM_PIECES = 120;
 constexpr int NUM_CELLS = 289;
 constexpr int BOARD_SIZE = 17;
 constexpr int NUM_SEATS = 4;
-constexpr int NUM_OBS_CHANNELS = 412;  // 256 base + 50 v4 tail + 46 v5 layer-3 + 60 v6 layer-4
+constexpr int NUM_OBS_CHANNELS = 317;  // 161 base + 50 v4 tail + 46 v5 layer-3 + 60 v6 layer-4
 constexpr int NUM_GLOBAL_DIMS = 28;
 // Compact on-board action space: only 129 on-board cells (of 289 total)
 constexpr int NUM_ON_BOARD = 129;

@@ -292,8 +292,9 @@ class TestHelpers:
 # Vectorised helpers behind the observation projection
 # ===========================================================================
 #
-# _write_combat_memory writes 156 of the 412 channels and is the dominant cost
-# of an observation build. Batching its popcounts collapsed sixteen NumPy
+# _write_combat_memory writes 156 of the observation channels and is the
+# dominant cost of an observation build. Batching its popcounts collapsed
+# sixteen NumPy
 # calls per build into five and a 30-iteration Python loop into one block,
 # which is an easy place to change results by accident. These pin the two
 # helpers that batching introduced against straightforward references.

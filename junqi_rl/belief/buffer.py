@@ -33,7 +33,7 @@ loss function (P1.4) only contributes CE from revealed cells via
 the mask — storing ``-1`` as a sentinel keeps the buffer homogeneous.
 
 **No padding / variable-length support.** ``obs_spatial`` is always
-``(OBS_CHANNELS, 17, 17)``. Under the v6/412-channel layout one float16
+``(OBS_CHANNELS, 17, 17)``. Under the 317-channel layout one float16
 sample is about 233 KiB; the 12k default therefore caps observation storage
 near 2.66 GiB.
 """

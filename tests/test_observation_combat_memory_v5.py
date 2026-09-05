@@ -76,16 +76,32 @@ def _build_state(*, pieces, turn, show_mode=ShowMode.DARK, move_counter=0):
 
 
 class TestLayerThreeLayout:
-    def test_obs_channels_is_352(self):
-        assert OBS_CHANNELS == 412
+    def test_layer3_is_sized_as_documented(self):
+        assert CHANNEL_LAYOUT["cm_kill_mine_count"].stop - CHANNEL_LAYOUT[
+            "cm_kill_mine_count"].start == 12
 
     def test_layer3_offsets_and_sizes(self):
-        assert CHANNEL_LAYOUT["cm_kill_mine_count"].start == 306
-        assert CHANNEL_LAYOUT["cm_kill_mine_count"].stop  == 318
-        assert CHANNEL_LAYOUT["cm_kill_mine_slot"].start  == 318
-        assert CHANNEL_LAYOUT["cm_kill_mine_slot"].stop   == 348
-        assert CHANNEL_LAYOUT["cm_recency"].start         == 348
-        assert CHANNEL_LAYOUT["cm_recency"].stop          == 352
+        # Sizes and order, not absolute indices — see the note in
+        # test_observation_combat_memory_v6.
+        for name, size in (
+            ("cm_kill_mine_count", 12),
+            ("cm_kill_mine_slot", 30),
+            ("cm_recency", 4),
+        ):
+            sl = CHANNEL_LAYOUT[name]
+            assert sl.stop - sl.start == size, name
+        assert CHANNEL_LAYOUT["cm_kill_mine_count"].start == (
+            CHANNEL_LAYOUT["cm_my_dilei_candidate"].stop
+        )
+        assert CHANNEL_LAYOUT["cm_kill_mine_slot"].start == (
+            CHANNEL_LAYOUT["cm_kill_mine_count"].stop
+        )
+        assert CHANNEL_LAYOUT["cm_recency"].start == (
+            CHANNEL_LAYOUT["cm_kill_mine_slot"].stop
+        )
+        assert CHANNEL_LAYOUT["cm_recency"].stop == (
+            CHANNEL_LAYOUT["cm_eaten_by_pid"].start
+        )
 
 
 # ---------------------------------------------------------------------------
