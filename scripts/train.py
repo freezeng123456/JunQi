@@ -110,7 +110,10 @@ from junqi_rl.analysis.random_eval import (
     evaluate_vs_random_cpu as evaluate_vs_random,
     evaluate_vs_random_gpu,
 )
-from junqi_rl.analysis.protocol import merge_evaluations
+from junqi_rl.analysis.protocol import (
+    completed_evaluation_score,
+    merge_evaluations,
+)
 from junqi_rl.env import VectorJunqiEnv
 from junqi_rl.networks.arrangement_net import (
     ArrangementNet, ArrangementNetConfig,
@@ -662,7 +665,8 @@ def train(cfg: TrainConfig) -> None:
     # Early-stop state: number of *consecutive* evals below threshold.
     # Only consulted when cfg.early_stop_win_rate > 0 and rollout >= min.
     _early_stop_low_streak = 0
-    _best_eval_win_rate = -1.0
+    _best_random_win_rate = -1.0
+    _best_h2h_score = -1.0
     _eval_baseline_policy = None
     if is_rank0 and cfg.eval_baseline_ckpt:
         ckpt_path = cfg.eval_baseline_ckpt
@@ -939,11 +943,14 @@ def train(cfg: TrainConfig) -> None:
             if cfg.disable_arr_train:
                 arr_metrics = {}
             else:
-                arr_metrics = arr_trainer.train_epoch(arr_buffer)
+                arr_metrics = arr_trainer.train_epoch(
+                    arr_buffer,
+                    on_optimizer_step=(
+                        arr_ema.update if arr_ema is not None else None
+                    ),
+                )
             if arr_metrics:
                 mc.update(arr_metrics)
-                # EMA update only after a real gradient step happened.
-                arr_ema.update(arr_net)
             mc.inc("time/arr_train_s", time.time() - t_arr_train0)
 
         # ---- BeliefNet (P1) train + refresh ----
@@ -1090,7 +1097,7 @@ def train(cfg: TrainConfig) -> None:
                 print(f"[train] Evaluating (rollout {rollout_idx + 1})…")
                 pool_size = 0
                 try:
-                    eval_seed = cfg.env.seed + rollout_idx + 1_000_000
+                    eval_seed = cfg.eval_game_seed
                     if (
                         cfg.eval_fixed_setup_pool
                         and cfg.env.use_gpu_rollout
@@ -1114,6 +1121,8 @@ def train(cfg: TrainConfig) -> None:
                         autocast_dtype=cfg.ppo.get_dtype(),
                         greedy=True,
                     )
+                    eval_metrics["eval/game_seed"] = float(eval_seed)
+                    eval_metrics["eval/greedy"] = 1.0
                     if pool_size:
                         eval_metrics["eval/fixed_setup_pool_size"] = float(pool_size)
                         eval_metrics["eval/fixed_setup_seed"] = float(cfg.eval_setup_seed)
@@ -1133,28 +1142,62 @@ def train(cfg: TrainConfig) -> None:
 
                     if cfg.eval_baseline_ckpt:
                         baseline_games = cfg.eval_baseline_games or cfg.eval_num_games
+                        h2h_seed = eval_seed + 17
                         h2h = evaluate_paired_head_to_head(
                             eval_policy,
                             _eval_baseline_policy,
                             num_games=baseline_games,
                             num_envs=cfg.env.num_envs,
                             device=device,
-                            seed=eval_seed + 17,
+                            seed=h2h_seed,
                             max_moves=cfg.env.max_num_moves,
                             autocast_dtype=cfg.ppo.get_dtype(),
-                            greedy=False,
+                            greedy=True,
                         )
+                        h2h["h2h/game_seed"] = float(h2h_seed)
+                        h2h["h2h/greedy"] = 1.0
                         logger.log(h2h, step=rollout_idx)
                         print(
                             f"[h2h]   vs_baseline  win={h2h.get('h2h/win_rate', 0.0):.3f}  "
                             f"loss={h2h.get('h2h/loss_rate', 0.0):.3f}  "
                             f"draw={h2h.get('h2h/draw_rate', 0.0):.3f}  "
+                            f"score={h2h.get('h2h/score_completed', 0.0):.3f}  "
                             f"avg_len={h2h.get('h2h/avg_game_len', 0.0):.0f}  "
                             f"done={int(h2h.get('h2h/num_games', 0.0))}/"
                             f"{int(h2h.get('h2h/requested_games', 0.0))}  "
                             f"ci95=[{h2h.get('h2h/win_rate_ci95_low', 0.0):.3f}, "
                             f"{h2h.get('h2h/win_rate_ci95_high', 1.0):.3f}]"
                         )
+
+                        h2h_score = completed_evaluation_score(h2h, prefix="h2h")
+                        if h2h_score is not None and h2h_score > _best_h2h_score:
+                            _best_h2h_score = h2h_score
+                            best_h2h_path = save_checkpoint(
+                                trainer, cfg, rollout_idx + 1, cfg.save_dir,
+                                arr_trainer=arr_trainer,
+                                arr_ema=arr_ema,
+                                belief_trainer=belief_trainer,
+                            )
+                            assert league_pool is not None
+                            league_pool.register(
+                                best_h2h_path,
+                                rollout=rollout_idx + 1,
+                                tags={"kind": "best_h2h", "h2h_score": h2h_score},
+                            )
+                            best_h2h_link = os.path.join(
+                                cfg.save_dir, "ckpt_best_h2h.pt"
+                            )
+                            update_checkpoint_alias(
+                                best_h2h_path, best_h2h_link, copy_fallback=True
+                            )
+                            best_link = os.path.join(cfg.save_dir, "ckpt_best.pt")
+                            update_checkpoint_alias(
+                                best_h2h_path, best_link, copy_fallback=True
+                            )
+                            print(
+                                f"[train] New best baseline H2H "
+                                f"score={h2h_score:.3f}; saved {best_h2h_link}"
+                            )
 
                     if cfg.eval_record_games > 0:
                         # A replay is useful evidence, but it must not prevent
@@ -1304,28 +1347,41 @@ def train(cfg: TrainConfig) -> None:
                         requested_games > 0
                         and done_games == requested_games
                         and ongoing_rate == 0.0
-                        and win_rate > _best_eval_win_rate
+                        and win_rate > _best_random_win_rate
                     ):
-                        _best_eval_win_rate = win_rate
-                        best_path = save_checkpoint(
+                        _best_random_win_rate = win_rate
+                        best_random_path = save_checkpoint(
                             trainer, cfg, rollout_idx + 1, cfg.save_dir,
                             arr_trainer=arr_trainer,
                             arr_ema=arr_ema,
                             belief_trainer=belief_trainer,
                         )
                         assert league_pool is not None
-                        league_pool.register(
-                            best_path,
-                            rollout=rollout_idx + 1,
-                            tags={"kind": "best", "win_rate": win_rate},
+                        if not cfg.eval_baseline_ckpt:
+                            league_pool.register(
+                                best_random_path,
+                                rollout=rollout_idx + 1,
+                                tags={"kind": "best_random", "win_rate": win_rate},
+                            )
+                        best_random_link = os.path.join(
+                            cfg.save_dir, "ckpt_best_random.pt"
                         )
-                        best_link = os.path.join(cfg.save_dir, "ckpt_best.pt")
                         update_checkpoint_alias(
-                            best_path,
-                            best_link,
+                            best_random_path,
+                            best_random_link,
                             copy_fallback=True,
                         )
-                        print(f"[train] New best eval win={win_rate:.3f}; saved {best_link}")
+                        if not cfg.eval_baseline_ckpt:
+                            best_link = os.path.join(cfg.save_dir, "ckpt_best.pt")
+                            update_checkpoint_alias(
+                                best_random_path,
+                                best_link,
+                                copy_fallback=True,
+                            )
+                        print(
+                            f"[train] New best vs-random win={win_rate:.3f}; "
+                            f"saved {best_random_link}"
+                        )
 
                     # Early-stop logic stays on rank 0 only; the verdict is
                     # broadcast to all ranks below so every rank exits in sync.

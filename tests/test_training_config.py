@@ -74,7 +74,9 @@ def test_current_h20_config_only_overrides_advantage_filter() -> None:
 
     expected = _dataclass_to_dict(base)
     expected["ppo"]["adv_filt_rate"] = 1.0
+    expected["ppo"]["adv_filt_thresh"] = 0.0
     assert current.ppo.adv_filt_rate == 1.0
+    assert current.ppo.adv_filt_thresh == 0.0
     assert _dataclass_to_dict(current) == expected
 
 

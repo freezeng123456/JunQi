@@ -168,11 +168,11 @@ struct DeviceObservationBatch {
   void copy_to_host(float* h_spatial, float* h_global, int stream_id = 0) const;
 };
 
-// Single-seat observation batch: (N, 412, 17, 17) instead of (N, 4, 412, 17, 17).
+// Single-seat observation batch: (N, NUM_OBS_CHANNELS, 17, 17).
 // Used in the PPO collect hot-path where only the acting seat's observation is needed.
 struct DeviceObservationSingleBatch {
   int num_envs = 0;
-  float* d_spatial = nullptr;  // (N, 412, 17, 17)
+  float* d_spatial = nullptr;  // (N, NUM_OBS_CHANNELS, 17, 17)
   float* d_global = nullptr;   // (N, 28)
 
   DeviceObservationSingleBatch(int num_envs);
