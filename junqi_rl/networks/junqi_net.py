@@ -127,6 +127,14 @@ class JunqiNetConfig:
     action_key_dim: int = 64
     """Dimension of query/key projections for the bilinear action logits."""
 
+    use_graph_stem: bool = True
+    """If True, use :class:`GraphStem` on the 129 on-board cells.
+    If False, use the legacy :class:`CNNStem` over the 17×17 encoding."""
+
+    in_channels: int | None = None
+    """Spatial-channel count. ``None`` uses the current ``OBS_CHANNELS`` (317).
+    Legacy CNN checkpoints were trained on the 412-channel layout."""
+
 
 # ---------------------------------------------------------------------------
 # Building blocks
@@ -376,11 +384,16 @@ class JunqiNet(nn.Module):
         self._nan_fwd_count: int = 0
 
         D = cfg.embed_dim
+        in_ch = OBS_CHANNELS if cfg.in_channels is None else cfg.in_channels
+        self.use_graph_stem = cfg.use_graph_stem
 
-        # -- Graph stem --------------------------------------------------------
-        self.stem = GraphStem(
-            OBS_CHANNELS, cfg.cnn_channels, cfg.cnn_layers, cfg.ff_factor
-        )
+        # -- Stem --------------------------------------------------------------
+        if cfg.use_graph_stem:
+            self.stem = GraphStem(
+                in_ch, cfg.cnn_channels, cfg.cnn_layers, cfg.ff_factor
+            )
+        else:
+            self.cnn = CNNStem(in_ch, cfg.cnn_channels, cfg.cnn_layers)
 
         # Project stem output channels to embed_dim (may be a no-op if equal)
         if cfg.cnn_channels != D:
@@ -457,8 +470,9 @@ class JunqiNet(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         """Encode inputs → (cls_token, cell_tokens).
 
-        The CNN runs on the full 17×17 grid, but we only extract the 129
-        on-board cell patches for the Transformer (5x attention savings).
+        The graph stem takes the 129 on-board cells only. The legacy CNN
+        stem still runs on the full 17×17 grid; we then keep the same 129
+        cells for the Transformer.
 
         Returns
         -------
@@ -468,13 +482,16 @@ class JunqiNet(nn.Module):
         B = obs_spatial.size(0)
         D = self.cfg.embed_dim
 
-        # Take the 129 on-board cells first, so nothing downstream ever sees
-        # the 160 encoding positions that are not on the board.
-        cells = obs_spatial.permute(0, 2, 3, 1).reshape(B, NUM_CELLS, -1)
-        cells = cells[:, self.on_board_idx]      # (B, 129, OBS_CHANNELS)
-
-        # Graph stem → (B, 129, cnn_channels)
-        feat = self.stem(cells)
+        if self.use_graph_stem:
+            # Take the 129 on-board cells first, so nothing downstream ever
+            # sees the 160 encoding positions that are not on the board.
+            cells = obs_spatial.permute(0, 2, 3, 1).reshape(B, NUM_CELLS, -1)
+            cells = cells[:, self.on_board_idx]      # (B, 129, C_in)
+            feat = self.stem(cells)                  # (B, 129, cnn_channels)
+        else:
+            feat = self.cnn(obs_spatial)             # (B, cnn_channels, 17, 17)
+            feat = feat.permute(0, 2, 3, 1).reshape(B, NUM_CELLS, -1)
+            feat = feat[:, self.on_board_idx]        # (B, 129, cnn_channels)
 
         # Project to embed_dim → (B, 129, D)
         cell_tokens = self.patch_proj(feat)  # type: ignore[operator]
