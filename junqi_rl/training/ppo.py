@@ -59,6 +59,10 @@ except ImportError:
     def _make_grad_scaler() -> "_TorchAmpGradScaler":
         return _TorchAmpGradScaler()
 
+from junqi_rl.checkpoint_compat import (
+    current_checkpoint_metadata,
+    validate_policy_checkpoint,
+)
 from junqi_rl.networks.junqi_net import N_VF_CAT, JunqiNet, JunqiNetConfig
 from junqi_rl.training.rollout import RolloutBatch, RolloutBuffer
 
@@ -1226,9 +1230,15 @@ class PPOTrainer:
             "num_rollout": self.num_rollout,
             "cfg": self.cfg,
             "world_size_at_save": _world_size(),
+            "checkpoint_meta": current_checkpoint_metadata(self._policy_unwrapped),
         }
 
     def load_state_dict(self, sd: dict[str, Any]) -> None:
+        validate_policy_checkpoint(
+            self._policy_unwrapped,
+            sd,
+            source="PPO checkpoint",
+        )
         self._policy_unwrapped.load_state_dict(sd["policy"])
         self.ema.load_state_dict(sd["ema"])
         self.optimizer.load_state_dict(sd["optimizer"])

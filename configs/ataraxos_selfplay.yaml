@@ -96,9 +96,10 @@ eval_record_games: 0
 league_eval_games: 0
 log_every: 10
 
-# Yardstick is the previous from-scratch 1.13M run's final weights.
-# Report h2h as win/loss/draw; vs-random is saturated and not for decisions.
-eval_baseline_ckpt: /jizhicfs/freezeng123456/JunQi-runs/ataraxos_bigbatch_20260818/ckpt_003000.pt
+# Optional H2H yardstick. Do not pin a machine-local checkpoint in a tracked
+# production config. Supply a schema-compatible path at launch, e.g.
+#   --set eval_baseline_ckpt=/path/to/baseline.pt
+eval_baseline_ckpt: ""
 eval_baseline_games: 128
 
 device: cuda

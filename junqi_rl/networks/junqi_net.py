@@ -13,12 +13,13 @@ Input
 
 Pipeline
 ~~~~~~~~
-1. **CNN stem** — 3 conv layers compress (OBS_CHANNELS, 17, 17) → (C, 17, 17),
-   keeping spatial resolution to preserve board topology.
+1. **Graph stem** — extract the 129 on-board cells, embed them, then aggregate
+   static road and rail neighbours separately before combining the messages.
+   This injects board topology without treating the 160 off-board encoding
+   positions as zero-valued cells.
 
-2. **Positional patch embedding** — reshape (C, 17, 17) → (289, C), keep the
-   129 on-board cells, project to (129, D), add learnable positional
-   embeddings (one per on-board cell).
+2. **Positional embedding** — project GraphStem output to (129, D), then add
+   learnable positional embeddings (one per on-board cell).
 
 3. **Global token injection** — project ``obs_global`` (28,) → (1, D) and
    prepend as a CLS token; sequence length becomes 130.
@@ -92,12 +93,13 @@ class JunqiNetConfig:
     larger 4-player board (17×17 vs 10×10) and 16,641-action space.
     """
 
-    # CNN stem
+    # Spatial stem. Historical ``cnn_*`` field names are retained for
+    # config/checkpoint compatibility.
     cnn_channels: int = 128
-    """Number of channels after the CNN stem (= transformer embed dim D)."""
+    """Number of channels emitted by the spatial stem."""
 
     cnn_layers: int = 3
-    """Number of convolutional layers in the stem."""
+    """Number of message-passing rounds in the policy GraphStem."""
 
     # Transformer trunk
     depth: int = 6
@@ -254,9 +256,10 @@ class GraphStem(nn.Module):
         cross the board, which a 7x7 receptive field cannot express at all
 
     So aggregate along each graph separately and combine. Off-board cells are
-    absent from every neighbour list rather than present as zeros, and rail
-    reachability becomes part of the stem instead of something the transformer
-    has to rediscover from learned position embeddings.
+    absent from every neighbour list rather than present as zeros. This injects
+    the *static rail topology* into the stem; occupancy-conditioned long-range
+    rail reachability is not precomputed here and remains a dynamic relation
+    for later layers to infer from the current position.
 
     Padded neighbour slots index one past the last cell; a zero row is
     appended before gathering so they contribute nothing, and the sum is

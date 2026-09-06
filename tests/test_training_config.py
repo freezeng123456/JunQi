@@ -78,6 +78,11 @@ def test_current_h20_config_only_overrides_advantage_filter() -> None:
     assert _dataclass_to_dict(current) == expected
 
 
+def test_current_h20_config_does_not_pin_machine_local_baseline() -> None:
+    current = load_config(_args(ROOT / "configs" / "h20_10m_current.yaml"))
+    assert current.eval_baseline_ckpt == ""
+
+
 def test_ataraxos_config_uses_rollout_quantile_with_timestep_batches() -> None:
     cfg = load_config(_args(ROOT / "configs" / "ataraxos_selfplay.yaml"))
 
