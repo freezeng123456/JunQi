@@ -331,13 +331,12 @@ def main() -> None:
         state = torch.load(ckpt_path, map_location=device, weights_only=False)
         trainer.load_state_dict(state)
 
-        # Use the EMA policy for rollout (matches training-time data collection)
-        ema_policy = trainer.ema.model
-        ema_policy.eval()
+        policy = trainer.policy
+        policy.eval()
 
         for shaping in (True, False):
             stats = run_one_rollout(
-                ema_policy,
+                policy,
                 num_envs=args.num_envs,
                 steps_per_env=args.steps_per_env,
                 seed=args.seed + (1 if shaping else 0),

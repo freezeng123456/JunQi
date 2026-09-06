@@ -82,6 +82,14 @@ def test_ema_copies_batchnorm_buffers_exactly():
         assert torch.equal(shadow_buffers[name], model_buffer), name
 
 
+def test_ppo_checkpoint_omits_move_policy_ema() -> None:
+    trainer = _trainer()
+    state = trainer.state_dict()
+    assert "ema" not in state
+    state["ema"] = {"decay": 0.999, "shadow": trainer.policy.state_dict()}
+    trainer.load_state_dict(state)
+
+
 def test_policy_active_action_legality_is_checked_directly():
     trainer = _trainer()
     legal = torch.tensor([[True, False, True], [True, False, True]])

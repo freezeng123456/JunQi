@@ -1057,9 +1057,7 @@ def train(cfg: TrainConfig) -> None:
                 dist.barrier()
 
         # ---- Periodic evaluation (rank-0 only; others wait) ----
-        # Evaluate the actual learner policy used for collection. EMA remains
-        # checkpoint metadata rather than a second, lagging definition of what
-        # the main win-rate means.
+        # Evaluate the actual learner policy used for collection.
         if (rollout_idx + 1) % cfg.eval_every == 0:
             eval_should_stop = torch.zeros(1, dtype=torch.long,
                                            device=device if device.type == "cuda" else "cpu")

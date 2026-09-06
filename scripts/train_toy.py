@@ -115,7 +115,7 @@ def main() -> None:
         t0 = time.time()
         collect_rollout_gpu(
             rollout_world=world,
-            policy=trainer.ema.model,
+            policy=trainer.policy,
             buffer=buf,
             device=device,
             seed_base=args.seed + r,
@@ -148,7 +148,7 @@ def main() -> None:
         ):
             t0 = time.time()
             stats = eval_vs_random(
-                trainer.ema.model,
+                trainer.policy,
                 num_games=args.eval_games,
                 trained_team=0,
                 max_steps=args.eval_max_steps,
@@ -172,7 +172,6 @@ def main() -> None:
                 best_path = save_dir / "ckpt_best.pt"
                 torch.save({
                     "policy": policy.state_dict(),
-                    "ema":    trainer.ema.model.state_dict(),
                     "eval_stats": stats,
                     "rollout": r,
                 }, best_path)
@@ -193,7 +192,6 @@ def main() -> None:
     ckpt_path = save_dir / "ckpt.pt"
     torch.save({
         "policy": policy.state_dict(),
-        "ema":    trainer.ema.model.state_dict(),
         "config": {
             "net": vars(tiny_net_cfg()),
             "ppo": vars(ppo_cfg),
@@ -207,7 +205,7 @@ def main() -> None:
         from junqi_rl.analysis import record_game_with_policy
         print("[toy] recording final demo game ...")
         traj = record_game_with_policy(
-            trainer.ema.model, rng_seed=args.seed + 9999,
+            trainer.policy, rng_seed=args.seed + 9999,
             device=device, max_steps=400, top_k=8, greedy=False,
         )
         rec_path = save_dir / "recording.npz"

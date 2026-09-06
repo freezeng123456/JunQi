@@ -134,7 +134,7 @@ def main():
         with torch.no_grad():
             collect_rollout_gpu_v2(
                 rollout_world=env,
-                policy=trainer.ema.model,
+                policy=trainer.policy,
                 buffer=buf,
                 device=device,
                 seed_base=args.seed + n,

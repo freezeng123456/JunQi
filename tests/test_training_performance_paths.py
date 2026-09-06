@@ -30,14 +30,6 @@ class _GuardedRollout:
         return {"rollout/test": 1.0}
 
 
-class _FakeEMA:
-    def __init__(self) -> None:
-        self.updates = 0
-
-    def update(self, _model) -> None:
-        self.updates += 1
-
-
 def test_single_process_ppo_streams_minibatches() -> None:
     trainer = object.__new__(PPOTrainer)
     trainer.cfg = SimpleNamespace(
@@ -48,7 +40,6 @@ def test_single_process_ppo_streams_minibatches() -> None:
     trainer._nan_skip_count = 0
     trainer._grad_nan_skip_count = 0
     trainer._policy_unwrapped = object()
-    trainer.ema = _FakeEMA()
     trainer._sync_collect_policy = lambda: None
     rollout = _GuardedRollout()
 
@@ -63,7 +54,6 @@ def test_single_process_ppo_streams_minibatches() -> None:
     metrics = trainer.train_epoch(rollout)
 
     assert rollout.consumed == 3
-    assert trainer.ema.updates == 3
     assert trainer.num_rollout == 1
     assert metrics["train/test_loss"] == pytest.approx(2.0)
     assert metrics["train/num_updates"] == 3.0
@@ -80,7 +70,6 @@ def test_distributed_ppo_still_aligns_minibatch_count(monkeypatch) -> None:
     trainer._nan_skip_count = 0
     trainer._grad_nan_skip_count = 0
     trainer._policy_unwrapped = object()
-    trainer.ema = _FakeEMA()
     trainer._sync_collect_policy = lambda: None
     consumed: list[int] = []
 
@@ -108,7 +97,6 @@ def test_distributed_ppo_still_aligns_minibatch_count(monkeypatch) -> None:
     metrics = trainer.train_epoch(Rollout())
 
     assert consumed == [0, 1]
-    assert trainer.ema.updates == 2
     assert metrics["train/num_updates"] == 2.0
 
 
