@@ -6,7 +6,6 @@ Implements Proximal Policy Optimisation (PPO) with:
   - Entropy bonus (magnet loss in Ataraxos terminology)
   - KL divergence penalty (to stabilise training)
   - Generalised Advantage Estimation (GAE)
-  - EMA (Exponential Moving Average) shadow for diagnostics/checkpoints
   - Mixed-precision training (bfloat16 / float32 autocast)
   - Gradient clipping
   - Power-schedule learning rate and temperature annealing
@@ -350,7 +349,11 @@ class PPOConfig:
 
     # --- EMA ---
     ema_decay: float = 0.999
-    """EMA decay for the diagnostic/checkpoint shadow policy."""
+    """Ignored. Move-policy EMA was removed after raw-vs-EMA H2H showed no gain.
+
+    The field remains so historical YAML still loads. ArrangementNet and
+    BeliefNet keep their own EMA objects.
+    """
 
     # --- Training schedule ---
     num_epochs_per_rollout: int = 4
@@ -415,8 +418,6 @@ class PPOTrainer:
 
     Attributes
     ----------
-    ema
-        EMA shadow model retained for diagnostics and checkpoint metadata.
     num_train_step
         Total number of gradient update steps taken.
     """
@@ -448,10 +449,9 @@ class PPOTrainer:
         policy = policy.to(self.device)
 
         # Save the **unwrapped** JunqiNet reference. External callers
-        # (``trainer.policy.state_dict()``, ``trainer.policy.load_state_dict``,
-        # ``EMAPolicy.update``) operate on this unwrapped module so that
-        # checkpoints stay compatible across single-process / DDP / different
-        # world sizes.
+        # (``trainer.policy.state_dict()``, ``trainer.policy.load_state_dict``)
+        # operate on this unwrapped module so that checkpoints stay compatible
+        # across single-process / DDP / different world sizes.
         self._policy_unwrapped: JunqiNet = policy
         self.policy: JunqiNet = policy
 
@@ -475,12 +475,6 @@ class PPOTrainer:
                 ddp_kwargs["output_device"] = self.device.index
             train_module = DistributedDataParallel(train_module, **ddp_kwargs)
         self._policy_for_train: torch.nn.Module = train_module
-
-        # EMA tracks the **unwrapped** module; update() zips
-        # ``shadow.parameters()`` with ``model.parameters()`` and DDP /
-        # torch.compile both keep the same parameter list as the underlying
-        # module, so this is safe.
-        self.ema = EMAPolicy(self._policy_unwrapped, cfg.ema_decay)
 
         # Frozen snapshot of the collection policy π_θt. PPO evaluates its
         # complete legal-action distribution on every minibatch so the
@@ -1176,10 +1170,6 @@ class PPOTrainer:
             for batch in batches:
                 metrics = self._update_step(batch)
                 all_metrics.append(metrics)
-                # Update EMA after each gradient step. Use the unwrapped
-                # policy reference; DDP / torch.compile share parameter
-                # storage so this picks up the just-stepped values.
-                self.ema.update(self._policy_unwrapped)
 
         self.num_rollout += 1
 
@@ -1224,7 +1214,6 @@ class PPOTrainer:
             # cross-world-size resume works because the saved keys never
             # include the ``module.`` / ``_orig_mod.`` prefixes.
             "policy": self._policy_unwrapped.state_dict(),
-            "ema": self.ema.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "num_train_step": self.num_train_step,
             "num_rollout": self.num_rollout,
@@ -1240,7 +1229,6 @@ class PPOTrainer:
             source="PPO checkpoint",
         )
         self._policy_unwrapped.load_state_dict(sd["policy"])
-        self.ema.load_state_dict(sd["ema"])
         self.optimizer.load_state_dict(sd["optimizer"])
         self.num_train_step = sd["num_train_step"]
         self.num_rollout = sd["num_rollout"]

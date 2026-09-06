@@ -13,8 +13,8 @@ Example::
 
 By default this follows the main training score exactly: the raw learner
 policy, both team assignments on paired seeds, greedy actions, and a fixed
-held-out GPU setup pool.  ``--single-team`` and ``--checkpoint-kind ema`` are
-available only for targeted diagnostics.
+held-out GPU setup pool.  ``--single-team`` remains available for targeted
+diagnostics.
 """
 
 from __future__ import annotations
@@ -44,12 +44,6 @@ def main() -> None:
         help="Evaluate only --trained-team instead of the paired two-team protocol",
     )
     ap.add_argument("--trained-team", type=int, default=0, choices=[0, 1])
-    ap.add_argument(
-        "--checkpoint-kind",
-        choices=["policy", "ema"],
-        default="policy",
-        help="Checkpoint weights to evaluate (default: raw PPO learner)",
-    )
     ap.add_argument("--max-steps", type=int, default=4000)
     ap.add_argument("--seed-base", type=int, default=42)
     ap.add_argument(
@@ -103,15 +97,7 @@ def main() -> None:
 
     policy = JunqiNet(JunqiNetConfig(**net_cfg)).to(args.device)
     sd = torch.load(args.ckpt, map_location=args.device, weights_only=False)
-    if args.checkpoint_kind == "ema":
-        if not isinstance(sd, dict) or "ema" not in sd:
-            raise SystemExit("Checkpoint has no EMA state")
-        ema_sd = sd["ema"]
-        # Training checkpoints store EMAPolicy.state_dict() → {"decay", "shadow"}.
-        weights = ema_sd.get("shadow") if isinstance(ema_sd, dict) else ema_sd
-        if weights is None:
-            raise SystemExit("Checkpoint EMA state has no shadow weights")
-    elif isinstance(sd, dict) and "policy" in sd:
+    if isinstance(sd, dict) and "policy" in sd:
         weights = sd["policy"]
     elif isinstance(sd, dict) and "net" in sd:
         weights = sd["net"]
@@ -168,7 +154,7 @@ def main() -> None:
     high = stats["eval/win_rate_ci95_high"]
 
     print(f"ckpt:     {args.ckpt}")
-    print(f"weights:  {args.checkpoint_kind}")
+    print(f"weights:  policy")
     print(f"protocol: {protocol}")
     if pool_size:
         print(f"setups:   fixed seed={args.setup_seed} pool={pool_size}")
