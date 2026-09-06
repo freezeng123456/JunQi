@@ -60,9 +60,6 @@ env:
   steps_per_env: 1024
   use_gpu_rollout: true
 eval_num_games: 256
-eval_record_games: 1
-eval_record_beliefs: false
-league_eval_games: 16
 eval_every: 100
 log_every: 10
 net:

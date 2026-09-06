@@ -110,16 +110,12 @@ from junqi_rl.analysis.random_eval import (
     evaluate_vs_random_cpu as evaluate_vs_random,
     evaluate_vs_random_gpu,
 )
-from junqi_rl.analysis.protocol import (
-    completed_evaluation_score,
-    merge_evaluations,
-)
+from junqi_rl.analysis.protocol import completed_evaluation_score
 from junqi_rl.env import VectorJunqiEnv
 from junqi_rl.networks.arrangement_net import (
     ArrangementNet, ArrangementNetConfig,
 )
 from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
-from junqi_rl.checkpoint_compat import validate_policy_checkpoint
 from junqi_rl.arrangement.buffer import ArrangementBuffer
 from junqi_rl.arrangement.sampling import generate_arrangements
 from junqi_rl.training import (
@@ -136,6 +132,7 @@ from junqi_rl.training.arr_ppo import (
     ArrangementPPOConfig, ArrangementPPOTrainer,
 )
 from junqi_rl.training.checkpoint import (
+    load_evaluation_policy,
     save_checkpoint,
     update_checkpoint_alias,
 )
@@ -261,15 +258,6 @@ def train(cfg: TrainConfig) -> None:
     if is_distributed:
         dist.barrier()
     log_dir = os.path.join(cfg.save_dir, "logs")
-    if is_rank0:
-        from junqi_rl.analysis.league import LeaguePool
-
-        league_pool: LeaguePool | None = LeaguePool(
-            os.path.join(cfg.save_dir, "league.json"),
-            max_entries=cfg.league_max_checkpoints,
-        )
-    else:
-        league_pool = None
 
     # ---- Tee stdout/stderr to train.log so user can always tail the file ----
     # Under DDP each rank gets its own log file (train.log on rank 0,
@@ -670,23 +658,11 @@ def train(cfg: TrainConfig) -> None:
     _eval_baseline_policy = None
     if is_rank0 and cfg.eval_baseline_ckpt:
         ckpt_path = cfg.eval_baseline_ckpt
-        if not os.path.isfile(ckpt_path):
-            raise FileNotFoundError(f"eval_baseline_ckpt not found: {ckpt_path}")
-        baseline_state = torch.load(
-            ckpt_path, map_location=device, weights_only=False
-        )
-        baseline_net_cfg = baseline_state["cfg"].net
-        _eval_baseline_policy = JunqiNet(baseline_net_cfg).to(device)
-        validate_policy_checkpoint(
-            _eval_baseline_policy,
-            baseline_state,
-            source=f"eval baseline {ckpt_path}",
-        )
-        _eval_baseline_policy.load_state_dict(baseline_state["policy"])
-        _eval_baseline_policy.eval()
+        _eval_baseline_policy = load_evaluation_policy(ckpt_path, device=device)
         print(
             f"[train] Frozen baseline for h2h: {ckpt_path} "
-            f"(embed={baseline_net_cfg.embed_dim}, depth={baseline_net_cfg.depth})"
+            f"(embed={_eval_baseline_policy.cfg.embed_dim}, "
+            f"depth={_eval_baseline_policy.cfg.depth})"
         )
 
     for rollout_idx in range(start_rollout, cfg.total_rollouts):
@@ -1073,12 +1049,6 @@ def train(cfg: TrainConfig) -> None:
                     belief_trainer=belief_trainer,
                 )
                 print(f"[train] Checkpoint saved: {ckpt_path}")
-                assert league_pool is not None
-                league_pool.register(
-                    ckpt_path,
-                    rollout=rollout_idx + 1,
-                    tags={"kind": "periodic"},
-                )
                 # Log config text once on first save
                 if rollout_idx + 1 == cfg.save_every:
                     with open(cfg_path) as f:
@@ -1178,12 +1148,6 @@ def train(cfg: TrainConfig) -> None:
                                 arr_ema=arr_ema,
                                 belief_trainer=belief_trainer,
                             )
-                            assert league_pool is not None
-                            league_pool.register(
-                                best_h2h_path,
-                                rollout=rollout_idx + 1,
-                                tags={"kind": "best_h2h", "h2h_score": h2h_score},
-                            )
                             best_h2h_link = os.path.join(
                                 cfg.save_dir, "ckpt_best_h2h.pt"
                             )
@@ -1199,150 +1163,6 @@ def train(cfg: TrainConfig) -> None:
                                 f"score={h2h_score:.3f}; saved {best_h2h_link}"
                             )
 
-                    if cfg.eval_record_games > 0:
-                        # A replay is useful evidence, but it must not prevent
-                        # league evaluation, best-checkpoint selection, or
-                        # early-stop decisions. Keep this optional artifact
-                        # path isolated from the main evaluation transaction.
-                        try:
-                            from junqi_rl.analysis.record import record_game_with_policy
-
-                            replay_dir = os.path.join(cfg.save_dir, "replays")
-                            os.makedirs(replay_dir, exist_ok=True)
-                            for replay_idx in range(cfg.eval_record_games):
-                                policy_team = replay_idx & 1
-                                replay_seed = eval_seed + replay_idx
-                                trajectory = record_game_with_policy(
-                                    eval_policy,
-                                    rng_seed=replay_seed,
-                                    device=device,
-                                    max_steps=cfg.env.max_num_moves,
-                                    greedy=True,
-                                    random_opponent=True,
-                                    policy_team=policy_team,
-                                    record_beliefs=cfg.eval_record_beliefs,
-                                    meta={
-                                        "rollout": rollout_idx + 1,
-                                        "policy_team": policy_team,
-                                        "checkpoint_kind": "policy",
-                                        **eval_metrics,
-                                    },
-                                )
-                                replay_path = os.path.join(
-                                    replay_dir,
-                                    f"eval_{rollout_idx + 1:06d}_"
-                                    f"{replay_idx:02d}_team{policy_team}.npz",
-                                )
-                                trajectory.save(replay_path)
-                                print(f"[eval] Replay saved: {replay_path}")
-                        except Exception:
-                            print("[eval] Replay recording failed; continuing evaluation:")
-                            traceback.print_exc()
-
-                    if cfg.league_eval_games > 0:
-                        from junqi_rl.analysis.evaluate import eval_head_to_head
-
-                        assert league_pool is not None
-                        current_path = save_checkpoint(
-                            trainer,
-                            cfg,
-                            rollout_idx + 1,
-                            cfg.save_dir,
-                            arr_trainer=arr_trainer,
-                            arr_ema=arr_ema,
-                            belief_trainer=belief_trainer,
-                        )
-                        current_entry = league_pool.register(
-                            current_path,
-                            rollout=rollout_idx + 1,
-                            tags={"kind": "evaluation", "win_rate": win_rate},
-                        )
-                        opponent_entry = league_pool.sample(
-                            seed=eval_seed,
-                            exclude_rollout=rollout_idx + 1,
-                        )
-                        if opponent_entry is not None:
-                            opponent = JunqiNet(cfg.net).to(device)
-                            opponent_state = torch.load(
-                                opponent_entry.checkpoint,
-                                map_location=device,
-                                weights_only=False,
-                            )
-                            # League comparisons use the same raw learner
-                            # definition as the primary score and collection.
-                            # Keep EMA only as a backwards-compatible fallback
-                            # for a checkpoint that lacks raw policy weights.
-                            weights = opponent_state.get("policy")
-                            if weights is None:
-                                ema_state = opponent_state.get("ema", {})
-                                weights = (
-                                    ema_state.get("shadow")
-                                    if isinstance(ema_state, dict)
-                                    else None
-                                )
-                            if weights is None:
-                                raise KeyError(
-                                    "league checkpoint has neither policy nor EMA weights"
-                                )
-                            opponent.load_state_dict(weights)
-                            opponent.eval()
-
-                            league_team0_games = max(1, cfg.league_eval_games // 2)
-                            league_team1_games = (
-                                cfg.league_eval_games - league_team0_games
-                            )
-                            league_shards = [
-                                eval_head_to_head(
-                                    eval_policy,
-                                    opponent,
-                                    num_games=league_team0_games,
-                                    first_team=0,
-                                    max_steps=cfg.env.max_num_moves,
-                                    device=device,
-                                    seed_base=eval_seed,
-                                    greedy=True,
-                                )
-                            ]
-                            if league_team1_games > 0:
-                                league_shards.append(
-                                    eval_head_to_head(
-                                        eval_policy,
-                                        opponent,
-                                        num_games=league_team1_games,
-                                        first_team=1,
-                                        max_steps=cfg.env.max_num_moves,
-                                        device=device,
-                                        seed_base=eval_seed,
-                                        greedy=True,
-                                    )
-                                )
-                            league_metrics = merge_evaluations(
-                                *league_shards,
-                                prefix="league",
-                            )
-                            league_metrics["league/opponent_rollout"] = float(
-                                opponent_entry.rollout
-                            )
-                            logger.log(league_metrics, step=rollout_idx)
-                            league_pool.record_match(
-                                current_entry.sha256,
-                                opponent_entry.sha256,
-                                first_score=league_metrics[
-                                    "league/score_completed"
-                                ],
-                                games=int(
-                                    league_metrics["league/num_games"]
-                                ),
-                            )
-                            print(
-                                "[league] "
-                                f"vs rollout {opponent_entry.rollout}: "
-                                f"score={league_metrics['league/score_completed']:.3f} "
-                                f"win={league_metrics['league/win_rate']:.3f} "
-                                f"games={int(league_metrics['league/num_games'])}"
-                            )
-                            del opponent
-
                     if (
                         requested_games > 0
                         and done_games == requested_games
@@ -1356,13 +1176,6 @@ def train(cfg: TrainConfig) -> None:
                             arr_ema=arr_ema,
                             belief_trainer=belief_trainer,
                         )
-                        assert league_pool is not None
-                        if not cfg.eval_baseline_ckpt:
-                            league_pool.register(
-                                best_random_path,
-                                rollout=rollout_idx + 1,
-                                tags={"kind": "best_random", "win_rate": win_rate},
-                            )
                         best_random_link = os.path.join(
                             cfg.save_dir, "ckpt_best_random.pt"
                         )

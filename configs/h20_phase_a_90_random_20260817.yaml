@@ -9,11 +9,8 @@ total_rollouts: 300
 save_every: 20
 eval_every: 20
 eval_num_games: 256
-eval_record_games: 1
-eval_record_beliefs: false
 eval_fixed_setup_pool: true
 eval_setup_seed: 20260817
-league_eval_games: 0
 early_stop_win_rate: 0.0
 early_stop_patience: 3
 early_stop_min_rollout: 100
