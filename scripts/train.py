@@ -116,6 +116,7 @@ from junqi_rl.networks.arrangement_net import (
     ArrangementNet, ArrangementNetConfig,
 )
 from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
+from junqi_rl.checkpoint_compat import validate_policy_checkpoint
 from junqi_rl.arrangement.buffer import ArrangementBuffer
 from junqi_rl.arrangement.sampling import generate_arrangements
 from junqi_rl.training import (
@@ -672,6 +673,11 @@ def train(cfg: TrainConfig) -> None:
         )
         baseline_net_cfg = baseline_state["cfg"].net
         _eval_baseline_policy = JunqiNet(baseline_net_cfg).to(device)
+        validate_policy_checkpoint(
+            _eval_baseline_policy,
+            baseline_state,
+            source=f"eval baseline {ckpt_path}",
+        )
         _eval_baseline_policy.load_state_dict(baseline_state["policy"])
         _eval_baseline_policy.eval()
         print(

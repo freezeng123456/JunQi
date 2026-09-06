@@ -130,6 +130,11 @@ RL 轨迹可以包含每步 Top-K 动作概率、Value、Belief 快照及训练�
 # ppo.adv_filt_rate 覆盖为 1.0（保留全部 transition）。
 python scripts/train.py --config configs/h20_10m_current.yaml
 
+# 可选：使用与当前 317-channel / GraphStem schema 兼容的冻结 baseline 做 H2H。
+# 路径由启动环境提供，不再写死在 tracked config 中。
+python scripts/train.py --config configs/h20_10m_current.yaml \
+  --set eval_baseline_ckpt=/path/to/compatible_baseline.pt
+
 # 通用小规模入口
 python scripts/train.py --config configs/default.yaml
 ```

@@ -1,6 +1,11 @@
 # JunQi-RL Architecture
 
-> **Status**: DRAFT (2026-04-19)
+> **Status**: HISTORICAL DESIGN DRAFT (2026-04-19). The tensor counts and
+> network layout below predate the compact 317-channel observation,
+> 129×129 action space, compact-history rollout and GraphStem migrations.
+> For runtime truth use `junqi_core/observation.py`,
+> `junqi_core/board.py`, `junqi_rl/networks/junqi_net.py` and
+> `docs/STABILIZATION_2026-09-07.md`.
 > **Scope**: Engineering-level design doc covering codebase layout, module boundaries, coordinate systems, observation/action tensors, and the canonical rotation math that unifies 4-seat play under a single network weight.
 > **Companion**: `RULES.md` (what the engine does) | This doc (how it's organized and how RL interacts with it) | `DECISIONS.md` (why these choices).
 
