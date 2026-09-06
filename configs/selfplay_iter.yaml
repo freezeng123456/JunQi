@@ -55,8 +55,6 @@ total_rollouts: 400
 save_every: 25
 eval_every: 10
 eval_num_games: 128
-eval_record_games: 0
-league_eval_games: 0
 log_every: 5
 
 eval_baseline_ckpt: /jizhicfs/freezeng123456/JunQi-runs/feat_ablate_200r_20260817/f_belief/ckpt_000200.pt

@@ -92,8 +92,6 @@ total_rollouts: 3000
 save_every: 100
 eval_every: 25
 eval_num_games: 128
-eval_record_games: 0
-league_eval_games: 0
 log_every: 10
 
 # Optional H2H yardstick. Do not pin a machine-local checkpoint in a tracked

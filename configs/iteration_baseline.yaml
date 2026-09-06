@@ -50,8 +50,6 @@ total_rollouts: 100
 save_every: 25
 eval_every: 10
 eval_num_games: 256
-eval_record_games: 0
-league_eval_games: 0
 log_every: 5
 
 device: cuda

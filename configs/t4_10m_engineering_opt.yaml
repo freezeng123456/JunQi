@@ -56,8 +56,6 @@ total_rollouts: 3000
 save_every: 25
 eval_every: 10
 eval_num_games: 64
-eval_record_games: 0
-league_eval_games: 0
 log_every: 1
 
 resume: /data/disk2/junqi_opt/models/junqi-10m-pin01-nofilt-20260821/ckpt_000570.pt
