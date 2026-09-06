@@ -12,16 +12,16 @@ rollout:
   * mutates state on-device via ``GpuWorld.step_batch``
   * fetches dense legal-action ids (world frame) from the GPU kernel
   * builds per-seat observations on-device (a tensor of shape
-    ``(N, 4, 101, 17, 17)``) and copies them to the host
+    ``(N, 4, 317, 17, 17)``) and copies them to the host
 
-Per step we only *use* the acting seat slice (``N × 101 × 17 × 17`` float32,
+Per step we only *use* the acting seat slice (``N × 317 × 17 × 17`` float32,
 ≈118 MB at N = 1024).  When torch is available we expose this to the policy
 as a CUDA tensor via the existing host round-trip; future work can swap that
 for ``torch.from_dlpack`` using :attr:`DeviceObservationBatch.d_spatial_ptr`.
 
 Action-frame conventions
 ~~~~~~~~~~~~~~~~~~~~~~~~
-* Policy → canonical-frame ``(0, 83520)`` flat ids.
+* Policy → canonical-frame ``[0, 16640]`` compact ids.
 * GPU step() consumes **world-frame** ids; we un-rotate via
   :data:`junqi_rl.action_lut.UNROTATE_LUT`.
 * GPU ``legal_action_ids_batch`` returns **world-frame** ids; we rotate the

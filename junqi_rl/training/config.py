@@ -99,6 +99,9 @@ class TrainConfig:
     # change the test distribution from checkpoint to checkpoint.
     eval_fixed_setup_pool: bool = True
     eval_setup_seed: int = 20_260_817
+    # Keep game/reset seeds fixed across checkpoints so monitoring differences
+    # are attributable to policy changes rather than a moving evaluation set.
+    eval_game_seed: int = 20_260_817
     league_max_checkpoints: int = 12
     league_eval_games: int = 16
 

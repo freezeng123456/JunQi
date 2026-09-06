@@ -3,7 +3,7 @@
 Mirrors Ataraxos ``pyengine/core/rl.py::arr_train`` (lines 616-700) with
 JunQi adaptations:
 
-* No distributed training (single-process).
+* DDP wraps the train-time network and matches minibatch counts across ranks.
 * Forward pass takes ``(seq, seat_idx)`` — the shared net conditions on
   per-sample seat via embedding.
 * No ``force_handedness`` / flip — JunQi has no left-right symmetry.
@@ -21,6 +21,7 @@ as stats.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -134,7 +135,12 @@ class ArrangementPPOTrainer:
             self._net_for_train = self.net
         self._total_batches: int = 0
 
-    def train_epoch(self, buffer: ArrangementBuffer) -> dict[str, float]:
+    def train_epoch(
+        self,
+        buffer: ArrangementBuffer,
+        *,
+        on_optimizer_step: Callable[[ArrangementNet], None] | None = None,
+    ) -> dict[str, float]:
         """Run ``cfg.num_epoch_per_train`` passes over the buffer's ready rows.
 
         Returns a dict of averaged per-stat values over ALL minibatches in
@@ -197,7 +203,9 @@ class ArrangementPPOTrainer:
                 dist.all_reduce(n_local, op=dist.ReduceOp.MIN)
                 batches = batches[: int(n_local.item())]
             for batch in batches:
-                self._step(batch, stats)
+                stepped = self._step(batch, stats)
+                if stepped and on_optimizer_step is not None:
+                    on_optimizer_step(self.net)
 
         # Aggregate.
         out = {k: (sum(v) / len(v)) for k, v in stats.items() if len(v) > 0 and k != "arr_train/n_batches"}
@@ -209,8 +217,8 @@ class ArrangementPPOTrainer:
 
     # ----------------------------------------------------------- single batch
 
-    def _step(self, batch: Batch, stats: dict[str, list[float]]) -> None:
-        """One PPO update on one minibatch."""
+    def _step(self, batch: Batch, stats: dict[str, list[float]]) -> bool:
+        """One PPO update; return True iff ``optimizer.step()`` ran."""
         cfg = self.cfg
         net = self._net_for_train  # DDP-wrapped (or plain) module for fwd+bwd
         # Use the unwrapped reference for non-tensor metadata access.
@@ -313,7 +321,7 @@ class ArrangementPPOTrainer:
             stats["arr_train/grad_skip"].append(1.0)
             stats["arr_train/n_batches"].append(1.0)
             self._total_batches += 1
-            return
+            return False
 
         self.optim.step()
 
@@ -331,6 +339,7 @@ class ArrangementPPOTrainer:
         stats["arr_train/lr"].append(float(self.optim.param_groups[0]["lr"]))
         stats["arr_train/n_batches"].append(1.0)
         self._total_batches += 1
+        return True
 
     # ----------------------------------------------------------- checkpointing
 

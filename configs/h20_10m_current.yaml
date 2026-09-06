@@ -9,3 +9,4 @@ extends: ataraxos_selfplay.yaml
 
 ppo:
   adv_filt_rate: 1.0
+  adv_filt_thresh: 0.0

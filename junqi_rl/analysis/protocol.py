@@ -150,8 +150,27 @@ def merge_evaluations(
     return out
 
 
+def completed_evaluation_score(
+    metrics: Mapping[str, float],
+    *,
+    prefix: str = "eval",
+) -> float | None:
+    """Return chess-style score only for a fully completed evaluation.
+
+    Partial evaluations are not comparable model-selection samples: an
+    ongoing game changes the effective denominator and may bias the result.
+    """
+
+    counts = counts_from_metrics(metrics, prefix=prefix)
+    if counts.requested <= 0:
+        return None
+    if counts.ongoing != 0 or counts.completed != counts.requested:
+        return None
+    return counts.score
+
 __all__ = [
     "EvaluationCounts",
+    "completed_evaluation_score",
     "counts_from_metrics",
     "merge_evaluations",
     "wilson_interval",
