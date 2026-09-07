@@ -66,7 +66,7 @@ def _seed_buffer(N: int, *, use_cat_vf: bool, seed: int = 0):
     term = torch.ones(N, dtype=torch.bool)
     # Mix of rewards so cat-VF one-hot has non-trivial distribution.
     rewards = torch.tensor([(-1.0, 0.0, 1.0)[i % 3] for i in range(N)])
-    buf.add_rewards(vocabs_tensor, term, rewards)
+    buf.add_rewards(vocabs_tensor, seat_idx, term, rewards)
     buf.process_data(
         td_lambda=1.0, gae_lambda=1.0, reg_temp=0.02, reg_norm=10.0,
     )

@@ -7,9 +7,9 @@ TD(λ)/GAE(λ) + regularised-advantage processing identical to Ataraxos
 
 Adaptations for JunQi
 ---------------------
-* **No pystratego** — we hash vocab-idx lineups with ``blake2b`` (digest 8
-  bytes → int64) for dedup. Collisions within ``storage_duration`` are
-  astronomically unlikely.
+* **No pystratego** — we hash ``(seat, vocab-idx lineup)`` with
+  ``blake2b`` (digest 8 bytes → int64) for dedup. Collisions within
+  ``storage_duration`` are astronomically unlikely.
 * **No flip / handedness** — JunQi 4-seat layout has no left-right symmetry,
   so ``needs_flip`` is dropped entirely.
 * **Per-seat conditioning** — we additionally store ``seat_idx`` so the
@@ -61,20 +61,19 @@ DEFAULT_CATEGORICAL_AGGREGATION: Tensor = torch.tensor(
 )
 
 
-def _arrangement_ids(arr_idx: Tensor) -> list[int]:
-    """Hash each lineup to a stable 64-bit int via blake2b.
+def _arrangement_ids(arr_idx: Tensor, seat_idx: Tensor) -> list[int]:
+    """Hash each ``(seat, lineup)`` pair to a stable 64-bit int via blake2b.
 
-    ``arr_idx`` is ``(N, ARRANGEMENT_SIZE)`` uint8 (vocab indices, 0..12).
-    Identical lineups get identical IDs regardless of the seat.
-
-    Using blake2b rather than Python's ``hash(tuple(...))`` keeps IDs stable
-    across Python invocations (``hash()`` is randomised) — useful for
-    offline debugging & for the storage-duration dedup across refreshes.
+    The arrangement policy is seat-conditioned, so identical 30-slot lineups
+    generated for different seats are distinct policy samples and must not
+    share creation-time log-probs/value targets in the buffer.
     """
     idx_np = arr_idx.cpu().to(torch.uint8).numpy()
+    seats = seat_idx.detach().cpu().tolist()
     out: list[int] = []
-    for row in idx_np:
-        digest = hashlib.blake2b(row.tobytes(), digest_size=8).digest()
+    for row, seat in zip(idx_np, seats, strict=True):
+        payload = bytes([int(seat)]) + row.tobytes()
+        digest = hashlib.blake2b(payload, digest_size=8).digest()
         out.append(int.from_bytes(digest, "little", signed=False))
     return out
 
@@ -265,7 +264,7 @@ class ArrangementBuffer:
 
         # ---- 1. Hash new rows and dedup within the new batch ------------
         new_arr_idx = arrangements.argmax(dim=-1).to(torch.uint8)
-        new_ids_all = _arrangement_ids(new_arr_idx)
+        new_ids_all = _arrangement_ids(new_arr_idx, seat_idx)
 
         # Dedup within the new batch: when the same hash appears twice,
         # keep the *last* occurrence (matches paper's "most recent" rule
@@ -346,6 +345,7 @@ class ArrangementBuffer:
     def add_rewards(
         self,
         env_arrangements: Tensor,     # (E, 30) int64 vocab indices of each env's arrangement
+        env_seats: Tensor,            # (E,) int64 seat index in [0, 4)
         is_newly_terminal: Tensor,    # (E,) bool
         rewards: Tensor,              # (E,) float in {-1, 0, 1}
     ) -> None:
@@ -369,6 +369,11 @@ class ArrangementBuffer:
                 f"env_arrangements must be ({E}, {ARRANGEMENT_SIZE}), "
                 f"got {env_arrangements.shape}"
             )
+        if env_seats.shape != (E,) or env_seats.dtype != torch.long:
+            raise ValueError(
+                f"env_seats must be ({E},) int64, "
+                f"got {tuple(env_seats.shape)}/{env_seats.dtype}"
+            )
         if is_newly_terminal.shape != (E,) or is_newly_terminal.dtype != torch.bool:
             raise ValueError(
                 f"is_newly_terminal must be ({E},) bool, "
@@ -382,6 +387,7 @@ class ArrangementBuffer:
 
         term_mask = is_newly_terminal
         arr_term = env_arrangements[term_mask].to(torch.uint8)
+        seats_term = env_seats[term_mask]
         rewards_term = rewards[term_mask].to(self.device).float()
 
         if self.use_cat_vf:
@@ -390,8 +396,8 @@ class ArrangementBuffer:
                 (rewards_term + 1).long(), num_classes=self.n_vf_cat,
             ).to(torch.float32)
 
-        # Map each terminal arrangement to its buffer row via hash.
-        ids = _arrangement_ids(arr_term)
+        # Map each terminal (seat, arrangement) pair to its buffer row.
+        ids = _arrangement_ids(arr_term, seats_term)
         rows: list[int] = []
         kept: list[int] = []
         for i, rid in enumerate(ids):

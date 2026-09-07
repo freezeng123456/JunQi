@@ -62,14 +62,20 @@ def test_arrangement_ids_stable_and_distinct():
     import random
     rng = random.Random(123)
     vocabs = torch.stack([_lineup_to_vocab(generate_random_lineup(rng)) for _ in range(N)])
-    ids1 = _arrangement_ids(vocabs.to(torch.uint8))
-    ids2 = _arrangement_ids(vocabs.to(torch.uint8))
+    seats = torch.zeros(N, dtype=torch.long)
+    ids1 = _arrangement_ids(vocabs.to(torch.uint8), seats)
+    ids2 = _arrangement_ids(vocabs.to(torch.uint8), seats)
     assert ids1 == ids2  # deterministic across invocations
     # Identical rows yield identical ids.
     dup = vocabs.clone()
     dup[-1] = vocabs[0]
-    ids3 = _arrangement_ids(dup.to(torch.uint8))
+    ids3 = _arrangement_ids(dup.to(torch.uint8), seats)
     assert ids3[0] == ids3[-1]
+
+    same_lineup = torch.stack([vocabs[0], vocabs[0]])
+    seat_pair = torch.tensor([0, 1], dtype=torch.long)
+    ids4 = _arrangement_ids(same_lineup.to(torch.uint8), seat_pair)
+    assert ids4[0] != ids4[1]
 
 
 def test_mark_most_recent_basic():
@@ -154,6 +160,32 @@ def test_add_arrangements_rejects_bad_dtypes():
 # ---------------------------------------------------------------------------
 
 
+def test_same_lineup_different_seats_keep_separate_reward_rows():
+    buf = ArrangementBuffer(storage_duration=100, device="cpu", use_cat_vf=False)
+    arr, values, ents, log_probs, _, vocabs = _fake_batch(
+        1, seed=41, use_cat_vf=False
+    )
+    arrangements = arr.repeat(2, 1, 1)
+    values = values.repeat(2, 1)
+    ents = ents.repeat(2, 1)
+    log_probs = log_probs.repeat(2, 1, 1)
+    seats = torch.tensor([0, 1], dtype=torch.long)
+
+    buf.add_arrangements(arrangements, values, ents, log_probs, seats, step=0)
+    assert len(buf) == 2
+
+    env_arrangements = vocabs.repeat(2, 1)
+    terminal = torch.ones(2, dtype=torch.bool)
+    rewards = torch.tensor([1.0, -1.0])
+    buf.add_rewards(env_arrangements, seats, terminal, rewards)
+
+    row_by_seat = {int(seat): i for i, seat in enumerate(buf.seat_idx.tolist())}
+    assert float(buf.rewards[row_by_seat[0]]) == 1.0
+    assert float(buf.rewards[row_by_seat[1]]) == -1.0
+    assert bool(buf.ready_flags[row_by_seat[0]])
+    assert bool(buf.ready_flags[row_by_seat[1]])
+
+
 def test_add_rewards_marks_row_ready_and_updates_mean():
     buf = ArrangementBuffer(storage_duration=100, device="cpu", use_cat_vf=False)
     arr, values, ents, log_probs, seat_idx, vocabs = _fake_batch(3, seed=5, use_cat_vf=False)
@@ -163,7 +195,7 @@ def test_add_rewards_marks_row_ready_and_updates_mean():
     env_arr = vocabs  # (3, 30) int64
     is_term = torch.tensor([True, False, True], dtype=torch.bool)
     rewards = torch.tensor([1.0, 0.0, -1.0])
-    buf.add_rewards(env_arr, is_term, rewards)
+    buf.add_rewards(env_arr, seat_idx, is_term, rewards)
     assert bool(buf.ready_flags[0])
     assert not bool(buf.ready_flags[1])  # its terminal flag was False
     assert bool(buf.ready_flags[2])
@@ -173,7 +205,7 @@ def test_add_rewards_marks_row_ready_and_updates_mean():
     # Second hit on row 0 with reward -1 → running mean = 0.0.
     is_term2 = torch.tensor([True, False, False], dtype=torch.bool)
     rewards2 = torch.tensor([-1.0, 0.0, 0.0])
-    buf.add_rewards(env_arr, is_term2, rewards2)
+    buf.add_rewards(env_arr, seat_idx, is_term2, rewards2)
     assert abs(float(buf.rewards[0])) < 1e-6
     assert int(buf.counts[0]) == 2
 
@@ -186,7 +218,7 @@ def test_add_rewards_cat_vf_onehot_conversion():
 
     is_term = torch.tensor([True, True, True], dtype=torch.bool)
     rewards = torch.tensor([1.0, 0.0, -1.0])
-    buf.add_rewards(vocabs, is_term, rewards)
+    buf.add_rewards(vocabs, seat_idx, is_term, rewards)
     # Row 0 reward is +1 → bin index 2 (win).
     assert torch.allclose(buf.rewards[0], torch.tensor([0.0, 0.0, 1.0]))
     # Row 1 reward 0 → bin 1 (draw).
@@ -204,9 +236,10 @@ def test_add_rewards_unknown_arrangement_skipped():
     import random
     stranger = _lineup_to_vocab(generate_random_lineup(random.Random(999)))
     env_arr = torch.stack([stranger, vocabs[0]])
+    env_seats = torch.tensor([0, int(seat_idx[0])], dtype=torch.long)
     is_term = torch.tensor([True, True], dtype=torch.bool)
     rewards = torch.tensor([1.0, -1.0])
-    buf.add_rewards(env_arr, is_term, rewards)
+    buf.add_rewards(env_arr, env_seats, is_term, rewards)
     # Only the second env should have updated the buffer.
     assert bool(buf.ready_flags[0])   # the one whose arrangement matches row 0
     assert not bool(buf.ready_flags[1])
@@ -217,7 +250,12 @@ def test_add_rewards_before_add_arrangements_raises():
     buf = ArrangementBuffer(storage_duration=100, device="cpu", use_cat_vf=False)
     vocabs = torch.zeros(2, ARRANGEMENT_SIZE, dtype=torch.long)
     with pytest.raises(RuntimeError):
-        buf.add_rewards(vocabs, torch.tensor([True, False]), torch.tensor([1.0, 0.0]))
+        buf.add_rewards(
+            vocabs,
+            torch.zeros(2, dtype=torch.long),
+            torch.tensor([True, False]),
+            torch.tensor([1.0, 0.0]),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +270,7 @@ def test_process_data_scalar_vf_mc_target_equals_reward():
     arr, values, ents, log_probs, seat_idx, vocabs = _fake_batch(3, seed=8, use_cat_vf=False)
     buf.add_arrangements(arr, values, ents, log_probs, seat_idx, step=0)
     rewards = torch.tensor([1.0, 0.0, -1.0])
-    buf.add_rewards(vocabs, torch.ones(3, dtype=torch.bool), rewards)
+    buf.add_rewards(vocabs, seat_idx, torch.ones(3, dtype=torch.bool), rewards)
     stats = buf.process_data(td_lambda=1.0, gae_lambda=1.0, reg_temp=0.0, reg_norm=10.0)
     assert "arr_buf/abs_adv_q90" in stats
     # Cross-check: for scalar VF, TD(1) backward from reward gives
@@ -248,7 +286,7 @@ def test_process_data_cat_vf_scalar_adv_has_right_sign():
     arr, values, ents, log_probs, seat_idx, vocabs = _fake_batch(3, seed=9)
     buf.add_arrangements(arr, values, ents, log_probs, seat_idx, step=0)
     rewards = torch.tensor([1.0, 0.0, -1.0])
-    buf.add_rewards(vocabs, torch.ones(3, dtype=torch.bool), rewards)
+    buf.add_rewards(vocabs, seat_idx, torch.ones(3, dtype=torch.bool), rewards)
     buf.process_data(td_lambda=1.0, gae_lambda=1.0, reg_temp=0.0, reg_norm=10.0)
     # Advantages at t=0 scaled by categorical_aggregation should roughly
     # reflect: row with reward +1 → positive; reward -1 → negative.
@@ -275,7 +313,12 @@ def test_sample_batches_cover_all_ready_rows():
     N = 10
     arr, values, ents, log_probs, seat_idx, vocabs = _fake_batch(N, seed=11, use_cat_vf=False)
     buf.add_arrangements(arr, values, ents, log_probs, seat_idx, step=0)
-    buf.add_rewards(vocabs, torch.ones(N, dtype=torch.bool), torch.arange(N).float() * 0.1 - 0.5)
+    buf.add_rewards(
+        vocabs,
+        seat_idx,
+        torch.ones(N, dtype=torch.bool),
+        torch.arange(N).float() * 0.1 - 0.5,
+    )
     buf.process_data(td_lambda=1.0, gae_lambda=1.0, reg_temp=0.02, reg_norm=10.0)
 
     seen = 0
@@ -335,7 +378,7 @@ def test_full_lifecycle():
         buf.add_arrangements(arr, values, ents, log_probs, seat_idx, step=epoch * 10)
         term = torch.ones(8, dtype=torch.bool)
         rewards = torch.tensor([1.0, 0.0, -1.0, 1.0, -1.0, 0.0, 1.0, -1.0])
-        buf.add_rewards(vocabs, term, rewards)
+        buf.add_rewards(vocabs, seat_idx, term, rewards)
         stats = buf.process_data(
             td_lambda=1.0, gae_lambda=1.0, reg_temp=0.02, reg_norm=10.0,
         )
