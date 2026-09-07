@@ -504,6 +504,7 @@ class GpuRollout:
         canonical_setup_styles: tuple[str, ...] | None = None,
         mixed_setup: bool = False,
         mixed_own_team_styles: tuple[str, ...] = ("T",),
+        max_num_moves: int | None = None,
     ) -> None:
         if not _CUDA_AVAILABLE:
             raise ImportError(
@@ -530,7 +531,10 @@ class GpuRollout:
                 "mixed_setup=True requires mixed_own_team_styles to be non-empty"
             )
 
-        self.state = _cuda.DeviceGameStateBatch(num_envs)
+        move_limit = 4000 if max_num_moves is None else max_num_moves
+        if move_limit <= 0:
+            raise ValueError("max_num_moves must be positive")
+        self.state = _cuda.DeviceGameStateBatch(num_envs, max_num_moves=move_limit)
         self.obs   = _cuda.DeviceObservationBatch(num_envs)
         # Single-seat obs buffer for acting-seat-only builds (4x less memory)
         self.obs_single = _cuda.DeviceObservationSingleBatch(num_envs)

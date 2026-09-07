@@ -1531,15 +1531,10 @@ def generate_legal_action_ids_n(
             cr_land  = lp_flat[fi_cr].reshape(Cv, 2, CL)
 
             # Prefix "all cells before this one were empty" — same as straight rail
-            if CL <= 11:
-                # Unroll up to 11 — use cumprod for generality
-                sh = np.empty_like(cr_empty)
-                sh[..., 0] = True
-                if CL > 1:
-                    sh[..., 1:] = cr_empty[..., :-1]
-                pref = np.cumprod(sh, axis=-1).astype(bool, copy=False)
-            else:
-                pref = np.ones_like(cr_empty)
+            sh = np.empty_like(cr_empty)
+            sh[..., 0] = True
+            sh[..., 1:] = cr_empty[..., :-1]
+            pref = np.logical_and.accumulate(sh, axis=-1)
 
             ok = pref & cr_land
             if ok.any():
@@ -1570,8 +1565,8 @@ def has_legal_moves_soa(
     """Return True iff ``acting_seat_val`` has at least one legal move.
 
     Optimized fast path: first checks if any mobile piece has an empty
-    orthogonal neighbor (covers >99% of cases without full occupancy
-    computation). Falls back to full check only when the fast path fails.
+    orthogonal neighbor (avoids full occupancy
+    computation). Falls back to the shared full generator when it fails.
     """
     # Filter to mobile alive pieces of this seat
     seat_mask = alive & (piece_seat_arr == acting_seat_val)
@@ -1597,76 +1592,20 @@ def has_legal_moves_soa(
         return False
     src_flats = src_flats[not_stronghold]
 
-    # Fast path: check if any orthogonal neighbor is empty.
-    # This avoids building full occupancy masks (the expensive part).
-    occupied = np.ones(NUM_CELLS + 1, dtype=bool)
-    occupied[:NUM_CELLS] = (cell_piece_id >= 0)
-    # The pad slot at NUM_CELLS means "no neighbour that way" — off the board.
-    # It must read as unusable, not as empty, or a piece with fewer than four
-    # orthogonal neighbours reports a move it cannot make.
-
-    adj = _ADJ_STRAIGHT_PAD[src_flats]  # (K, 4), sentinel=289=NUM_CELLS
-    # Check if any adjacent cell is empty (not occupied)
-    adj_occupied = occupied[adj.ravel()].reshape(adj.shape)
-    any_empty_adj = ~adj_occupied  # (K, 4)
-    if any_empty_adj.any():
+    # Off-board padding must remain non-landable. Inverting an occupied
+    # mask whose sentinel is False incorrectly treats board edges as moves.
+    empty_pad = _empty_with_sentinel(cell_piece_id < 0)
+    adj = _ADJ_STRAIGHT_PAD[src_flats]
+    if empty_pad[adj].any():
         return True
 
-    # Slow path (rare): build full occupancy and do comprehensive check
-    empty, _same, enemy_attackable = _compute_occupancy_masks_soa(
-        cell_piece_id, piece_seat_arr, acting_seat_val
-    )
-    landable = empty | enemy_attackable
-    landable_pad = _landable_with_sentinel(landable)
-    empty_pad = _empty_with_sentinel(empty)
-
-    pids_full = pids[not_stronghold]
-    pt_vals_full = piece_type_arr[pids_full].astype(np.intp, copy=False)
-
-    # Check orthogonal 1-step with full landable (includes enemy attack)
-    adj_idx = adj.astype(np.intp, copy=False)
-    if landable_pad[adj_idx].any():
-        return True
-
-    # Check diagonal-into-camp 1-step
-    diag = _T.ADJ_DIAG_INTO_CAMP_PAD[src_flats]
-    diag_idx = _remap_neg1(diag)
-    if landable_pad[diag_idx].any():
-        return True
-
-    # Check straight-rail moves (non-engineer on rail)
-    is_rail_src = _T.IS_RAIL_FLAT[src_flats]
-    is_engineer = _T.IS_ENGINEER_TYPE[pt_vals_full]
-    rail_nonengineer = is_rail_src & ~is_engineer
-    if rail_nonengineer.any():
-        sub_src_flats = src_flats[rail_nonengineer]
-        rays = _T.STRAIGHT_RAIL_RAYS_PAD[sub_src_flats]   # (Kr, 4, L)
-        rays_idx = _remap_neg1(rays)
-        ray_empty = empty_pad[rays_idx]
-        ray_landable = landable_pad[rays_idx]
-        L = ray_empty.shape[-1]
-        pref = np.empty_like(ray_empty)
-        pref[..., 0] = True
-        if L > 1:
-            pref[..., 1] = ray_empty[..., 0]
-            running = ray_empty[..., 0]
-            for ll in range(2, L):
-                running = running & ray_empty[..., ll - 1]
-                pref[..., ll] = running
-        ok = pref & ray_landable
-        if ok.any():
-            return True
-
-    # Check engineer BFS (rail engineers)
-    eng_mask = is_rail_src & is_engineer
-    if eng_mask.any():
-        for kidx in np.nonzero(eng_mask)[0].tolist():
-            sf = int(src_flats[kidx])
-            dests = _engineer_dests_soa(sf, empty, enemy_attackable)
-            if dests:
-                return True
-
-    return False
+    # Share the full movement rules (including curve rails) on the rare path.
+    # A second partial implementation here can disagree with enumeration and
+    # prevent the Q12 no-legal-move elimination in BatchedGameState.
+    return bool(generate_legal_action_ids_batch(
+        cell_piece_id, piece_seat_arr, piece_type_arr, alive,
+        pos_x, pos_y, acting_seat_val,
+    ).size)
 
 
 # ===========================================================================

@@ -66,6 +66,18 @@ Differences from v32 (the most comparable baseline):
 
 ## Launch
 
+### Compact-history rollouts
+
+`rollout.storage_mode: compact_history` is supported under DDP.  Each rank
+owns an independent `GpuRolloutHistory` on its local CUDA device and rebuilds
+only its own selected PPO minibatches; only gradients are synchronized.
+
+Because `env.num_envs` is interpreted per rank, use
+`configs/ataraxos_selfplay_value_all_ddp2.yaml` for a two-H20 continuation of
+the current 10.8M run.  It uses 1024 envs per rank, preserving the previous
+single-H20 global total of 2048 envs and therefore preserving rollout-indexed
+learning-rate and temperature schedules.
+
 Pre-flight:
 
 ```bash

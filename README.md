@@ -3,6 +3,10 @@
 JunQi 包含一套可玩的 GTK 客户端、遗留 C 对弈引擎、权威 Python
 规则实现、CUDA 批量环境以及 PPO/BeliefNet/ArrangementNet 训练代码。
 
+**唯一主干是 `main`。** 新开发和质量检查以更新后的 `origin/main` 为基线，
+改动统一合入 `main`；不再维护或重新创建平行的 `master`。
+原两条主干的整合与保留项见 [主干收敛记录](docs/engineering/single-main-20260908.md)。
+
 项目当前的职责边界是：
 
 - `junqi_core`：规则、状态、信息模型和复盘格式的权威实现。

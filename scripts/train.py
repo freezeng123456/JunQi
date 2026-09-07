@@ -234,11 +234,13 @@ def train(cfg: TrainConfig) -> None:
     world_size, global_rank, _local_rank = _init_distributed(cfg)
     is_rank0 = global_rank == 0
     is_distributed = world_size > 1
-    if is_distributed and cfg.rollout.storage_mode == "compact_history":
-        raise ValueError(
-            "rollout.storage_mode=compact_history currently supports "
-            "single-GPU training only"
-        )
+
+    # ``compact_history`` is process-local: every DDP rank owns a distinct
+    # GpuRollout, CUDA device, history allocation, and minibatch reconstruction
+    # stream.  No history tensor is shared or reduced across ranks; DDP only
+    # synchronises the gradients produced from each rank's reconstructed
+    # minibatches.  Keeping the optimized storage path enabled is important for
+    # large H20 rollouts, where ``full_obs`` would consume most of each GPU.
 
     # ---- Reproducibility ----
     torch.manual_seed(cfg.seed)
@@ -375,9 +377,20 @@ def train(cfg: TrainConfig) -> None:
                 f"[train] magnet α unit={mag_unit} "
                 f"(legacy power_schedule with floor/ceil)"
             )
+        value_path = (
+            "shared_encoder"
+            if (
+                cfg.ppo.value_sample_scope == "all_valid"
+                and cfg.ppo.value_minibatch_size >= cfg.env.num_envs
+            )
+            else "chunked_or_policy"
+        )
         print(
             f"[train] minibatch_group={cfg.ppo.minibatch_group}  "
             f"adv_filter_scope={cfg.ppo.adv_filter_scope}  "
+            f"value_sample_scope={cfg.ppo.value_sample_scope}  "
+            f"value_minibatch_size={cfg.ppo.value_minibatch_size}  "
+            f"value_path={value_path}  "
             f"steps_per_env={cfg.env.steps_per_env}  "
             f"adv_filt_rate={cfg.ppo.adv_filt_rate}"
         )
@@ -408,6 +421,7 @@ def train(cfg: TrainConfig) -> None:
             canonical_setup_styles=canonical_styles,
             mixed_setup=mixed_setup,
             mixed_own_team_styles=mixed_own_team_styles,
+            max_num_moves=cfg.env.max_num_moves,
         )
         if is_rank0:
             if mixed_setup:
@@ -453,6 +467,7 @@ def train(cfg: TrainConfig) -> None:
             adv_filt_thresh=cfg.ppo.adv_filt_thresh,
             adv_filt_rate=cfg.ppo.adv_filt_rate,
             adv_filter_scope=cfg.ppo.adv_filter_scope,
+            value_sample_scope=cfg.ppo.value_sample_scope,
             minibatch_group=cfg.ppo.minibatch_group,
             device=device,
             csr_legal_mask=cfg.rollout.csr_legal_mask,
@@ -489,6 +504,7 @@ def train(cfg: TrainConfig) -> None:
             adv_filt_thresh=cfg.ppo.adv_filt_thresh,
             adv_filt_rate=cfg.ppo.adv_filt_rate,
             adv_filter_scope=cfg.ppo.adv_filter_scope,
+            value_sample_scope=cfg.ppo.value_sample_scope,
             minibatch_group=cfg.ppo.minibatch_group,
             device=device,
         )
@@ -1001,6 +1017,7 @@ def train(cfg: TrainConfig) -> None:
                 nan_skips = summary.get("train/nan_skip_total", 0.0)
                 grad_skips = summary.get("train/grad_skip_total", 0.0)
                 policy_kept = summary.get("rollout/n_policy_kept", 0.0)
+                value_samples = summary.get("rollout/n_value_samples", 0.0)
                 kept_mean = summary.get("rollout/kept_mean", float("nan"))
                 kept_min = summary.get("rollout/kept_min", float("nan"))
                 # In DDP mode this prints PER-RANK fps; cluster-wide
@@ -1035,6 +1052,7 @@ def train(cfg: TrainConfig) -> None:
                     f"mkl={magnet_kl:+.4f}  n_upd={n_upd:.0f}  "
                     f"kept={policy_kept:.0f}  kept_mean={kept_mean:.0f}  "
                     f"kept_min={kept_min:.0f}  "
+                    f"value_n={value_samples:.0f}  "
                     f"nan_skip={nan_skips:.0f}  grad_skip={grad_skips:.0f}"
                     f"{arr_suffix}"
                 )

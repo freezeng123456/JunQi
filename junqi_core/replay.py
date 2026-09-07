@@ -5,7 +5,7 @@ Phase 0.4 M7 / ADR-122 follow-on. Implements the replay protocol of
 Zobrist).
 
 File format (.npz) — keys:
-    setups              : object ndarray, shape (4, 30), dtype=object of
+    setups              : unicode ndarray, shape (4, 30), dtype=np.str_ of
                           piece-name strings (see setup.setup_to_names).
     action_log          : int16 ndarray of shape (T, 5) with columns
                           (seat, src_x, src_y, dst_x, dst_y).
@@ -169,7 +169,7 @@ class Trajectory:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         setup_names = np.asarray(
-            setup_to_names(self.setups), dtype=object,
+            setup_to_names(self.setups), dtype=np.str_,
         )
         np.savez(
             str(p),
@@ -187,7 +187,7 @@ class Trajectory:
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> Trajectory:
         """Load a trajectory previously saved with :meth:`save`."""
-        with np.load(str(path), allow_pickle=True) as data:
+        with np.load(str(path), allow_pickle=False) as data:
             setup_names = data["setups"].tolist()
             setups = setup_from_names(setup_names)
             actions = np.asarray(data["action_log"], dtype=np.int16)

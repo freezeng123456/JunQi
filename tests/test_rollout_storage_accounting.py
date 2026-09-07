@@ -28,30 +28,21 @@ def test_full_observation_storage_matches_tensor_schema() -> None:
     assert estimate.bytes_per_transition == expected_obs + expected_legal + 26
 
 
-def test_compact_history_accounts_for_observer_slices_only() -> None:
+def test_compact_history_accounts_for_all_combat_memory_observers() -> None:
     estimate = estimate_rollout_storage(
         num_envs=1,
         steps_per_env=1,
         storage_mode="compact_history",
     )
 
-    assert COMPACT_HISTORY_BYTES_PER_TRANSITION == 24_203
-    assert estimate.observation_bytes == 24_203
+    assert COMPACT_HISTORY_BYTES_PER_TRANSITION == 47_243
+    assert estimate.observation_bytes == 47_243
     assert estimate.legal_bytes == 0
-    assert estimate.bytes_per_transition == 24_229
+    assert estimate.bytes_per_transition == 47_269
 
 
 def test_compact_history_is_much_smaller_than_full_observations() -> None:
-    """The saving is large, but the exact factor tracks OBS_CHANNELS.
-
-    This used to assert a flat 14.60 GiB and a ratio under 0.11, both of
-    which encoded a 412-channel observation. Compacting piece_id to
-    piece_slot took the layout to 317 channels, so full_obs shrank and the
-    ratio moved with it. The invariant worth holding is that compact_history
-    stores an observer slice instead of a stacked tensor, which is an order
-    of magnitude either way; the GiB figure belongs to the schema and is
-    derived from it here.
-    """
+    """Use current channel width and retain all four combat-memory observers."""
     n_envs, steps = 128, 512
     full = estimate_rollout_storage(
         num_envs=n_envs, steps_per_env=steps, storage_mode="full_obs",
@@ -59,12 +50,12 @@ def test_compact_history_is_much_smaller_than_full_observations() -> None:
     compact = estimate_rollout_storage(
         num_envs=n_envs, steps_per_env=steps, storage_mode="compact_history",
     )
-
     transitions = n_envs * steps
     assert full.total_bytes == full.bytes_per_transition * transitions
     assert compact.total_bytes == compact.bytes_per_transition * transitions
-    assert compact.total_gib == pytest.approx(1.48, abs=0.02)
-    assert compact.total_bytes / full.total_bytes < 0.2
+    assert compact.total_gib == pytest.approx(2.89, abs=0.02)
+    # 317 channels make full_obs smaller than the former 412-channel layout.
+    assert compact.total_bytes / full.total_bytes < 0.26
 
 
 @pytest.mark.parametrize("storage_mode", ["full_obs", "compact_history"])

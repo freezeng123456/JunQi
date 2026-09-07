@@ -296,6 +296,7 @@ def validate_config(cfg: TrainConfig) -> None:
         "belief.buffer_capacity": cfg.belief.buffer_capacity,
         "belief.infer_chunk_size": cfg.belief.infer_chunk_size,
         "rollout.csr_k_max": cfg.rollout.csr_k_max,
+        "ppo.value_minibatch_size": cfg.ppo.value_minibatch_size,
     }
     invalid = [name for name, value in positive.items() if value <= 0]
     if invalid:
@@ -321,6 +322,18 @@ def validate_config(cfg: TrainConfig) -> None:
     if cfg.ppo.adv_filter_scope not in {"timestep", "rollout"}:
         raise ValueError(
             "ppo.adv_filter_scope must be 'timestep' or 'rollout'"
+        )
+    if cfg.ppo.value_sample_scope not in {"policy", "all_valid"}:
+        raise ValueError(
+            "ppo.value_sample_scope must be 'policy' or 'all_valid'"
+        )
+    if (
+        cfg.ppo.value_sample_scope == "all_valid"
+        and cfg.ppo.minibatch_group != "timestep"
+    ):
+        raise ValueError(
+            "ppo.value_sample_scope='all_valid' requires "
+            "ppo.minibatch_group='timestep'"
         )
     if cfg.ppo.minibatch_group not in {"global", "timestep"}:
         raise ValueError(

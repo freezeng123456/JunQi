@@ -62,8 +62,9 @@ Repository = "https://github.com/freezeng123456/JunQi"
 [project.scripts]
 junqi-replay = "junqi_viz.__main__:main"
 
-[tool.setuptools]
-packages = ["junqi_core", "junqi_rl", "junqi_viz"]
+[tool.setuptools.packages.find]
+include = ["junqi_core*", "junqi_rl*", "junqi_viz*"]
+namespaces = false
 
 [tool.setuptools.package-data]
 junqi_core = ["*.json", "*.md"]

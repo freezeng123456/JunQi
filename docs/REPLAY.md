@@ -3,6 +3,16 @@
 JunQi now has one replay contract for the GTK client, headless tools, and RL
 recordings.
 
+## Safe NPZ loading
+
+Replay NPZ files store numeric arrays and Unicode strings and are loaded with
+`allow_pickle=False`. This applies to core trajectories, policy trajectories,
+and viewer format detection. Legacy NPZ files containing object arrays are
+rejected with `ValueError: Object arrays cannot be loaded when allow_pickle=False`.
+Re-export recordings from their original trusted game/action data with the current
+writer; do not enable pickle to open an unknown replay. JSON and native JQL replay
+workflows are unchanged.
+
 ## Core trajectory
 
 `junqi_core.replay.Trajectory` stores the four starting lineups plus a compact

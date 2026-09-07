@@ -155,6 +155,7 @@ def _minibatch_buffer(advantages, seats=None, random_opponent=False, grouping="g
     b.random_opponent = random_opponent
     b.train_value_on_random_seats = True
     b.adv_filter_scope = "timestep"
+    b.value_sample_scope = "policy"
     b.minibatch_group = grouping
     b.adv_filt_thresh = 0.0
     b.adv_filt_rate = 1.0

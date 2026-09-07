@@ -138,7 +138,7 @@ def frame_summary(frame: ViewerFrame) -> dict[str, Any]:
 def load_replay(path: str) -> Trajectory | TrajectoryWithPolicy:
     """Load either supported ``.npz`` replay format by its header."""
 
-    with np.load(path, allow_pickle=True) as data:
+    with np.load(path, allow_pickle=False) as data:
         kind = str(data["kind"]) if "kind" in data.files else ""
     if kind.startswith("with_policy_v"):
         return TrajectoryWithPolicy.load(path)

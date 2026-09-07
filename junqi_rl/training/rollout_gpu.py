@@ -219,6 +219,7 @@ class RolloutBufferGPU:
         adv_filt_thresh: float = 0.01,
         adv_filt_rate: float = 0.75,
         adv_filter_scope: str = "timestep",
+        value_sample_scope: str = "policy",
         minibatch_group: str = "global",
         device: str | torch.device = "cuda",
         csr_legal_mask: bool = True,
@@ -242,6 +243,17 @@ class RolloutBufferGPU:
                 f"got {adv_filter_scope!r}"
             )
         self.adv_filter_scope = adv_filter_scope
+        if value_sample_scope not in {"policy", "all_valid"}:
+            raise ValueError(
+                "value_sample_scope must be 'policy' or 'all_valid'; "
+                f"got {value_sample_scope!r}"
+            )
+        if value_sample_scope == "all_valid" and minibatch_group != "timestep":
+            raise ValueError(
+                "value_sample_scope='all_valid' requires "
+                "minibatch_group='timestep'"
+            )
+        self.value_sample_scope = value_sample_scope
         if minibatch_group not in {"global", "timestep"}:
             raise ValueError(
                 "minibatch_group must be 'global' or 'timestep'; "
@@ -718,6 +730,50 @@ class RolloutBufferGPU:
                 value_only_mask=vo,
             )
 
+        def _emit_all_valid_row(t: int, policy_env: Tensor):
+            flat_all = torch.arange(
+                t * N, (t + 1) * N, dtype=torch.long, device=dev,
+            )
+            seats_all = seats_flat.index_select(0, flat_all)
+            if self.uses_compact_history:
+                obs_sp_all, obs_gl_all, lm_all = self.history.reconstruct(
+                    flat_all,
+                    seats_all,
+                    dtype=self.obs_storage_dtype,
+                )
+            elif self.csr_legal_mask:
+                lm_all = _csr_to_dense_selected(
+                    flat_ids, flat_cnt, flat_all, FLAT_ACTION_DIM,
+                )
+                obs_sp_all = obs_sp.index_select(0, flat_all)
+                obs_gl_all = obs_gl.index_select(0, flat_all)
+            else:
+                lm_all = lm.index_select(0, flat_all)
+                obs_sp_all = obs_sp.index_select(0, flat_all)
+                obs_gl_all = obs_gl.index_select(0, flat_all)
+            policy_env = policy_env.to(device=dev, dtype=torch.long)
+            policy_flat = flat_all.index_select(0, policy_env)
+            yield RolloutBatch(
+                obs_spatial=obs_sp_all.index_select(0, policy_env),
+                obs_global=obs_gl_all.index_select(0, policy_env),
+                legal_mask=lm_all.index_select(0, policy_env),
+                actions=act.index_select(0, policy_flat).to(torch.int64),
+                old_log_probs=lp.index_select(0, policy_flat),
+                advantages=adv_norm.index_select(0, policy_flat),
+                returns=ret.index_select(0, policy_flat),
+                values=val.index_select(0, policy_flat),
+                adv_mask=torch.ones(
+                    policy_flat.numel(), dtype=torch.bool, device=dev,
+                ),
+                value_only_mask=torch.zeros(
+                    policy_flat.numel(), dtype=torch.bool, device=dev,
+                ),
+                value_obs_spatial=obs_sp_all,
+                value_obs_global=obs_gl_all,
+                value_returns=ret.index_select(0, flat_all),
+                policy_value_indices=policy_env,
+            )
+
         if self.minibatch_group == "timestep":
             # One Adam step per collect row.  Filter only shrinks the row.
             # shuffle is ignored so t=0..T-1 stay in order.
@@ -751,19 +807,29 @@ class RolloutBufferGPU:
             self._last_n_total = int(total)
             self._last_n_own = int(own_mask.sum().item())
             self._last_n_policy = n_policy
+            self._last_n_value = (
+                int(total)
+                if self.value_sample_scope == "all_valid"
+                else n_policy
+            )
             self._last_thresh_used = float(thresh)
             self._last_kept_mean = float(np.mean(sizes)) if sizes else 0.0
             self._last_kept_min = float(min(nonempty) if nonempty else 0)
             self._last_kept_max = float(max(sizes) if sizes else 0)
             self._last_n_empty_steps = float(sum(1 for s in sizes if s == 0))
             for t, env_idx in enumerate(rows):
-                if env_idx.size == 0:
+                if self.value_sample_scope == "all_valid":
+                    policy_env = torch.from_numpy(env_idx).to(dev)
+                    yield from _emit_all_valid_row(t, policy_env)
+                elif env_idx.size:
+                    flat = torch.from_numpy(
+                        (t * N + env_idx).astype(np.int64)
+                    ).to(dev)
+                    vo = torch.zeros(flat.numel(), dtype=torch.bool, device=dev)
+                else:
                     continue
-                flat = torch.from_numpy(
-                    (t * N + env_idx).astype(np.int64)
-                ).to(dev)
-                vo = torch.zeros(flat.numel(), dtype=torch.bool, device=dev)
-                yield from _emit(flat, vo)
+                if self.value_sample_scope != "all_valid":
+                    yield from _emit(flat, vo)
             return
 
         # --- Avoid per-call .item() syncs ---
@@ -795,6 +861,7 @@ class RolloutBufferGPU:
         self._last_n_total      = int(total)
         self._last_n_own        = int(own_mask.sum().item())
         self._last_n_policy     = n_policy
+        self._last_n_value      = n_policy
         self._last_thresh_used  = float(thresh)
         self._last_kept_mean = float("nan")
         self._last_kept_min = float("nan")
@@ -928,6 +995,7 @@ class RolloutBufferGPU:
             out["rollout/n_total"]        = float(self._last_n_total)
             out["rollout/n_own_seat"]     = float(self._last_n_own)
             out["rollout/n_policy_kept"]  = float(self._last_n_policy)
+            out["rollout/n_value_samples"] = float(self._last_n_value)
             out["rollout/keep_frac_own"]  = (
                 float(self._last_n_policy) / max(1.0, float(self._last_n_own))
             )

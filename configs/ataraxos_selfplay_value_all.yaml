@@ -1,0 +1,14 @@
+# Controlled stability variant of the strict Ataraxos-aligned baseline.
+#
+# Policy / entropy / full reverse-KL keep the exact rollout-global top-25%
+# selection. Only the value objective is decoupled: it trains on every valid
+# rollout position through a chunked value-only forward that skips the large
+# action head. Model forward I/O and checkpoint structure are unchanged.
+extends: ataraxos_selfplay.yaml
+
+ppo:
+  value_sample_scope: all_valid
+  # H20 profile: 2048 covers one complete timestep, so filtered policy and
+  # all-valid value share one learner encoder pass. Smaller values retain the
+  # memory-safe chunked fallback.
+  value_minibatch_size: 2048
