@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-import shutil
 from typing import Any
 
 import torch
 
 from junqi_rl.checkpoint_compat import validate_policy_checkpoint
 from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
+from junqi_rl.training._checkpoint_io import atomic_alias, atomic_write
 from junqi_rl.training.config import TrainConfig, _dataclass_to_dict, _dict_to_dataclass
 
 
@@ -21,13 +21,7 @@ def update_checkpoint_alias(
 ) -> None:
     """Point ``alias_path`` at a checkpoint, optionally copying if needed."""
 
-    if os.path.islink(alias_path) or os.path.exists(alias_path):
-        os.remove(alias_path)
-    try:
-        os.symlink(os.path.abspath(checkpoint_path), alias_path)
-    except OSError:
-        if copy_fallback:
-            shutil.copy2(checkpoint_path, alias_path)
+    atomic_alias(checkpoint_path, alias_path, copy_fallback=copy_fallback)
 
 
 def save_checkpoint(
@@ -55,10 +49,11 @@ def save_checkpoint(
     if belief_trainer is not None:
         state["belief"] = belief_trainer.state_dict()
 
-    torch.save(state, checkpoint_path)
+    atomic_write(checkpoint_path, lambda handle: torch.save(state, handle))
     update_checkpoint_alias(
         checkpoint_path,
         os.path.join(save_dir, "ckpt_latest.pt"),
+        copy_fallback=True,
     )
     return checkpoint_path
 

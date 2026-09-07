@@ -305,36 +305,56 @@ class RolloutBuffer:
     # -------------------------------------------------------------------------
 
     def compute_returns(
-        self, last_values: np.ndarray  # (N,) bootstrap value at end of rollout
+        self,
+        last_values: np.ndarray,
+        *,
+        last_seats: np.ndarray | None = None,
     ) -> None:
-        """Compute GAE(λ) advantages and TD(λ) returns in-place.
+        """Compute acting-team GAE and independent TD(lambda) value targets.
 
-        Implements Ataraxos-style two-λ advantage estimation:
+        Values, rewards and advantages are in the acting seat's perspective.
+        At an enemy-team boundary BOTH the value bootstrap and the recursive
+        trace change sign. Seat IDs, rather than a hard-coded alternating
+        sign, also handle an eliminated seat being skipped.
 
-            δ_t    = r_t + γ · V(s_{t+1}) − V(s_t)
-            A_t    = Σ_{l≥0} (γ · gae_λ)^l · δ_{t+l}   [GAE]
-            G_t    = A_t + V(s_t)                         [TD(λ) return]
+        ``gae_lambda`` controls advantages; ``td_lambda`` independently
+        controls the trace used in value targets. Setting them equal restores
+        ``returns = advantages + values`` in self-play.
 
-        Terminal steps have their bootstrap zeroed (``done=True → V_next=0``).
-
-        Parameters
-        ----------
-        last_values
-            Value estimate for the state immediately after the last collected
-            step.  Used as the bootstrap value for the final TD residual.
+        Pass the actual post-rollout ``last_seats`` for exact bootstrapping.
+        Omission preserves the GPU API's opposite-team fallback, which is
+        not exact when the next surviving actor is a teammate.
         """
         T = self.steps_per_env
         N = self.num_envs
+        next_val = np.asarray(last_values, dtype=np.float32)
+        if next_val.shape != (N,):
+            raise ValueError(f"last_values must have shape ({N},)")
+        if last_seats is None:
+            next_team = (self.seats[T - 1].astype(np.int64) & 1) ^ 1
+        else:
+            last_seats = np.asarray(last_seats)
+            if last_seats.shape != (N,):
+                raise ValueError(f"last_seats must have shape ({N},)")
+            next_team = last_seats.astype(np.int64) & 1
         gae = np.zeros(N, dtype=np.float32)
-        next_val = last_values.astype(np.float32)  # (N,)
+        td_trace = np.zeros(N, dtype=np.float32)
 
         for t in reversed(range(T)):
-            mask = (~self.dones[t]).astype(np.float32)   # 0 at terminal
-            delta = self.rewards[t] + self.gamma * next_val * mask - self.values[t]
-            gae = delta + self.gamma * self.gae_lambda * mask * gae
+            mask = (~self.dones[t]).astype(np.float32)
+            cur_team = self.seats[t].astype(np.int64) & 1
+            flip = (cur_team == next_team).astype(np.float32) * 2.0 - 1.0
+            delta = (
+                self.rewards[t]
+                + self.gamma * flip * next_val * mask
+                - self.values[t]
+            )
+            gae = delta + self.gamma * self.gae_lambda * mask * flip * gae
+            td_trace = delta + self.gamma * self.td_lambda * mask * flip * td_trace
             self.advantages_[t] = gae
-            self.returns_[t] = gae + self.values[t]
+            self.returns_[t] = td_trace + self.values[t]
             next_val = self.values[t]
+            next_team = cur_team
 
     # -------------------------------------------------------------------------
     # Minibatch iteration
