@@ -429,6 +429,7 @@ def train(cfg: TrainConfig) -> None:
             canonical_setup_styles=canonical_styles,
             mixed_setup=mixed_setup,
             mixed_own_team_styles=mixed_own_team_styles,
+            max_num_moves=cfg.env.max_num_moves,
         )
         if is_rank0:
             if mixed_setup:

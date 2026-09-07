@@ -1227,7 +1227,7 @@ class PPOTrainer:
                 "train/lr": lr,
                 "train/batch_size": n_policy,
                 "train/value_batch_size": n_value,
-                "train/grad_skip": torch.ones((), device=self.device),
+                "train/grad_skip": 1.0,
             }
         if self._scaler is not None:
             self._scaler.step(self.optimizer)
@@ -1329,10 +1329,25 @@ class PPOTrainer:
                 torch.isnan(new_log_probs_all).any()
                 | (~torch.isfinite(value).all())
             )
-            if bool(bad_forward):
+            bad_forward_any = bad_forward.to(dtype=torch.long)
+            if _is_distributed():
+                dist.all_reduce(bad_forward_any, op=dist.ReduceOp.MAX)
+            if bool(bad_forward_any):
+                self.optimizer.zero_grad(set_to_none=True)
+                if _is_distributed():
+                    # Complete this DDP forward's reducer cycle on every rank.
+                    # Use parameter leaves so NaNs in the rejected graph cannot
+                    # enter the backward; every trainable parameter participates.
+                    zero_loss = sum(
+                        p.reshape(-1)[0] * 0.0
+                        for p in self._policy_unwrapped.parameters()
+                        if p.requires_grad
+                    )
+                    zero_loss.backward()
+                    self.optimizer.zero_grad(set_to_none=True)
                 self._nan_skip_count += 1
                 # Return a zero-gradient "no-op" result: zero losses, no
-                # backward/step. The caller's aggregator averages these as
+                # optimiser step. The caller's aggregator averages these as
                 # zero entries, which is fine because the frequency is
                 # logged separately.
                 zero = torch.zeros((), device=self.device)
@@ -1497,7 +1512,7 @@ class PPOTrainer:
                 "train/temperature": temp,
                 "train/lr": lr,
                 "train/batch_size": int(batch.actions.shape[0]),
-                "train/grad_skip": torch.ones((), device=self.device),
+                "train/grad_skip": 1.0,
             }
 
         # Gradients are finite on every rank — safe to step.
@@ -1588,6 +1603,9 @@ class PPOTrainer:
 
             for batch in batches:
                 metrics = self._update_step(batch)
+                # Skip indicators are rates over ALL minibatches, including
+                # healthy ones, independent of which kind appears first.
+                metrics.setdefault("train/grad_skip", 0.0)
                 all_metrics.append(metrics)
                 # Update EMA after each gradient step. Use the unwrapped
                 # policy reference; DDP / torch.compile share parameter

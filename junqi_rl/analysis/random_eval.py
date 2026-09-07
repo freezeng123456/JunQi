@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from junqi_rl.networks.junqi_net import JunqiNet
 
 
-_GPU_ROLLOUT_CACHE: dict[tuple[int, int], GpuRollout] = {}
+_GPU_ROLLOUT_CACHE: dict[tuple[int, int, int], GpuRollout] = {}
 
 
 def _autocast_context(
@@ -53,11 +53,12 @@ def evaluate_vs_random_gpu(
     policy.eval()
     batch_size = min(num_envs, num_games)
     device_id = dev.index or 0
-    cache_key = (batch_size, device_id)
+    cache_key = (batch_size, device_id, max_moves)
     if cache_key not in _GPU_ROLLOUT_CACHE:
         _GPU_ROLLOUT_CACHE[cache_key] = GpuRollout(
             num_envs=batch_size,
             device_id=device_id,
+            max_num_moves=max_moves,
         )
     rollout = _GPU_ROLLOUT_CACHE[cache_key]
     rollout.reset(seed_base=seed)
@@ -169,6 +170,8 @@ def evaluate_vs_random_cpu(
     env = VectorJunqiEnv(num_envs=batch_size, max_num_moves=max_moves)
     obs_spatial, obs_global = env.reset(seed_base=seed)
     rng = np.random.default_rng(seed)
+    next_game_id = batch_size
+    active = np.ones(batch_size, dtype=bool)
     game_moves = np.zeros(batch_size, dtype=np.int32)
     wins = losses = draws = total_games = total_moves = 0
     env_indices = np.arange(batch_size)
@@ -212,10 +215,10 @@ def evaluate_vs_random_cpu(
                 world_actions[env_idx] = int(rng.choice(legal_world))
 
         obs_spatial, obs_global, rewards, done, _ = env.step(world_actions)
-        game_moves += 1
+        game_moves += active
 
         for env_idx, finished in enumerate(done):
-            if not finished:
+            if not finished or not active[env_idx]:
                 continue
             team_zero_reward = float(rewards[env_idx, Seat.SOUTH.value])
             trained_reward = (
@@ -232,9 +235,11 @@ def evaluate_vs_random_cpu(
             total_games += 1
             total_moves += int(game_moves[env_idx])
             game_moves[env_idx] = 0
-            if total_games >= num_games:
-                break
-            env.envs[env_idx].reset(seed=seed + total_games)
+            if next_game_id >= num_games:
+                active[env_idx] = False
+                continue
+            env.envs[env_idx].reset(seed=seed + next_game_id)
+            next_game_id += 1
             env._done[env_idx] = False
             env._fill_all_obs()
             obs_spatial = env.obs_spatial
@@ -335,11 +340,12 @@ def evaluate_head_to_head_gpu(
     second_policy.eval()
     batch_size = min(num_envs, num_games)
     device_id = dev.index or 0
-    cache_key = (batch_size, device_id)
+    cache_key = (batch_size, device_id, max_moves)
     if cache_key not in _GPU_ROLLOUT_CACHE:
         _GPU_ROLLOUT_CACHE[cache_key] = GpuRollout(
             num_envs=batch_size,
             device_id=device_id,
+            max_num_moves=max_moves,
         )
     rollout = _GPU_ROLLOUT_CACHE[cache_key]
     rollout.reset(seed_base=seed)

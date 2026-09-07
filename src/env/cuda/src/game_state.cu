@@ -21,13 +21,16 @@
 #include <cuda_runtime.h>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 
 namespace junqi_cuda {
 
 // ---------------------------------------------------------------------------
 // DeviceGameStateBatch — constructor
 // ---------------------------------------------------------------------------
-DeviceGameStateBatch::DeviceGameStateBatch(int n) : num_envs(n) {
+DeviceGameStateBatch::DeviceGameStateBatch(int n, int move_limit)
+    : num_envs(n), max_num_moves(move_limit) {
+    if (move_limit <= 0) throw std::invalid_argument("max_num_moves must be positive");
     CUDA_CHECK(cudaMalloc(&d_cell_piece_id_per_piece, (size_t)n * 120 * sizeof(int16_t)));
     CUDA_CHECK(cudaMalloc(&d_piece_seat_arr,          (size_t)n * 120 * sizeof(int8_t)));
     CUDA_CHECK(cudaMalloc(&d_piece_type_arr,          (size_t)n * 120 * sizeof(int8_t)));
@@ -1301,6 +1304,7 @@ __device__ int gpu_surrender_seat(
 // ---------------------------------------------------------------------------
 __global__ void step_batch_kernel(
     int num_envs,
+    int max_num_moves,
     const int32_t* d_action_ids,
     // Piece-indexed SoA (N × 120)
     int16_t* d_cell_piece_id_all,      // <-- cell-indexed (N × 289)
@@ -1640,6 +1644,13 @@ __global__ void step_batch_kernel(
         new_turn = candidate;
         // Re-check victory (Q12 may have killed a whole team).
         check_victory(terminated, winner_team, draw);
+    }
+
+    // Apply the configurable episode cap after natural victory / Q12, just
+    // like JunqiEnv. The canonical 4000-move and no-combat rules above remain.
+    if (!terminated && new_mc >= max_num_moves) {
+        terminated = true;
+        draw = true;
     }
 
     // ------- Commit scalars + Zobrist XOR-in -------
@@ -2527,7 +2538,7 @@ void step_batch(
     }
 
     step_batch_kernel<<<grid, BLOCK, 0, stream>>>(
-        N, d_action_ids,
+        N, d_state.max_num_moves, d_action_ids,
         d_state.d_cell_piece_id,
         d_state.d_piece_seat_arr,
         d_state.d_piece_type_arr,

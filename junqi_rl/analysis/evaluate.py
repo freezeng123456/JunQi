@@ -84,6 +84,8 @@ def eval_head_to_head(
     n = min(16, num_games)
     env = VectorJunqiEnv(num_envs=n, max_num_moves=max_steps)
     obs_sp, obs_gl = env.reset(seed_base=seed_base)
+    next_game_id = n
+    active = np.ones(n, dtype=bool)
     game_moves = np.zeros(n, dtype=np.int32)
     wins = losses = draws = total_games = total_moves = 0
 
@@ -114,9 +116,9 @@ def eval_head_to_head(
             )
 
         obs_sp, obs_gl, rewards, done, _infos = env.step(world_actions)
-        game_moves += 1
+        game_moves += active
         for i, finished in enumerate(done):
-            if not finished:
+            if not finished or not active[i]:
                 continue
             team_zero_reward = float(rewards[i, 0])
             first_reward = (
@@ -131,9 +133,11 @@ def eval_head_to_head(
             total_games += 1
             total_moves += int(game_moves[i])
             game_moves[i] = 0
-            if total_games >= num_games:
-                break
-            env.envs[i].reset(seed=seed_base + total_games)
+            if next_game_id >= num_games:
+                active[i] = False
+                continue
+            env.envs[i].reset(seed=seed_base + next_game_id)
+            next_game_id += 1
             env._done[i] = False
             env._fill_all_obs()
             obs_sp = env.obs_spatial

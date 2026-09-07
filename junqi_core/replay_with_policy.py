@@ -193,7 +193,7 @@ class TrajectoryWithPolicy:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         assert self.action_sources is not None
-        setup_names = np.asarray(setup_to_names(self.setups), dtype=object)
+        setup_names = np.asarray(setup_to_names(self.setups), dtype=np.str_)
         extras: dict[str, Any] = {}
         if self.beliefs is not None:
             extras["beliefs"] = self.beliefs.astype(np.float16, copy=False)
@@ -219,7 +219,7 @@ class TrajectoryWithPolicy:
 
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> TrajectoryWithPolicy:
-        with np.load(str(path), allow_pickle=True) as data:
+        with np.load(str(path), allow_pickle=False) as data:
             kind = str(data.get("kind", "")) if "kind" in data.files else ""
             if kind and not kind.startswith("with_policy_v"):
                 raise ValueError(

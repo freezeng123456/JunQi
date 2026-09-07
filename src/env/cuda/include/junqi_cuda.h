@@ -47,6 +47,7 @@ enum class PieceType : int8_t {
 
 struct DeviceGameStateBatch {
   int num_envs = 0;
+  const int max_num_moves;
   int16_t* d_cell_piece_id_per_piece = nullptr;
   int8_t*  d_piece_seat_arr = nullptr;
   int8_t*  d_piece_type_arr = nullptr;
@@ -108,7 +109,7 @@ struct DeviceGameStateBatch {
   bool*     d_cm_not_gongb                 = nullptr;
   bool*     d_cm_attacked_by_known_gongb   = nullptr;
 
-  DeviceGameStateBatch(int num_envs);
+  DeviceGameStateBatch(int num_envs, int max_num_moves = 4000);
   ~DeviceGameStateBatch();
   DeviceGameStateBatch(const DeviceGameStateBatch&) = delete;
   DeviceGameStateBatch& operator=(const DeviceGameStateBatch&) = delete;

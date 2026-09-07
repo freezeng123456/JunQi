@@ -206,3 +206,64 @@ def test_evaluation_pool_does_not_replace_training_pool() -> None:
         gpu_rollout_mod._reset_pool_uploaded = False
         gpu_rollout_mod._training_setup_pool = None
         GpuRollout(num_envs=1)
+
+@pytest.mark.parametrize("device_step", [False, True])
+def test_custom_move_limit_is_per_rollout_and_survives_reset(device_step):
+    import torch
+
+    short = GpuRollout(num_envs=2, max_num_moves=1)
+    longer = GpuRollout(num_envs=2, max_num_moves=3)
+    for world in (short, longer):
+        world.reset(seed_base=100)
+
+    def step(world):
+        if device_step:
+            acting = world.turn_torch().clone()
+            mask = world.legal_mask_canonical_torch_device(acting)
+            actions = mask.long().argmax(-1).to(torch.int32)
+            world.step_device_torch(actions, acting)
+        else:
+            acting = world.state.copy_to_host()["turn"].reshape(-1)
+            ids, counts = world.legal_actions_dense(acting)
+            assert (counts > 0).all()
+            world.step(ids[:, 0].copy())
+
+    step(short)
+    step(longer)
+    assert short.read_termination()["draw"].all()
+    assert not longer.read_termination()["terminated"].any()
+    step(longer)
+    step(longer)
+    assert longer.read_termination()["draw"].all()
+    for world in (short, longer):
+        world.reset_terminated_device(seed=103)
+        assert not world.read_termination()["terminated"].any()
+    step(short)
+    step(longer)
+    assert short.read_termination()["draw"].all()
+    assert not longer.read_termination()["terminated"].any()
+
+
+def test_gpu_evaluation_honors_move_limit_and_cache():
+    import torch
+    from junqi_rl.analysis.random_eval import evaluate_vs_random_gpu, evaluate_head_to_head_gpu
+
+    class Policy:
+        def eval(self):
+            return self
+
+        def act_greedy(self, sp, gl, mask):
+            return mask.long().argmax(-1)
+
+    for limit in (1, 3, 1):
+        for evaluator, args in [
+            (evaluate_vs_random_gpu, (Policy(),)),
+            (evaluate_head_to_head_gpu, (Policy(), Policy())),
+        ]:
+            metrics = evaluator(
+                *args, num_envs=2, num_games=2, max_moves=limit, device="cuda", seed=101
+            )
+            prefix = "eval" if evaluator is evaluate_vs_random_gpu else "h2h"
+            assert metrics[f"{prefix}/draw_rate"] == 1
+            assert metrics[f"{prefix}/ongoing_rate"] == 0
+            assert metrics[f"{prefix}/avg_game_len"] == limit

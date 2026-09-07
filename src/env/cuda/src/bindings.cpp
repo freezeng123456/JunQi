@@ -518,9 +518,10 @@ PYBIND11_MODULE(junqi_cuda, m) {
     // --- DeviceGameStateBatch ---
     py::class_<DeviceGameStateBatch>(m, "DeviceGameStateBatch",
         "GPU-resident batch of game states (SoA layout).")
-        .def(py::init<int>(), py::arg("num_envs"),
-             "Allocate device memory for num_envs game states.")
+        .def(py::init<int, int>(), py::arg("num_envs"), py::arg("max_num_moves") = 4000,
+             "Allocate device memory with a per-batch episode move limit.")
         .def_readonly("num_envs", &DeviceGameStateBatch::num_envs)
+        .def_readonly("max_num_moves", &DeviceGameStateBatch::max_num_moves)
         // --- Phase 2: device pointer accessors for zero-copy torch views ---
         .def_property_readonly("d_turn_ptr",
             [](const DeviceGameStateBatch& self) {
