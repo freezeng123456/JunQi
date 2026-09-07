@@ -40,6 +40,8 @@ def test_return_shapes():
     assert res.ent_pred.shape == (8, ARRANGEMENT_SIZE)
     assert res.log_probs.shape == (8, ARRANGEMENT_SIZE, N_PIECE_TYPE_WITH_NONE)
     assert res.seat_idx.shape == (8,)
+    assert res.fallback_mask.shape == (8,)
+    assert res.fallback_mask.dtype == torch.bool
     assert "retry_rate" in res.stats
     assert "fallback_rate" in res.stats
 
@@ -154,6 +156,34 @@ def test_log_probs_sum_to_one():
         pytest.skip("random weights triggered fallback; log-prob row is placeholder")
     probs_sum = res.log_probs.exp().sum(dim=-1)  # (N, 30)
     assert torch.allclose(probs_sum, torch.ones_like(probs_sum), atol=1e-4)
+
+
+def test_forced_dead_end_marks_every_fallback_row():
+    class AlwaysDeadNet:
+        def __init__(self):
+            self.device = torch.device("cpu")
+            self.cfg = type("Cfg", (), {"use_cat_vf": True, "n_vf_cat": 3})()
+
+        def eval(self):
+            return self
+
+        def __call__(self, seq, seat_idx):
+            batch = seq.size(0)
+            steps = seq.size(1) + 1
+            return {
+                "logits": torch.full((batch, steps, N_PIECE_TYPE_WITH_NONE), -1.0e31),
+                "value": torch.zeros(batch, steps, 3),
+                "ent_pred": torch.zeros(batch, steps, 1),
+            }
+
+    res = generate_arrangements(
+        n_sample=8, model=AlwaysDeadNet(), max_resample=0, rng_seed=123
+    )
+    assert bool(res.fallback_mask.all())
+    assert res.stats["fallback_rate"] == pytest.approx(1.0)
+    assert torch.equal(res.log_probs, torch.zeros_like(res.log_probs))
+    assert torch.equal(res.values, torch.zeros_like(res.values))
+    assert torch.equal(res.ent_pred, torch.zeros_like(res.ent_pred))
 
 
 # ---------------------------------------------------------------------------

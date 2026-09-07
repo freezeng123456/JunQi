@@ -680,20 +680,21 @@ def train(cfg: TrainConfig) -> None:
                 model=arr_gen_net,
                 rng_seed=cfg.env.seed + rollout_idx * 17,
             )
-            # Push the pool to CUDA so reset_terminated_envs picks from it.
+            # Random-lineup fallback rows have placeholder old-policy
+            # statistics, so they are neither rollout-policy setups nor PPO data.
+            trainable_arr = ~arr_gen.fallback_mask
             pool_size = env.refresh_setup_pool_from_arrangements(
-                arr_gen.samples,
-                arr_gen.seat_idx,
+                arr_gen.samples[trainable_arr],
+                arr_gen.seat_idx[trainable_arr],
                 pool_size=cfg.arr.pool_size,
                 seed=cfg.env.seed + rollout_idx * 17,
             )
-            # Record the generation-time info so process_data has targets.
             arr_buffer.add_arrangements(
-                arrangements=arr_gen.samples,
-                values=arr_gen.values,
-                ents=arr_gen.ent_pred,
-                log_probs=arr_gen.log_probs,
-                seat_idx=arr_gen.seat_idx,
+                arrangements=arr_gen.samples[trainable_arr],
+                values=arr_gen.values[trainable_arr],
+                ents=arr_gen.ent_pred[trainable_arr],
+                log_probs=arr_gen.log_probs[trainable_arr],
+                seat_idx=arr_gen.seat_idx[trainable_arr],
                 step=rollout_idx,
             )
             mc.inc("arr/pool_size", float(pool_size))
