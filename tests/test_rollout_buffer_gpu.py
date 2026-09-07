@@ -114,22 +114,21 @@ def test_gpu_buffer_csr_roundtrip():
     assert torch.equal(back, mask)
 
 
-def test_gpu_buffer_csr_truncation():
-    """When a row has more than K_MAX truths, the encoder keeps the first
-    K_MAX in column order; everything past that is silently dropped."""
-    from junqi_rl.training.rollout_gpu import _dense_mask_to_csr, _csr_to_dense_selected
+def test_gpu_buffer_csr_overflow_raises_without_mutating():
+    """Overflow must fail closed before changing stored IDs/counts."""
+    from junqi_rl.training.rollout_gpu import _dense_mask_to_csr
 
     dev = torch.device("cuda")
     mask = torch.zeros(1, FLAT_ACTION_DIM, dtype=torch.bool, device=dev)
-    # 100 truths at positions 10..1000 step 10.
+    # 100 truths at positions 10..1000 step 10 — exceeds K=64.
     positions = list(range(10, 1010, 10))
     mask[0, positions] = True
-    ids = torch.zeros((1, 64), dtype=torch.int32, device=dev)
-    cnt = torch.zeros(1, dtype=torch.int32, device=dev)
-    _dense_mask_to_csr(mask, ids, cnt)
-    assert int(cnt[0].item()) == 64
-    kept = ids[0, :64].tolist()
-    assert kept == positions[:64]
+    ids = torch.full((1, 64), 123, dtype=torch.int32, device=dev)
+    cnt = torch.full((1,), 7, dtype=torch.int32, device=dev)
+    with pytest.raises(ValueError, match="overflow"):
+        _dense_mask_to_csr(mask, ids, cnt)
+    assert (ids == 123).all()
+    assert int(cnt[0].item()) == 7
 
 
 def test_gpu_buffer_collect_e2e_and_gae():

@@ -42,6 +42,8 @@ the policy's value head for non-terminal states.
 
 from __future__ import annotations
 
+import random
+
 import numpy as np
 import torch
 from torch import Tensor
@@ -120,16 +122,20 @@ def collect_rollout(
         :class:`VectorJunqiEnv` (already reset or will be reset here).
     policy
         :class:`JunqiNet` used for action selection and value estimation.
-        Should be the **EMA** model for stable behaviour.
+        Must be the learner's behaviour policy, as in scripts/train.py;
+        do not substitute the lagged EMA policy for PPO collection.
     rollout
         :class:`RolloutBuffer` to populate (will call ``rollout.reset()``).
     device
         Device for policy inference tensors.
     seed_base
-        Optional base seed for environment resets.
+        Seeds newly initialized envs and, on the first call, a persistent
+        episode-reset RNG. Later calls continue live games and that RNG;
+        changing this argument does not restart an ongoing episode.
     auto_reset_done
         If True, done environments are immediately reset so collection
-        continues uninterrupted.
+        continues uninterrupted. If False, termination before the rollout
+        is full raises rather than storing fictitious post-terminal steps.
     """
     _device = torch.device(device)
     policy.eval()
@@ -138,8 +144,31 @@ def collect_rollout(
     N = env.num_envs
     T = rollout.steps_per_env
 
-    # Ensure all envs are live at the start
-    obs_sp, obs_gl = env.reset(seed_base=seed_base)
+    if N != rollout.num_envs:
+        raise ValueError("env and rollout must have the same num_envs")
+    if not auto_reset_done and env.done.any():
+        raise RuntimeError("terminal env present; reset it or enable auto_reset_done")
+    # Keep live games across rollout boundaries. Reset only fresh/dead envs.
+    # A persistent stream avoids replaying the same setup at every terminal.
+    reset_rng = getattr(env, "_collector_reset_rng", None)
+    if reset_rng is None:
+        reset_rng = random.Random(seed_base)
+        env._collector_reset_rng = reset_rng
+    refreshed = False
+    for i, single_env in enumerate(env._envs):
+        fresh = single_env._state is None
+        if fresh or env.done[i]:
+            sd = (
+                seed_base + i
+                if fresh and seed_base is not None
+                else reset_rng.randrange(2**63)
+            )
+            single_env.reset(seed=sd)
+            env._done[i] = False
+            refreshed = True
+    if refreshed:
+        env._fill_all_obs()
+    obs_sp, obs_gl = env.obs_spatial, env.obs_global
 
     # Pre-allocate per-step index vector (reused each step)
     _env_range = np.arange(N, dtype=np.intp)
@@ -209,7 +238,7 @@ def collect_rollout(
         if auto_reset_done and done_np.any():
             for i in range(N):
                 if done_np[i]:
-                    sd = (seed_base + i) if seed_base is not None else None
+                    sd = reset_rng.randrange(2**63)
                     env._envs[i].reset(seed=sd)
                     env._done[i] = False
             env._fill_all_obs()
@@ -217,6 +246,11 @@ def collect_rollout(
             obs_gl = env.obs_global
 
         step += 1
+        if not auto_reset_done and done_np.any() and step < T:
+            raise RuntimeError(
+                "episode ended before the fixed-length rollout was full; "
+                "enable auto_reset_done to continue safely"
+            )
 
     # ---- Compute bootstrap values for the last step ----
     current_seats = env.current_seats()
@@ -225,19 +259,19 @@ def collect_rollout(
     act_obs_gl = obs_gl[_env_range, acting_idx]
     legal_mask_np = build_legal_mask_batch(env, current_seats)
 
-    sp_t = torch.from_numpy(act_obs_sp).to(_device)
-    gl_t = torch.from_numpy(act_obs_gl).to(_device)
-    lm_t = torch.from_numpy(legal_mask_np).to(_device)
+    # Do not sample a policy on an all-illegal terminal mask. Terminal
+    # transitions bootstrap to zero, including ones already auto-reset.
+    live = (~env.done) & (~rollout.dones[T - 1])
+    last_val_np = np.zeros(N, dtype=np.float32)
+    if live.any():
+        sp_t = torch.from_numpy(act_obs_sp[live]).to(_device)
+        gl_t = torch.from_numpy(act_obs_gl[live]).to(_device)
+        lm_t = torch.from_numpy(legal_mask_np[live]).to(_device)
+        with torch.no_grad():
+            _, _, last_values = policy.act(sp_t, gl_t, lm_t)
+        bootstrap = last_values.cpu().numpy()
+        if bootstrap.ndim > 1:
+            bootstrap = bootstrap[:, 0]
+        last_val_np[live] = bootstrap.astype(np.float32)
 
-    with torch.no_grad():
-        _, _, last_values = policy.act(sp_t, gl_t, lm_t)
-
-    if last_values.dim() == 1:
-        last_val_np = last_values.cpu().numpy().astype(np.float32)
-    else:
-        last_val_np = last_values.cpu().numpy()[:, 0].astype(np.float32)
-
-    # Zero bootstrap for terminal envs
-    last_val_np = last_val_np * (~env.done).astype(np.float32)
-
-    rollout.compute_returns(last_val_np)
+    rollout.compute_returns(last_val_np, last_seats=acting_idx)

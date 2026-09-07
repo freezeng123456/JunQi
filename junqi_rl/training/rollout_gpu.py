@@ -49,9 +49,8 @@ from junqi_rl.training.rollout import (
     timestep_keep_env_indices,
 )
 
-# Upper bound on per-env legal action count.  Empirically the kernel
-# emits < 200 actions; the compact flat action space is 16641 so 256 is
-# a conservative safety margin.  A single fallback path handles overflow.
+# Default storage capacity, NOT a proven upper bound on legal actions.
+# The encoder rejects overflow instead of silently changing the support.
 CSR_K_MAX = 256
 _OBS_STORAGE_DTYPES = frozenset((torch.float16, torch.bfloat16))
 
@@ -126,18 +125,28 @@ def _dense_mask_to_csr(
     and the per-row count into ``out_counts``.  The row order is preserved.
 
     Unused slots in ``out_ids`` are filled with 0 (benign — they are
-    ignored via ``out_counts``).  Rows with more than ``K_MAX`` True
-    entries are truncated (the first K_MAX positions are kept).
+    ignored via ``out_counts``). Overflow raises BEFORE mutating outputs:
+    silently truncating changes the PPO distribution's legal support.
     """
+    if mask.ndim != 2 or mask.dtype != torch.bool or out_ids.ndim != 2:
+        raise ValueError("CSR encoding requires a 2-D bool mask and 2-D ids")
     N, K_MAX = out_ids.shape
-    # Per-row TRUE counts (unclamped).  Used below to compute per-row
-    # offsets into the flat ``nonzero()`` list.  We clamp separately when
-    # writing ``out_counts`` so the reconstruction path only reads the
-    # first K_MAX slots.
-    counts_full = mask.sum(dim=1, dtype=torch.int32)           # (N,) int32
-
-    # Clamped counts — what callers read.
-    out_counts.copy_(torch.clamp(counts_full, max=K_MAX))
+    if K_MAX <= 0 or mask.shape[0] != N or out_counts.shape != (N,):
+        raise ValueError("CSR output shapes must be (N, K>0) and (N,)")
+    if out_ids.dtype != torch.int32 or out_counts.dtype != torch.int32:
+        raise ValueError("CSR ids and counts must be int32")
+    if out_ids.device != mask.device or out_counts.device != mask.device:
+        raise ValueError("CSR inputs and outputs must share a device")
+    counts_full = mask.sum(dim=1, dtype=torch.int32)
+    # This correctness guard synchronises on CUDA. Benchmark on target
+    # hardware; use dense/compact storage rather than dropping legal actions.
+    if bool((counts_full > K_MAX).any()):
+        required = int(counts_full.max().item())
+        raise ValueError(
+            f"CSR legal-mask overflow: need {required} entries, capacity {K_MAX}; "
+            "increase rollout.csr_k_max or disable CSR legal-mask storage"
+        )
+    out_counts.copy_(counts_full)
 
     # Offsets for flat scatter.  indices = nonzero(mask).
     nz = mask.nonzero(as_tuple=False)                          # (total_nz, 2) int64
@@ -154,14 +163,7 @@ def _dense_mask_to_csr(
                               device=mask.device)
     local_idx = global_idx - row_starts[rows]                  # 0..counts_full[row]-1
 
-    # Truncate rows whose local_idx exceeds K_MAX. Always apply the mask:
-    # branching on ``keep.all()`` synchronises the CUDA stream every env step,
-    # while these index tensors contain only the sparse legal entries.
-    keep = local_idx < K_MAX
-    rows = rows[keep]
-    cols = cols[keep]
-    local_idx = local_idx[keep]
-
+    # All entries fit: retain the COMPLETE legal support, in row order.
     out_ids[rows, local_idx] = cols
 
 
@@ -521,8 +523,10 @@ class RolloutBufferGPU:
         self-play (``random_opponent=False``) the policy controlled all
         seats, so every transition is kept.
 
-        Each iteration is a handful of (N,) tensor ops so loop-overhead
-        per step is ~10 μs; at T ≤ 1024 total cost is negligible.
+        ``gae_lambda`` controls policy advantages; ``td_lambda`` controls
+        the independent value-target trace. Equal lambdas recover the
+        previous return formula. GPU performance must be measured on target
+        hardware rather than inferred from the number of Python operations.
         """
         T = self.steps_per_env
         last_val_t = _to_tensor(last_values, device=self.device,
@@ -542,6 +546,7 @@ class RolloutBufferGPU:
             last_seat_team = last_seats_t & 1
 
         gae = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        td_trace = torch.zeros_like(gae)
         # next_val and next_team correspond to step t+1 as we iterate
         # backwards. Initialised to the bootstrap state (after T-1).
         next_val = last_val_t.clone()
@@ -564,8 +569,10 @@ class RolloutBufferGPU:
             # advantage was computed in S_{t+1}'s frame, so we similarly
             # flip it when teams differ at the t/t+1 boundary.
             gae = delta + self.gamma * self.gae_lambda * mask * flip * gae
+            # Keep the value target's lambda independent of policy GAE.
+            td_trace = delta + self.gamma * self.td_lambda * mask * flip * td_trace
             self.advantages_[t] = gae
-            self.returns_[t] = gae + self.values[t]
+            self.returns_[t] = td_trace + self.values[t]
 
             next_val = self.values[t]
             next_team = cur_team
@@ -664,10 +671,10 @@ class RolloutBufferGPU:
         if own_mask.any():
             own_adv  = adv[own_mask]
             adv_mean = own_adv.mean()
-            adv_std  = own_adv.std() + 1e-8
+            adv_std  = own_adv.std(unbiased=False) + 1e-8
         else:
             adv_mean = adv.mean()
-            adv_std  = adv.std() + 1e-8
+            adv_std  = adv.std(unbiased=False) + 1e-8
         adv_norm = (adv - adv_mean) / adv_std
 
         # Magnitude filter — keep policy-controlled transitions with
@@ -887,7 +894,7 @@ class RolloutBufferGPU:
 
     def num_valid_transitions(self) -> int:
         adv = self.advantages_.view(-1)
-        adv_std = adv.std() + 1e-8
+        adv_std = adv.std(unbiased=False) + 1e-8
         adv_norm = (adv - adv.mean()) / adv_std
         return int((adv_norm.abs() >= self.adv_filt_thresh).sum().item())
 
@@ -897,7 +904,7 @@ class RolloutBufferGPU:
         rew = self.rewards.view(-1)
         # Single synchronisation — compute all scalars on-device, stack,
         # then D2H once.  Avoids 5 separate .item() syncs.
-        adv_std = (adv.std() + 1e-8)
+        adv_std = (adv.std(unbiased=False) + 1e-8)
         adv_mean = adv.mean()
         adv_norm_abs = ((adv - adv_mean) / adv_std).abs()
         n_valid = (adv_norm_abs >= self.adv_filt_thresh).sum().to(torch.float32)
