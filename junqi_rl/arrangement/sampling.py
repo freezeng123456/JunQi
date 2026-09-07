@@ -66,6 +66,7 @@ class GenerationResult:
     ent_pred: Tensor       # (N, 30) float
     log_probs: Tensor      # (N, 30, 13) float  (log_softmax at each step)
     seat_idx: Tensor       # (N,) int64
+    fallback_mask: Tensor  # (N,) bool; random-lineup fallback, not policy data
     stats: dict            # {'retry_rate': ..., 'fallback_rate': ...}
 
 
@@ -227,9 +228,9 @@ def generate_arrangements(
                 device=device, dtype=torch.long,
             )
             samples[m] = F.one_hot(vocab_idxs, num_classes=N_PIECE_TYPE_WITH_NONE).float()
-            # Fallback-filled rows: zero out log_probs / values / ent_pred
-            # (they won't receive a training signal anyway — buffer filters
-            # them out by `fallback_flags`).
+            # Fallback-filled rows have no valid old-policy statistics.
+            # Keep placeholder tensors for the fixed-size generation contract;
+            # training callers must exclude `fallback_mask`.
             log_probs[m] = 0.0
             values[m] = 0.0
             ent_pred[m] = 0.0
@@ -251,6 +252,7 @@ def generate_arrangements(
         ent_pred=ent_pred,
         log_probs=log_probs,
         seat_idx=seat_idx,
+        fallback_mask=fallback_flags,
         stats=stats,
     )
 
