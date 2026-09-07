@@ -782,6 +782,7 @@ def train(cfg: TrainConfig) -> None:
                 seat_lineup = env_arr_snapshot[np.arange(N), seat]  # (N, 30)
                 arr_buffer.add_rewards(
                     env_arrangements=torch.from_numpy(seat_lineup),
+                    env_seats=torch.full((N,), seat, dtype=torch.long),
                     is_newly_terminal=torch.from_numpy(fired_np),
                     rewards=torch.from_numpy(seat_reward),
                 )
