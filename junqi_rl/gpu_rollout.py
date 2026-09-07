@@ -739,6 +739,21 @@ class GpuRollout:
         if self._beliefs_enabled:
             _cuda.init_all_beliefs(self.state)
 
+    def reset_from_setup_pool(self, seed: int = 0) -> None:
+        """Reset every env using the currently uploaded CUDA setup pool.
+
+        This is the all-env counterpart of :meth:`reset_terminated_device`.
+        Legacy :meth:`reset` keeps its exact CPU-seeded parity semantics.
+        """
+        n_env = self.num_envs
+        self.state.copy_termination_from_host(
+            np.ones(n_env, dtype=bool),
+            np.full(n_env, -1, dtype=np.int8),
+            np.zeros(n_env, dtype=bool),
+        )
+        self.reset_terminated_device(seed=int(seed))
+        self._last_result = None
+
     # ------------------------------------------------------------------
     # Step
     # ------------------------------------------------------------------

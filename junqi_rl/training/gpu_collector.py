@@ -754,7 +754,10 @@ def collect_rollout_gpu_v2(
         policy._compiled_for_collect = True
 
     if reset_at_start:
-        rollout_world.reset(seed_base=seed_base)
+        rollout_world.reset_from_setup_pool(seed=seed_base)
+        if on_reset is not None:
+            reset_all_t = torch.ones(N, dtype=torch.bool, device=_device)
+            on_reset(fired_t=reset_all_t, rollout_world=rollout_world)
 
     # Track done flags on GPU
     done_t = rollout_world.terminated_torch().clone()
