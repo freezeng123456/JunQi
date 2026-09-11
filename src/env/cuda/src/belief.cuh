@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <stdint.h>
 #include <cuda_runtime.h>
 #include "common.cuh"
 
