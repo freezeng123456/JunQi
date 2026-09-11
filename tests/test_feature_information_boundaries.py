@@ -107,3 +107,91 @@ def test_public_engineer_attack_removes_own_mine_candidate():
     belief = BeliefTensor.initial(state, Seat.SOUTH)
     obs = build_observation(state, belief, Seat.SOUTH)
     assert obs.spatial[CHANNEL_LAYOUT['cm_my_dilei_candidate'], 7, 2].item() == 0.0
+
+
+@pytest.mark.parametrize('observer', list(Seat))
+def test_commander_death_publicly_identifies_surviving_mine(observer):
+    from junqi_core.info_model import TRACKED_TYPES
+    st = position(PieceType.SILING, PieceType.DILEI)
+    belief = BeliefTensor.initial(st, observer)
+    after, result = st.step(Action(seat=Seat.SOUTH, src=(2, 7), dst=(1, 7)))
+    assert result.event is Event.KILLED and result.flag_reveal_src
+    belief.update(st, after, result)
+    assert belief.probs[(1, 7)][TRACKED_TYPES.index(PieceType.DILEI)] == 1.0
+    pid = after.pieces[(1, 7)].piece_id
+    assert not after.combat_memory.rank_floor[:, pid].any()
+
+
+@pytest.mark.parametrize('attacker,defender', [
+    (PieceType.PAIZH, PieceType.DILEI),
+    (PieceType.PAIZH, PieceType.LIANZH),
+])
+def test_death_without_commander_reveal_does_not_identify_hidden_mine(attacker, defender):
+    from junqi_core.info_model import TRACKED_TYPES
+    st = position(attacker, defender)
+    belief = BeliefTensor.initial(st, Seat.NORTH)
+    before = belief.probs[(1, 7)].copy()
+    after, result = st.step(Action(seat=Seat.SOUTH, src=(2, 7), dst=(1, 7)))
+    assert result.event is Event.KILLED and not result.flag_reveal_src
+    belief.update(st, after, result)
+    np.testing.assert_array_equal(belief.probs[(1, 7)], before)
+    assert belief.probs[(1, 7)][TRACKED_TYPES.index(PieceType.DILEI)] < 1.0
+
+
+def public_mine_sequence():
+    st = position(PieceType.SILING, PieceType.DILEI)
+    pieces = dict(st.pieces)
+    del pieces[(10, 5)]
+    pieces[(1, 6)] = PieceRef(Seat.NORTH, PieceType.GONGB)
+    st = GameState(pieces=pieces, turn=Seat.SOUTH, move_counter=0,
+                   moves_since_last_combat=0, info={s: SeatInfo() for s in Seat},
+                   terminated=False, winner_team=None, draw=False, show_mode=ShowMode.DARK)
+    return st, ((Seat.SOUTH, (2, 7), (1, 7)),
+                (Seat.WEST, (5, 6), (4, 6)),
+                (Seat.NORTH, (1, 6), (1, 7)))
+
+
+def test_public_mine_then_capture_reveals_engineer_without_path_reveal():
+    from junqi_core.info_model import TRACKED_TYPES
+    st, actions = public_mine_sequence()
+    beliefs = {s: BeliefTensor.initial(st, s) for s in Seat}
+    for seat, src, dst in actions:
+        after, result = st.step(Action(seat=seat, src=src, dst=dst))
+        for belief in beliefs.values():
+            belief.update(st, after, result)
+        st = after
+        if result.flag_reveal_src:
+            import json
+            restored_state = GameState.from_dict(json.loads(json.dumps(st.to_dict())))
+            for observer in Seat:
+                restored = BeliefTensor.initial(restored_state, observer)
+                assert restored.probs[(1, 7)][TRACKED_TYPES.index(PieceType.DILEI)] == 1.0
+    assert result.event is Event.EAT
+    pid = st.pieces[(1, 7)].piece_id
+    assert st.combat_memory.is_gongb[:, pid].all()
+    assert not st.combat_memory.not_gongb[:, pid].any()
+    assert not st.combat_memory.rank_floor[:, pid].any()
+    for observer, belief in beliefs.items():
+        assert belief.probs[(1, 7)][TRACKED_TYPES.index(PieceType.GONGB)] == 1.0
+        assert belief.probs[(1, 7)][TRACKED_TYPES.index(PieceType.DILEI)] == 0.0
+        restored = BeliefTensor.initial(GameState.from_dict(st.to_dict()), observer)
+        np.testing.assert_array_equal(restored.probs[(1, 7)], belief.probs[(1, 7)])
+
+
+def test_engineer_only_path_reveals_identity_in_belief_and_memory():
+    from junqi_core.info_model import TRACKED_TYPES
+    st = position(PieceType.GONGB, PieceType.LIANZH)
+    pieces = dict(st.pieces)
+    del pieces[(2, 7)]
+    pieces[(8, 5)] = PieceRef(Seat.SOUTH, PieceType.GONGB)
+    st = GameState(pieces=pieces, turn=Seat.SOUTH, move_counter=0,
+                   moves_since_last_combat=0, info={s: SeatInfo() for s in Seat},
+                   terminated=False, winner_team=None, draw=False, show_mode=ShowMode.DARK)
+    beliefs = {s: BeliefTensor.initial(st, s) for s in Seat}
+    after, result = st.step(Action(seat=Seat.SOUTH, src=(8, 5), dst=(6, 3)))
+    assert result.event is Event.MOVE
+    pid = after.pieces[(6, 3)].piece_id
+    assert after.combat_memory.is_gongb[:, pid].all()
+    for belief in beliefs.values():
+        belief.update(st, after, result)
+        assert belief.probs[(6, 3)][TRACKED_TYPES.index(PieceType.GONGB)] == 1.0

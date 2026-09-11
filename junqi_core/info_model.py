@@ -34,6 +34,7 @@ from typing import Final
 import numpy as np
 
 from .board import BOARD_SIZE, index_to_pos
+from .combat_memory import publicly_revealed_mines
 from .rules import (
     ALL_PLACEABLE_PIECES,
     ALL_SEATS,
@@ -260,6 +261,7 @@ class BeliefTensor:
         # ADR-120: seed the tensor mirrors so downstream observation
         # consumers (ObservationBuilder.build) can read them immediately
         # even before the first step().
+        b._apply_public_identities(state)
         b._sync_tensors(state)
 
         return b
@@ -311,30 +313,6 @@ class BeliefTensor:
             self._reveal_dst_siling(defender_seat)
 
         # -----------------------------------------------------------------
-        # R5/R7: GONGB signature (attacker eats DILEI)
-        # -----------------------------------------------------------------
-        if (
-            event is Event.EAT
-            and prev_dst_piece is not None
-            and defender_belief is not None
-            and _is_one_hot(defender_belief)
-            and defender_belief[TRACKED_TYPES.index(PieceType.DILEI)] == 1.0
-            and attacker_belief is not None
-            and not _is_one_hot(attacker_belief)
-        ):
-            # Only GONGB can eat DILEI → attacker is provably GONGB (unless
-            # observer already knew, e.g., because attacker is own/teammate).
-            # Update attacker's belief to GONGB one-hot.
-            attacker_belief = one_hot(PieceType.GONGB)
-            self.probs[src] = attacker_belief
-            self._decrement_remaining(attacker_seat, PieceType.GONGB)
-
-        # Also: if we just observed a KILLED event where the defender
-        # (stationary, on back-row cell) survives → defender is at least
-        # DILEI-strong. We leave this as a soft hint; the per-slot prior
-        # already biased back-row cells toward DILEI/higher. (TODO R5 soft)
-
-        # -----------------------------------------------------------------
         # R4 + R6: Flag capture / stronghold EAT deductions
         # -----------------------------------------------------------------
         if result.flag_captured:
@@ -360,7 +338,7 @@ class BeliefTensor:
         # R1: piece migration (must run AFTER reveals, so the revealed
         # identities get copied to the destination)
         # -----------------------------------------------------------------
-        # Refresh attacker_belief in case R5/R7 modified self.probs[src]
+        # Refresh the source entry before migration.
         attacker_belief = self.probs.get(src, attacker_belief)
 
         if event is Event.MOVE:
@@ -428,7 +406,16 @@ class BeliefTensor:
         # actual refresh is deferred until an observation build asks for
         # the data (ensure_synced), which saves ~100 µs per seat per
         # step when there is no concurrent obs build.
+        self._apply_public_identities(new_state)
         self._dirty_state = new_state
+
+    def _apply_public_identities(self, state: GameState) -> None:
+        """Use public combat/path records, never private mine knowledge."""
+        mines = publicly_revealed_mines(state.combat_memory)
+        engineers = np.all(state.combat_memory.is_gongb, axis=0)
+        for pid in np.flatnonzero(state.alive & (mines | engineers)):
+            pos = (int(state.pos_x[pid]), int(state.pos_y[pid]))
+            self.probs[pos] = one_hot(PieceType.DILEI if mines[pid] else PieceType.GONGB)
 
     def ensure_synced(self, state: GameState | None = None) -> None:
         """Refresh ``probs_arr`` / ``remaining_arr`` if they are stale.

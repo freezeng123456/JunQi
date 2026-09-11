@@ -288,3 +288,50 @@ def test_dark_missing_belief_fallback_keeps_teammate_unknown():
     occupied = teammate.sum(axis=0) > 0
     assert occupied.any()
     assert np.all(teammate[:, occupied].max(axis=0) < 1.0)
+
+
+def test_native_public_mine_and_engineer_inference_chain():
+    """Native step + belief updates must broadcast the entire Q7 inference chain."""
+    import torch
+    from junqi_core.board import FLAT_TO_COMPACT, NUM_ON_BOARD_CELLS
+    from junqi_core.info_model import BeliefTensor
+    from junqi_core.observation import CHANNEL_LAYOUT, build_observation
+    from junqi_core.rotation import world_to_canonical
+    from junqi_core.rules import Seat
+    from junqi_core.state import Action
+    from tests.test_feature_information_boundaries import public_mine_sequence
+    from tests.test_gpu_combat_memory_parity import _push_state
+
+    state, actions = public_mine_sequence()
+    rollout = GpuRollout(num_envs=1)
+    rollout.reset(seed_base=42)
+    rollout.state = _push_state(BatchedGameState.from_game_states([state]))
+    beliefs = {s: BeliefTensor.initial(state, s) for s in Seat}
+    initial = np.zeros((1, 4, 12, 289), dtype=np.float32)
+    for observer, belief in beliefs.items():
+        for (x, y), vector in belief.probs.items():
+            initial[0, observer.value, :, y * 17 + x] = vector
+    rollout.upload_beliefs(initial)
+
+    for seat, src, dst in actions:
+        sc = world_to_canonical(*src, seat)
+        dc = world_to_canonical(*dst, seat)
+        action_id = (int(FLAT_TO_COMPACT[sc[1] * 17 + sc[0]]) * NUM_ON_BOARD_CELLS
+                     + int(FLAT_TO_COMPACT[dc[1] * 17 + dc[0]]))
+        acting = torch.tensor([seat.value], device='cuda', dtype=torch.int8)
+        result = rollout.step_device_torch(
+            torch.tensor([action_id], device='cuda', dtype=torch.int32), acting)
+        rollout.update_beliefs_device(result, acting)
+        after, cpu_result = state.step(Action(seat=seat, src=src, dst=dst))
+        for belief in beliefs.values():
+            belief.update(state, after, cpu_result)
+        state = after
+        spatial, global_ = rollout.build_all_seat_observations()
+        for observer, belief in beliefs.items():
+            expected = build_observation(state, belief, observer)
+            for name in ('piece_own', 'prob_teammate', 'belief_left_side', 'belief_right_side'):
+                sl = CHANNEL_LAYOUT[name]
+                np.testing.assert_allclose(spatial[0, observer.value, sl], expected.spatial[sl], atol=1e-6)
+            np.testing.assert_allclose(global_[0, observer.value], expected.global_, atol=1e-5)
+    pid = state.pieces[(1, 7)].piece_id
+    assert rollout.state.cm_copy_to_host()['is_gongb'].reshape(1, 4, 120)[0, :, pid].all()

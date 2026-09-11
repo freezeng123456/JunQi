@@ -86,7 +86,9 @@ class TestProbsArrParity:
                 belief.update(state, new_state, result)
             state = new_state
 
-            # After every update, probs_arr must agree with probs dict.
+            # ADR-120 uses lazy tensor mirrors: readers synchronize before access.
+            belief.ensure_synced(state)
+            # After synchronization, probs_arr must agree with probs dict.
             for (x, y), vec in belief.probs.items():
                 flat = y * BOARD_SIZE + x
                 pid = int(state.cell_piece_id[flat])

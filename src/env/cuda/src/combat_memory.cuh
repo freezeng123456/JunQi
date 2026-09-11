@@ -143,11 +143,13 @@ __device__ inline void cm_apply_path_revealed_gongb_dev(
     CMEnvPtrs cm,
     int pid)
 {
-    // is_gongb[obs, pid] = true for all 4 observers.
-    cm.is_gongb[0 * CM_NUM_PIDS_DEV + pid] = true;
-    cm.is_gongb[1 * CM_NUM_PIDS_DEV + pid] = true;
-    cm.is_gongb[2 * CM_NUM_PIDS_DEV + pid] = true;
-    cm.is_gongb[3 * CM_NUM_PIDS_DEV + pid] = true;
+    for (int obs = 0; obs < CM_NUM_OBSERVERS_DEV; ++obs) {
+        int i = obs * CM_NUM_PIDS_DEV + pid;
+        cm.is_gongb[i] = true;
+        cm.not_gongb[i] = false;
+        cm.rank_floor[i] = 0;
+        cm.rank_floor_step[i] = -1;
+    }
 }
 
 // ---------------------------------------------------------------------------

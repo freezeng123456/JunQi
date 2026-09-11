@@ -348,7 +348,7 @@
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
     "hash_kind": "quantized_i32_1e6",
-    "sha256": "845f6c79b0c768f27ab5b53f59889366af91761d084b68d7a5a37e4ab656a6a2",
+    "sha256": "9ed0db2556e3441624a8a0c5d0d4c079529a873f264ee7df87450600cdb37e90",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 20.0,

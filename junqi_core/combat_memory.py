@@ -39,7 +39,7 @@ Ordinary rank floor:
 
 GONGB flags:
     is_gongb                                    : bool — set on
-        (A1) ate observer's DILEI (Event.EAT, victim_seat == observer), or
+        (A1) ate a mine publicly identified by a prior commander death, or
         (A2) walked a GONGB-only path (any observer)
     not_gongb                                   : bool — set on
         (B1) ate observer's non-DILEI piece (Event.EAT, victim_seat == observer), or
@@ -74,7 +74,7 @@ Layer 1 (45 ch, projected to enemy alive pieces in observer view):
 
 Layer 2 (5 ch, theory-of-mind, projected to my own alive pieces):
     cm_my_kill_count_ge    [3]   any single opponent's view of my kill count
-    cm_my_is_gongb         [1]   AND of two opponents' is_gongb (= path-revealed only)
+    cm_my_is_gongb         [1]   AND of two opponents' is_gongb (= public path or public-mine capture)
     cm_my_dilei_candidate  [1]   based on AND of two opponents' attacked_by_known_gongb
 
 Layer 3 (46 ch, ADR-129 v5; projected to enemy alive pieces):
@@ -349,6 +349,22 @@ def apply_path_revealed_gongb(cm: CombatMemoryState, pid: int) -> None:
     经过弧形线，不能转直角弯), so an engineer that uses one must stay hidden.
     """
     cm.is_gongb[:, pid] = True
+    cm.not_gongb[:, pid] = False
+    cm.rank_floor[:, pid] = RANK_FLOOR_UNKNOWN
+    cm.rank_floor_step[:, pid] = -1
+
+
+def publicly_revealed_mines(cm: CombatMemoryState) -> np.ndarray:
+    """Public mine identities, derived from direct non-mutual commander deaths.
+
+    A commander dying alone reveals its identity through the flag event; its
+    surviving direct killer must be a mine. BOMB never enters direct memory.
+    Only the DIRECT victim mask qualifies: an engineer later capturing that
+    mine inherits the chain mask, which must not identify it as another mine.
+    Own-piece knowledge and slot priors are deliberately not consulted.
+    """
+    commander_bit = np.uint16(1 << int(_PIECETYPE_TO_TRACKED_IDX[PieceType.SILING.value]))
+    return np.any((cm.direct_ate_my_type_mask & commander_bit) != 0, axis=0)
 
 
 def apply_combat_event(
@@ -408,6 +424,11 @@ def apply_combat_event(
             v_known_gongb[V_seat] = True
         # Set defender (K)'s flag for any observer who saw a known-GONGB attack.
         cm.attacked_by_known_gongb[v_known_gongb, K] = True
+
+    # EAT of a mine previously revealed by a public commander death reveals
+    # the attacker to EVERY observer. A privately known own mine is insufficient.
+    if event_is_eat and publicly_revealed_mines(cm)[V]:
+        cm.is_gongb[:, K] = True
 
     # --- Chain propagation (all observers) ---
     # chain[K] |= direct_my[V] | chain[V] | {V}
@@ -520,16 +541,14 @@ def apply_combat_event(
 
         # 2) GONGB / non-GONGB rules — V's type drives this.
         # Critical DARK rules:
-        #   - EAT, V == DILEI (my mine eaten alive) → K is GONGB
+        #   - EAT of a privately known mine does not reveal GONGB.
         #   - EAT, V != DILEI → K is NOT GONGB (engineers only beat mines)
         #   - KILLED, V's type known → K could be anything that beats V's
         #     type; ordinary-rank floor lifts handle this. K cannot be
         #     GONGB iff V is ordinary-rank (handled by chain block above
         #     when V's floor matters; but for direct, we set explicitly).
         if event_is_eat:
-            if V_type is PieceType.DILEI:
-                cm.is_gongb[obs, K] = True
-            else:
+            if V_type is not PieceType.DILEI:
                 # GONGB cannot win EAT vs non-DILEI.
                 cm.not_gongb[obs, K] = True
         else:
@@ -567,6 +586,18 @@ def apply_combat_event(
             if promoted > int(cm.rank_floor[obs, K]):
                 cm.rank_floor[obs, K] = promoted
                 cm.rank_floor_step[obs, K] = death_step
+
+    # Public special identities override ordinary-rank chain bounds. Otherwise
+    # a mine that killed SILING acquires rank 9, and its engineer captor inherits
+    # both that impossible floor and a contradictory not-GONGB flag.
+    if publicly_revealed_mines(cm)[K]:
+        cm.rank_floor[:, K] = RANK_FLOOR_UNKNOWN
+        cm.rank_floor_step[:, K] = -1
+        cm.not_gongb[:, K] = True
+    elif cm.is_gongb[:, K].all():
+        cm.rank_floor[:, K] = RANK_FLOOR_UNKNOWN
+        cm.rank_floor_step[:, K] = -1
+        cm.not_gongb[:, K] = False
 
 
 # ===========================================================================

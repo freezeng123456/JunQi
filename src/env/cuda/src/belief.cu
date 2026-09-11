@@ -3,7 +3,7 @@
  * GPU-side belief tensor init + update kernels for imperfect-information JunQi.
  *
  * Phase 1 scope:
- *   - belief_init_kernel: HALF_DARK prior seeding on env reset
+ *   - belief_init_kernel: DARK prior seeding on env reset
  *   - belief_update_kernel: deductive rules R1, R4, R5/R7, R6, R9, I5
  *   - Pre-step flag snapshot for detecting new seat_flag_revealed / seat_dead
  *
@@ -30,7 +30,7 @@ __constant__ int16_t SEAT_STRONGHOLDS[4 * 2];
 static constexpr int8_t  PT_JUNQI  = 2;
 static constexpr int8_t  PT_DILEI  = 3;
 // static constexpr int8_t  PT_ZHADAN = 4;  // Phase 2: used for ZHADAN-related rules
-// static constexpr int8_t  PT_SILING = 5;  // Phase 2: used for SILING reveal rules
+static constexpr int8_t PT_SILING = 5;
 static constexpr int8_t  PT_GONGB  = 13;
 
 // Event constants (must match rules.py)
@@ -268,6 +268,8 @@ __global__ void belief_update_kernel(
     const int32_t* d_world_actions,
     const bool*    d_prev_seat_flag_revealed,
     const bool*    d_prev_seat_dead,
+    const uint16_t* d_cm_direct_type,   // (N, 4, 120), direct victims only
+    const bool*     d_cm_is_gongb,      // (N, 4, 120), public identity markers
     float*         d_belief)
 {
     int env = blockIdx.x;
@@ -355,7 +357,7 @@ __global__ void belief_update_kernel(
         // For Phase 1, the cases that need it use alternative approaches:
         //   R4: flag_cap → use s_new_dead to find which seat died
         //   R6: stronghold → use precomputed SEAT_STRONGHOLDS
-        //   R5/R7: read belief at dst before clearing, type check
+        //   R5/R7: persistent public CombatMemory identity records
     }
     __syncthreads();
 
@@ -421,25 +423,6 @@ __global__ void belief_update_kernel(
         // Read pre-update beliefs at src and dst cells
         read_belief(d_belief, env, obs, s_src_flat, bel_src);
         read_belief(d_belief, env, obs, s_dst_flat, bel_dst);
-
-        // =================================================================
-        // R5/R7: Engineer signature — EAT + defender belief is one-hot DILEI
-        // → attacker belief becomes one-hot GONGB.
-        //
-        // Must run BEFORE R1 migration (which overwrites beliefs at src/dst).
-        // In HALF_DARK: observer may know defender is DILEI if it's own/teammate.
-        // =================================================================
-        if (s_event == EV_EAT) {
-            if (is_one_hot_12(bel_dst)) {
-                int def_type = argmax_12(bel_dst);
-                if (def_type == (PT_DILEI - 2)) {  // DILEI is type_idx 1
-                    // Attacker must be GONGB (only engineer eats mines)
-                    if (!is_one_hot_12(bel_src)) {
-                        write_one_hot(bel_src, PT_GONGB - 2);  // GONGB is type_idx 11
-                    }
-                }
-            }
-        }
 
         // =================================================================
         // R1: Piece migration — move belief vectors based on event.
@@ -534,6 +517,22 @@ __global__ void belief_update_kernel(
                     zero_belief(d_belief, env, obs, c);
                 }
             } else {
+                // Apply persistent PUBLIC identities before conservative fallback.
+                // SILING direct victims imply a commander died alone here. Its
+                // identity was revealed by Q7; the survivor must be a mine.
+                bool public_mine = false;
+                bool public_engineer = true;
+                for (int witness = 0; witness < 4; ++witness) {
+                    size_t ci = ((size_t)env * 4 + witness) * 120 + pid_c;
+                    public_mine |= (d_cm_direct_type[ci] & ((uint16_t)1 << (PT_SILING - 2))) != 0;
+                    public_engineer &= d_cm_is_gongb[ci];
+                }
+                if (public_mine || public_engineer) {
+                    float known[12];
+                    write_one_hot(known, (public_mine ? PT_DILEI : PT_GONGB) - 2);
+                    write_belief(d_belief, env, obs, c, known);
+                    continue;
+                }
                 // Cell has a live piece — check if belief is missing.
                 float buf[12];
                 read_belief(d_belief, env, obs, c, buf);
@@ -700,6 +699,8 @@ void update_beliefs_after_step(
         d_world_actions,
         g_pre_step.d_prev_seat_flag_revealed,
         g_pre_step.d_prev_seat_dead,
+        d_state.d_cm_direct_type,
+        d_state.d_cm_is_gongb,
         d_belief);
     KERNEL_CHECK();
 }

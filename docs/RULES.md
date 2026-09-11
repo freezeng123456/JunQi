@@ -282,9 +282,9 @@ Given `(event, A_visible, B_visible, flag_reveals)`, observers can sometimes nar
 
 **Special deduction cases** (RULES.md does not enumerate the belief algorithm; see `docs/INFERENCE.md` to be written in Phase 0.2). A few canonical examples:
 
-1. **Engineer-reveals-mine**: If A eats B where B was on `index ≥ 20` (back 2 rows) and B was immobile up to this point, and A survived, then A is likely `GONGB` and B was `DILEI`. Observers can mark A as engineer.
+1. **Public-mine capture reveals engineer**: A surviving hidden mine is publicly identified only by case 3 below. If a later attacker EATs that same, already-public mine, mark the attacker as `GONGB` for every observer. A mine's owner privately knowing its type is insufficient for this public inference. Engineer-only legal movement independently reveals `GONGB`; ordinary straight rail moves and arcs do not.
 2. **Lieutenant-beats-engineer**: If A kills B and A was known to be weak (e.g. `PAIZH`), observers learn B's rank was `≥ PAIZH`, typically `GONGB`.
-3. **SILING-on-mine**: KILLED + src-flag-revealed → src was `SILING`, dst was `DILEI`.
+3. **SILING-on-mine**: KILLED + src-flag-revealed → src was `SILING`, dst was `DILEI`. This is the only automatic public confirmation of a surviving hidden enemy mine. Other deaths, a back-row location, immobility, or private own-piece knowledge do not publicly confirm a mine. All observers retain this fact for subsequent moves.
 4. **Bomb-into-SILING** (Q7): BOMB + exactly-one-side-revealed → revealed side was `SILING`, other side was `ZHADAN`.
 5. **Double SILING**: BOMB + both-sides-revealed → both were `SILING`.
 

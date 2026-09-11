@@ -41,12 +41,12 @@ def _bit(t: PieceType) -> int:
 
 
 # ===========================================================================
-# 1. EAT + DILEI victim ⇒ killer is GONGB (A1)
+# 1. EAT of a privately known mine does not reveal GONGB
 # ===========================================================================
 
 
 class TestRule_A1_EatDilei:
-    def test_eat_my_dilei_marks_killer_as_gongb(self):
+    def test_eat_my_dilei_does_not_mark_killer_as_gongb(self):
         cm = CombatMemoryState.zeros()
         # WEST 's piece (pid=37) ate SOUTH's DILEI (pid=12).
         apply_combat_event(
@@ -60,8 +60,8 @@ class TestRule_A1_EatDilei:
             death_step=10,
         )
         south = Seat.SOUTH.value
-        # SOUTH knows: killer 37 is GONGB.
-        assert cm.is_gongb[south, 37]
+        # SOUTH knows its own mine, but this does not trigger public GONGB confirmation.
+        assert not cm.is_gongb[south, 37]
         assert not cm.not_gongb[south, 37]
         # DILEI is a special; no floor lift.
         assert cm.rank_floor[south, 37] == 0

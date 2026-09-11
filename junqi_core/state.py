@@ -21,7 +21,7 @@ Reference: docs/RULES.md v1.1.0 (and docs/DECISIONS.md ADR-016 for Q14).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from typing import Any, ClassVar
 
 import numpy as np
@@ -1433,6 +1433,10 @@ class GameState:
             "zero_board": zero_board_json,
             "piece_state": piece_state_json,
             "deaths": deaths_json,
+            "combat_memory": {
+                f.name: getattr(self.combat_memory, f.name).tolist()
+                for f in fields(CombatMemoryState)
+            },
             "zobrist": int(self.zobrist),
         }
 
@@ -1592,6 +1596,15 @@ class GameState:
                 seat_flag_revealed_arr=seat_flag_revealed_arr,
             )
 
+        combat_memory = CombatMemoryState.zeros()
+        if "combat_memory" in d:
+            for f in fields(CombatMemoryState):
+                target = getattr(combat_memory, f.name)
+                values = np.asarray(d["combat_memory"][f.name], dtype=target.dtype)
+                if values.shape != target.shape:
+                    raise ValueError(f"combat_memory.{f.name}: invalid shape {values.shape}")
+                target[:] = values
+
         return cls(
             pieces=pieces,
             turn=Seat(d["turn"]),
@@ -1607,6 +1620,7 @@ class GameState:
             zero_board=zero_board,
             piece_state=piece_state,
             deaths=deaths,
+            combat_memory=combat_memory,
             alive=alive,
             piece_type_arr=piece_type_arr,
             piece_seat_arr=piece_seat_arr,

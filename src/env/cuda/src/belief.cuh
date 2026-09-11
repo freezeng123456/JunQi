@@ -86,6 +86,8 @@ __global__ void belief_update_kernel(
     // Pre-step snapshot (saved before step)
     const bool*    d_prev_seat_flag_revealed, // (N, 4) — for detecting new reveals
     const bool*    d_prev_seat_dead,          // (N, 4) — for detecting new deaths
+    const uint16_t* d_cm_direct_type,       // (N, 4, 120)
+    const bool*     d_cm_is_gongb,          // (N, 4, 120)
     // Belief tensor (in-place update)
     float*         d_belief               // (N, 4, 12, 289)
 );

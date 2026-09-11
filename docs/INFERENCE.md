@@ -164,25 +164,19 @@ On combat where either side was SILING:
   needed — the key just gets deleted. But we DO update remaining
   inventory: `remaining[observer][seat_dst] = {}` (everything dies).
 
-### R5. Landmine signatures
+### R5. Public landmine confirmation
 
-If the defender occupied a stronghold OR the event was KILLED on a
-previously-suspected back-row cell, combined with the resolved event, we
-may infer DILEI:
+The only automatic public confirmation of a surviving hidden enemy mine is
+`KILLED` plus the attacker's commander-death flag reveal. The attacker is
+publicly known to have been SILING, and only DILEI can survive that encounter.
+All observers set the defender's DILEI probability to one and retain the fact.
+Ordinary deaths, immobility, back-row position, and a player's private knowledge
+of its own mine do not trigger public confirmation. Existing private visibility
+of one's own pieces is unchanged.
 
-- If event = `KILLED` AND attacker's type is known to be NOT `GONGB` AND
-  attacker's strength is known ≥ `DILEI`'s pseudo-strength (only SILING
-  and `GONGB` can win vs DILEI, per RULES §5.2–5.4): then defender MUST
-  be DILEI OR a higher-rank piece that actually beat attacker. Closer:
-  any non-GONGB piece that died to a stationary piece at a back-row cell,
-  the stationary piece is either DILEI or a higher rank.
-  - Practical rule (conservative): if attacker rank was known ≥ PAIZH
-    (which cannot beat DILEI) and attacker died → defender's type ∈
-    {DILEI, or any piece higher than attacker}. Zero out all others.
-- If event = `EAT` AND attacker is known to be `GONGB` AND defender dies
-  → defender was DILEI (GONGB is the only piece that EATs DILEI).
-  Strictly: `belief[observer][dst_before][DILEI] = 1` (but dst is deleted).
-  Use inventory: decrement `remaining[observer][seat_dst][DILEI]` by 1.
+The durable source is the defender's DIRECT non-mutual commander-victim record;
+commander death is public under Q7. Chain-inherited victims are not direct
+victims and must never identify a later captor as another mine.
 
 ### R6. Triangle-mine stronghold deduction (Q6)
 
@@ -193,12 +187,18 @@ When a player eats a piece at a stronghold and the event is `EAT`:
 - Set `belief[observer][(other_stronghold_pos_of_seat_dst)][JUNQI] = 1`
   if that cell still holds a piece (it should; JUNQI never moves).
 
-### R7. GONGB signature
+### R7. Public GONGB confirmation
 
-If a piece eats a DILEI (determined by R5 inverse or by revealing
-defender's type via other paths), that piece is provably `GONGB`:
-- Set `belief[observer][dst_after][GONGB] = 1`.
-- Decrement `remaining[observer][seat_src][GONGB] -= 1`.
+A piece is publicly confirmed as GONGB by either:
+
+- a legal move that ordinary pieces cannot perform (engineer-only rail routing);
+- EAT of a mine already publicly confirmed by R5.
+
+Set the surviving attacker's GONGB belief to one for all observers and persist
+its public CombatMemory identity. A privately known mine being eaten does not
+trigger this rule. Identifying a living engineer does not subtract a dead piece
+from the live-inventory feature. Public mine/engineer identities override
+incompatible ordinary-rank bounds and contradictory not-GONGB markers.
 
 ### R8. Bomb confirmation
 

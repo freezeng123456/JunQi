@@ -102,7 +102,7 @@ _CH_MOVE_HISTORY_SIZE: Final[int] = 32  # src_dst_planes: 32-step history
 # Two layers, total 50 + 46 = 96 channels:
 #   Layer 1 (45 ch) projects state[observer][enemy_pid] to enemy alive cells.
 #   Layer 2 ( 5 ch) projects {state[opp_left] AND state[opp_right]} to my own
-#     alive cells (theory-of-mind; AND yields path-revealed-only knowledge).
+#     alive cells (theory-of-mind; AND yields public identity knowledge).
 #   Layer 3 (46 ch, ADR-129 v5 PR 2026-Q2) — finer per-pid identity tracking
 #     to let the network distinguish "killer K ate observer's slot-i piece"
 #     from "killer K ate slot-j piece" (the same multi-hot type alone hides
@@ -1271,7 +1271,7 @@ def _write_combat_memory(
     alive pieces.  Computed by AND-aggregating the two opponent
     observers' state — this filters to public-only information (DARK
     rule: any single-opponent fact may be from their own-seat
-    visibility, but AND of two opponents is path-revealed and chain
+    visibility, but AND of two opponents contains public identity and chain
     knowledge that crossed both, which is necessarily public).
 
     All channels are binary (0/1).
@@ -1422,7 +1422,7 @@ def _write_combat_memory(
                 ix = np.where(sel)[0]
                 out_my_kill_count_ge[k, my[ix], mx[ix]] = 1.0
 
-        # is_gongb (path-revealed iff BOTH opponents see it).
+        # is_gongb (public identity, shared by BOTH opponents).
         l_isg = cm.is_gongb[left_opp,  mpids]
         r_isg = cm.is_gongb[right_opp, mpids]
         public_isg = l_isg & r_isg

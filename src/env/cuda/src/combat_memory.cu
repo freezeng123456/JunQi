@@ -22,6 +22,7 @@ namespace junqi_cuda {
 // PieceType.value tags (mirror common.cuh / game_state.cu PT_* if any).
 // ---------------------------------------------------------------------------
 static constexpr int8_t CM_PT_DILEI = 3;
+static constexpr int8_t CM_PT_SILING = 5;
 static constexpr int8_t CM_PT_GONGB = 13;
 
 // Indexing helper: state[(obs, pid)] → flat (4×120).
@@ -233,6 +234,17 @@ __device__ void cm_apply_event_dev(
     }
     if (K < 0 || V < 0) return;
 
+    // A mine is public iff it directly survived a commander death (Q7).
+    // Direct SILING victim identity is public; chain inheritance is not proof.
+    if (is_eat) {
+        const uint16_t commander_bit = (uint16_t)1 << (CM_PT_SILING - 2);
+        bool public_mine = false;
+        for (int obs = 0; obs < CM_NUM_OBSERVERS_DEV; ++obs)
+            public_mine |= (cm.direct_type[cm_idx(obs, V)] & commander_bit) != 0;
+        if (public_mine)
+            cm_apply_path_revealed_gongb_dev(cm, K);  // same all-observer broadcast
+    }
+
     int8_t v_idx_t = cm_type_to_idx(V_type);   // -1 if not tracked
 
     // ---------- KILLED preflight: was the dead attacker (V) a known GONGB? ----------
@@ -339,9 +351,7 @@ __device__ void cm_apply_event_dev(
 
         // GONGB / not-GONGB flags.
         if (is_eat) {
-            if (V_type == CM_PT_DILEI) {
-                cm.is_gongb[kIdx] = true;       // A1
-            } else {
+            if (V_type != CM_PT_DILEI) {
                 cm.not_gongb[kIdx] = true;      // B1
             }
             // EAT direct floor lift on K.
@@ -364,6 +374,24 @@ __device__ void cm_apply_event_dev(
             // Note: we do NOT flag not_gongb here — defender could be DILEI.
         }
     }
+    // Do not propagate ordinary-rank bounds through a publicly known mine or
+    // retain not-GONGB on a publicly revealed engineer.
+    bool public_mine_k = false;
+    bool public_engineer_k = true;
+    for (int obs = 0; obs < CM_NUM_OBSERVERS_DEV; ++obs) {
+        int i = cm_idx(obs, K);
+        public_mine_k |= (cm.direct_type[i] & ((uint16_t)1 << (CM_PT_SILING - 2))) != 0;
+        public_engineer_k &= cm.is_gongb[i];
+    }
+    if (public_mine_k || public_engineer_k) {
+        for (int obs = 0; obs < CM_NUM_OBSERVERS_DEV; ++obs) {
+            int i = cm_idx(obs, K);
+            cm.rank_floor[i] = 0;
+            cm.rank_floor_step[i] = -1;
+            cm.not_gongb[i] = public_mine_k;
+        }
+    }
+
 }
 
 // ===========================================================================
@@ -620,7 +648,7 @@ __device__ void cm_write_channels_device(
             if (public_count >= 2) cm_set_plane(spatial, CH_CM_MY_KILL_COUNT_GE + 1, cx, cy);
             if (public_count >= 3) cm_set_plane(spatial, CH_CM_MY_KILL_COUNT_GE + 2, cx, cy);
 
-            // is_gongb: AND of two opponents (path-revealed only).
+            // is_gongb: AND of two opponents (public path or public-mine capture).
             if (cm_is_gongb_env[li] && cm_is_gongb_env[ri]) {
                 cm_set_plane(spatial, CH_CM_MY_IS_GONGB, cx, cy);
             }
