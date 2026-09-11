@@ -284,19 +284,8 @@ __device__ void cm_apply_event_dev(
         cm.chain_type[kIdx] |= cm.chain_type[vIdx];
         cm.last_chain_step[kIdx] = (int16_t)death_step;
 
-        // §8 chain rank-floor: K's floor ≥ V.floor + 1 (capped at 9).
-        int8_t v_floor = cm.rank_floor[vIdx];
-        if (v_floor > 0) {
-            int8_t prop = (int8_t)(v_floor + 1);
-            if (prop > 9) prop = 9;
-            int8_t cur = cm.rank_floor[kIdx];
-            if (prop > cur) {
-                cm.rank_floor[kIdx]      = prop;
-                cm.rank_floor_step[kIdx] = (int16_t)death_step;
-            }
-            // K can't be GONGB (chain-killed an ordinary).
-            cm.not_gongb[kIdx] = true;
-        }
+        // Keep causal history; do not infer transitive ordinary strength.
+
     }
 
     // ---------- v6 reverse projection (DARK-safe) ----------
@@ -349,31 +338,18 @@ __device__ void cm_apply_event_dev(
         }
         cm.last_direct_step[kIdx] = (int16_t)death_step;
 
-        // GONGB / not-GONGB flags.
-        if (is_eat) {
-            if (V_type != CM_PT_DILEI) {
-                cm.not_gongb[kIdx] = true;      // B1
+        // Only direct EAT of a known ordinary piece gives a strict rank
+        // bound. KILLED can mean a hidden mine; flag capture permits GONGB.
+        if (is_eat && cm_rank_of_type(V_type) > 0) {
+            cm.not_gongb[kIdx] = true;
+            int8_t prop = cm_next_floor_after_eat(V_type);
+            if (prop > cm.rank_floor[kIdx]) {
+                cm.rank_floor[kIdx] = prop;
+                cm.rank_floor_step[kIdx] = (int16_t)death_step;
             }
-            // EAT direct floor lift on K.
-            if (cm_rank_of_type(V_type) > 0) {
-                int8_t prop = cm_next_floor_after_eat(V_type);
-                if (prop > cm.rank_floor[kIdx]) {
-                    cm.rank_floor[kIdx]      = prop;
-                    cm.rank_floor_step[kIdx] = (int16_t)death_step;
-                }
-            }
-        } else {
-            // KILLED: V is the dead attacker; K (defender) survived.
-            if (cm_rank_of_type(V_type) > 0) {
-                int8_t prop = cm_next_floor_after_eat(V_type);
-                if (prop > cm.rank_floor[kIdx]) {
-                    cm.rank_floor[kIdx]      = prop;
-                    cm.rank_floor_step[kIdx] = (int16_t)death_step;
-                }
-            }
-            // Note: we do NOT flag not_gongb here — defender could be DILEI.
         }
     }
+
     // Do not propagate ordinary-rank bounds through a publicly known mine or
     // retain not-GONGB on a publicly revealed engineer.
     bool public_mine_k = false;

@@ -19,7 +19,7 @@ from junqi_core.observation import OBS_CHANNELS
 
 
 CHECKPOINT_FORMAT_VERSION = 2
-OBSERVATION_SEMANTICS_VERSION = 2
+OBSERVATION_SEMANTICS_VERSION = 3
 
 
 def current_checkpoint_metadata(policy: Module | None = None) -> dict[str, Any]:

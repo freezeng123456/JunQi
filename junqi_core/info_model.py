@@ -34,7 +34,7 @@ from typing import Final
 import numpy as np
 
 from .board import BOARD_SIZE, index_to_pos
-from .combat_memory import publicly_revealed_mines
+from .combat_memory import publicly_revealed_mines, is_publicly_revealed_mine
 from .rules import (
     ALL_PLACEABLE_PIECES,
     ALL_SEATS,
@@ -406,7 +406,17 @@ class BeliefTensor:
         # actual refresh is deferred until an observation build asks for
         # the data (ensure_synced), which saves ~100 µs per seat per
         # step when there is no concurrent obs build.
-        self._apply_public_identities(new_state)
+        # A step can only newly reveal its surviving destination piece. All
+        # other identity beliefs already persist; avoid four full-board scans.
+        survivor = new_state.pieces.get(dst)
+        if survivor is not None:
+            pid = survivor.piece_id
+            if event is Event.KILLED and is_publicly_revealed_mine(new_state.combat_memory, pid):
+                self.probs[dst] = one_hot(PieceType.DILEI)
+            else:
+                known = new_state.combat_memory.is_gongb
+                if known[0, pid] and known[1, pid] and known[2, pid] and known[3, pid]:
+                    self.probs[dst] = one_hot(PieceType.GONGB)
         self._dirty_state = new_state
 
     def _apply_public_identities(self, state: GameState) -> None:

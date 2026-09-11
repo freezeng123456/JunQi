@@ -75,18 +75,7 @@ __device__ __forceinline__ bool is_one_hot_12(const float* vec) {
     return mx > (1.0f - 1e-6f);
 }
 
-// Return the argmax of a 12-element belief vector.
-__device__ __forceinline__ int argmax_12(const float* vec) {
-    int best = 0;
-    float best_val = vec[0];
-    for (int i = 1; i < NUM_TRACKED_TYPES; ++i) {
-        if (vec[i] > best_val) {
-            best_val = vec[i];
-            best = i;
-        }
-    }
-    return best;
-}
+
 
 // Write a one-hot vector at belief[type_idx] = 1.0, rest = 0.
 __device__ __forceinline__ void write_one_hot(float* vec, int type_idx) {
@@ -402,6 +391,23 @@ __global__ void belief_update_kernel(
             }
         }
     }
+    // Compute each public identity once per environment, not independently
+    // in all four observer sweeps. The existing barrier publishes 120 bytes.
+    __shared__ int8_t s_public_identity[120];
+    if (tid < 120) {
+        s_public_identity[tid] = -1;
+        if (alive_e[tid]) {
+            bool mine = false;
+            bool engineer = true;
+            for (int witness = 0; witness < 4; ++witness) {
+                size_t ci = ((size_t)env * 4 + witness) * 120 + tid;
+                mine |= (d_cm_direct_type[ci] & ((uint16_t)1 << (PT_SILING - 2))) != 0;
+                engineer &= d_cm_is_gongb[ci];
+            }
+            if (mine || engineer)
+                s_public_identity[tid] = (mine ? PT_DILEI : PT_GONGB) - 2;
+        }
+    }
     __syncthreads();
 
     // =====================================================================
@@ -415,14 +421,12 @@ __global__ void belief_update_kernel(
     // =====================================================================
     if (tid < 4) {
         int obs = tid;  // observer seat
-        int obs_team = obs & 1;
 
-        // Temporary buffers for belief at src and dst before modification
-        float bel_src[12], bel_dst[12];
+        // Temporary buffer for source belief before modification
+        float bel_src[12];
 
-        // Read pre-update beliefs at src and dst cells
+        // Read pre-update belief at the source cell
         read_belief(d_belief, env, obs, s_src_flat, bel_src);
-        read_belief(d_belief, env, obs, s_dst_flat, bel_dst);
 
         // =================================================================
         // R1: Piece migration — move belief vectors based on event.
@@ -517,19 +521,11 @@ __global__ void belief_update_kernel(
                     zero_belief(d_belief, env, obs, c);
                 }
             } else {
-                // Apply persistent PUBLIC identities before conservative fallback.
-                // SILING direct victims imply a commander died alone here. Its
-                // identity was revealed by Q7; the survivor must be a mine.
-                bool public_mine = false;
-                bool public_engineer = true;
-                for (int witness = 0; witness < 4; ++witness) {
-                    size_t ci = ((size_t)env * 4 + witness) * 120 + pid_c;
-                    public_mine |= (d_cm_direct_type[ci] & ((uint16_t)1 << (PT_SILING - 2))) != 0;
-                    public_engineer &= d_cm_is_gongb[ci];
-                }
-                if (public_mine || public_engineer) {
+                // The public identity cache is shared by all observers.
+                int known_type = s_public_identity[pid_c];
+                if (known_type >= 0) {
                     float known[12];
-                    write_one_hot(known, (public_mine ? PT_DILEI : PT_GONGB) - 2);
+                    write_one_hot(known, known_type);
                     write_belief(d_belief, env, obs, c, known);
                     continue;
                 }

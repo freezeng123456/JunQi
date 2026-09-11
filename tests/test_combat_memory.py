@@ -100,12 +100,12 @@ class TestRule_B1_NotGongbOnEat:
 
 
 # ===========================================================================
-# 3. KILLED + ordinary attacker visible ⇒ floor lift on defender
+# 3. KILLED does not give an unconditional ordinary-rank bound
 # ===========================================================================
 
 
-class TestRule_KILLED_FloorLift:
-    def test_my_paizh_dies_attacking_lifts_floor_to_lianzh(self):
+class TestRule_KILLED_NoRankDeduction:
+    def test_my_paizh_dies_attacking_leaves_defender_rank_unknown(self):
         cm = CombatMemoryState.zeros()
         # SOUTH's PAIZH (pid=12) attacks WEST's piece (pid=37) and dies.
         # Attacker died → KILLED event. Defender 37 is in WEST's back-two-rows.
@@ -120,8 +120,8 @@ class TestRule_KILLED_FloorLift:
             death_step=20,
         )
         south = Seat.SOUTH.value
-        # SOUTH knows attacker (its own PAIZH) → floor lift on defender 37.
-        assert cm.rank_floor[south, 37] == 3   # LIANZH+
+        # SOUTH knows PAIZH died, but the hidden defender may be a mine.
+        assert cm.rank_floor[south, 37] == 0
         # Direct memory recorded for SOUTH (its piece died): PAIZH bit set.
         assert (cm.direct_ate_my_type_mask[south, 37] & _bit(PieceType.PAIZH)) != 0
         # WEST (defender's own seat) only sees direct_other_count.
@@ -210,8 +210,8 @@ class TestChainPropagation:
         # SOUTH's chain memory: 87 inherits PAIZH lineage (pid=12 + type bit).
         assert cm.chain_pid_lo[south, 87] & (np.uint64(1) << np.uint64(12))
         assert (cm.chain_ate_my_type_mask[south, 87] & _bit(PieceType.PAIZH)) != 0
-        # 87's rank_floor should be at least YINGZH+ (37 was LIANZH+, +1 = YINGZH+).
-        assert cm.rank_floor[south, 87] >= 4
+        # The causal chain is retained without assuming transitive strength.
+        assert cm.rank_floor[south, 87] == 0
         # Chain propagation works for all observers (chain_pid bitmap).
         for obs in (Seat.WEST.value, Seat.NORTH.value, Seat.EAST.value):
             # 87's chain bitmap includes 37 (the public victim_pid).

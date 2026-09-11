@@ -103,7 +103,7 @@
     "show_mode": "BRIGHT",
     "observer": "SOUTH",
     "hash_kind": "quantized_i32_1e6",
-    "sha256": "d3f35cd14fdca32fbac19022d9811ef8b50bd68069f79b2e5b2713b7fb4aad5b",
+    "sha256": "59bd6e0a54deb4a1d234a51b34f4e9022d7b9c3fa57dcdbd51bf78398c92c45b",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 21.0,
@@ -128,7 +128,7 @@
       "cm_kill_other_ge": 0.0,
       "cm_chain_type": 3.0,
       "cm_chain_ge": 6.0,
-      "cm_floor_ge": 10.0,
+      "cm_floor_ge": 3.0,
       "cm_is_gongb": 0.0,
       "cm_not_gongb": 1.0,
       "cm_dilei_candidate": 17.0,
@@ -137,7 +137,7 @@
       "cm_my_dilei_candidate": 9.0,
       "cm_kill_mine_count": 1.3333333730697632,
       "cm_kill_mine_slot": 4.0,
-      "cm_recency": 7.655172348022461,
+      "cm_recency": 6.219551086425781,
       "cm_eaten_by_pid": 6.0
     },
     "global_sums": {
@@ -152,7 +152,7 @@
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
     "hash_kind": "quantized_i32_1e6",
-    "sha256": "324892ef35573dc026a5aad83ba53891f71d0d2ecb62a0dfd2f16e5ba5a54bda",
+    "sha256": "9f3d1989631937e72dec06bcd71b1db53653a95dd1deb9426edc7e643d0d2e76",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 21.0,
@@ -177,7 +177,7 @@
       "cm_kill_other_ge": 0.0,
       "cm_chain_type": 3.0,
       "cm_chain_ge": 6.0,
-      "cm_floor_ge": 10.0,
+      "cm_floor_ge": 3.0,
       "cm_is_gongb": 0.0,
       "cm_not_gongb": 1.0,
       "cm_dilei_candidate": 17.0,
@@ -186,7 +186,7 @@
       "cm_my_dilei_candidate": 9.0,
       "cm_kill_mine_count": 1.3333333730697632,
       "cm_kill_mine_slot": 4.0,
-      "cm_recency": 7.655172348022461,
+      "cm_recency": 6.219551086425781,
       "cm_eaten_by_pid": 6.0
     },
     "global_sums": {
@@ -299,7 +299,7 @@
     "show_mode": "BRIGHT",
     "observer": "SOUTH",
     "hash_kind": "quantized_i32_1e6",
-    "sha256": "a7b07b03d7fd51a4689b482614dab4dc0c2df556fc06c39c595d3738d85871d3",
+    "sha256": "97003034547e27d5711941fd00869c7ab153b7a5b1872f2eee2349efa35dc5d1",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 20.0,
@@ -324,7 +324,7 @@
       "cm_kill_other_ge": 1.0,
       "cm_chain_type": 2.0,
       "cm_chain_ge": 3.0,
-      "cm_floor_ge": 4.0,
+      "cm_floor_ge": 2.0,
       "cm_is_gongb": 1.0,
       "cm_not_gongb": 1.0,
       "cm_dilei_candidate": 18.0,
@@ -333,7 +333,7 @@
       "cm_my_dilei_candidate": 8.0,
       "cm_kill_mine_count": 0.6666666865348816,
       "cm_kill_mine_slot": 2.0,
-      "cm_recency": 5.273711204528809,
+      "cm_recency": 4.6229987144470215,
       "cm_eaten_by_pid": 5.0
     },
     "global_sums": {
@@ -348,7 +348,7 @@
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
     "hash_kind": "quantized_i32_1e6",
-    "sha256": "9ed0db2556e3441624a8a0c5d0d4c079529a873f264ee7df87450600cdb37e90",
+    "sha256": "4629747413642a4d284506cdf114184994e41e8be23857243696f1ba33d67e54",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 20.0,
@@ -373,7 +373,7 @@
       "cm_kill_other_ge": 1.0,
       "cm_chain_type": 2.0,
       "cm_chain_ge": 3.0,
-      "cm_floor_ge": 4.0,
+      "cm_floor_ge": 2.0,
       "cm_is_gongb": 1.0,
       "cm_not_gongb": 1.0,
       "cm_dilei_candidate": 18.0,
@@ -382,7 +382,7 @@
       "cm_my_dilei_candidate": 8.0,
       "cm_kill_mine_count": 0.6666666865348816,
       "cm_kill_mine_slot": 2.0,
-      "cm_recency": 5.273711204528809,
+      "cm_recency": 4.6229987144470215,
       "cm_eaten_by_pid": 5.0
     },
     "global_sums": {

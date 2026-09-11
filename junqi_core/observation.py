@@ -172,7 +172,7 @@ def _layout_slices() -> dict[str, slice]:
         ("dead_at_zero", _CH_DEAD_AT_ZERO_SIZE),
         ("piece_slot", _CH_PIECE_SLOT_SIZE),
         ("move_history", _CH_MOVE_HISTORY_SIZE),
-        # ---- CombatMemory v4 tail (50 ch); pre-CM indices [0, 256) preserved ----
+        # ---- CombatMemory v4 tail (50 ch); pre-CM indices [0, 161) preserved ----
         # Layer 1 (45 ch) — projected to enemy alive pieces.
         ("cm_kill_mine_type", _CH_CM_KILL_MINE_TYPE_SIZE),
         ("cm_kill_mine_ge", _CH_CM_KILL_MINE_GE_SIZE),
@@ -1643,7 +1643,8 @@ def _write_global_features(
 
     left_base = GLOBAL_LAYOUT["remaining_left_side"].start
     right_base = GLOBAL_LAYOUT["remaining_right_side"].start
-    belief.ensure_synced(state)
+    # The builder already synchronized this state; only refresh if dirty.
+    belief.ensure_synced()
     for base, seat in ((left_base, left_val), (right_base, right_val)):
         live = state.alive & (state.piece_seat_arr == seat)
         out[base:base + NUM_TRACKED_TYPES] = belief.probs_arr[live].sum(axis=0)
