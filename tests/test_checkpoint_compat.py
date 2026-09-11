@@ -62,3 +62,17 @@ def test_checkpoint_metadata_mismatch_is_rejected() -> None:
             net,
             {"policy": net.state_dict(), "checkpoint_meta": metadata},
         )
+
+
+def test_observation_semantics_mismatch_is_rejected():
+    net = _tiny_net()
+    metadata = current_checkpoint_metadata(net)
+    metadata["observation_semantics_version"] = 0
+    with pytest.raises(ValueError, match="observation_semantics_version"):
+        validate_policy_checkpoint(net, {"policy": net.state_dict(), "checkpoint_meta": metadata})
+
+
+def test_unversioned_weights_report_semantic_uncertainty():
+    net = _tiny_net()
+    with pytest.warns(UserWarning, match="does not reproduce"):
+        validate_policy_checkpoint(net, {"policy": net.state_dict()})

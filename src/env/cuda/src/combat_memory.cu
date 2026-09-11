@@ -625,10 +625,10 @@ __device__ void cm_write_channels_device(
                 cm_set_plane(spatial, CH_CM_MY_IS_GONGB, cx, cy);
             }
 
-            // dilei_candidate: alive ∧ at_zero ∧ in_back ∧ ¬(any opponent saw a known-GONGB attack).
+            // dilei_candidate: alive ∧ at_zero ∧ in_back ∧ ¬(both opponents saw a known-GONGB attack).
             int16_t zf = (int16_t)zero_y_env[pid] * 17 + (int16_t)zero_x_env[pid];
             bool public_atk = cm_attacked_by_known_gongb_env[li]
-                           || cm_attacked_by_known_gongb_env[ri];
+                           && cm_attacked_by_known_gongb_env[ri];
             if (zero_x_env[pid] >= 0 && zero_y_env[pid] >= 0
                 && cm_in_back_two_rows(zf, pseat)
                 && move_count_env[pid] == 0

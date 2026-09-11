@@ -506,6 +506,8 @@ class GpuRollout:
         mixed_own_team_styles: tuple[str, ...] = ("T",),
         max_num_moves: int | None = None,
     ) -> None:
+        if show_mode is not ShowMode.DARK:
+            raise ValueError("GpuRollout native beliefs currently support DARK only")
         if not _CUDA_AVAILABLE:
             raise ImportError(
                 "junqi_cuda extension is not available. "
@@ -787,7 +789,7 @@ class GpuRollout:
         Parameters
         ----------
         canonical_actions : torch.cuda.IntTensor (N,)
-            Actions in canonical frame (src_can * 289 + dst_can).
+            Compact actions in canonical frame (src_compact * 129 + dst_compact).
         acting_seats : torch.cuda.ByteTensor or int8 (N,)
             Per-env acting seat value (0-3).
 

@@ -202,3 +202,11 @@ def test_all_tracked_training_configs_remain_compatible() -> None:
             load_config(_args(path))
         except (TypeError, ValueError) as exc:
             pytest.fail(f"{path.relative_to(ROOT)}: {exc}")
+
+
+def test_training_visibility_is_explicit_and_serialized():
+    cfg = load_config(_args(ROOT / 'configs' / 'iteration_baseline.yaml'))
+    assert _dataclass_to_dict(cfg)['env']['show_mode'] == 'DARK'
+    cfg.env.show_mode = 'HALF_DARK'
+    with pytest.raises(ValueError, match='show_mode=DARK'):
+        validate_config(cfg)

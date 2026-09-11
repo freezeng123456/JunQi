@@ -541,11 +541,10 @@ __global__ void belief_update_kernel(
                     // Missing belief entry — provide a fallback.
                     int8_t ps = seat_arr[pid_c];
                     int8_t pt = type_arr[pid_c];
-                    int p_team = ps & 1;
                     int type_idx = (pt >= 2 && pt <= 13) ? (pt - 2) : -1;
 
-                    if (obs_team == p_team && type_idx >= 0) {
-                        // Own/teammate: one-hot
+                    if (obs == ps && type_idx >= 0) {
+                        // DARK mode: only the observer's own pieces are known
                         float oh[12];
                         write_one_hot(oh, type_idx);
                         write_belief(d_belief, env, obs, c, oh);

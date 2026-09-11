@@ -295,8 +295,8 @@ def test_canonical_symmetry_across_4_seats() -> None:
 # ===========================================================================
 
 
-def test_global_remaining_counts_match_piece_counts() -> None:
-    """Fresh opening: every enemy has PIECE_COUNTS-matching inventory."""
+def test_global_remaining_counts_match_live_belief() -> None:
+    """Expected counts sum live posterior mass, as on CUDA."""
     st = _random_opening()
     obs = _obs_for(st, Seat.SOUTH)
 
@@ -305,11 +305,14 @@ def test_global_remaining_counts_match_piece_counts() -> None:
     assert left.shape == (NUM_TRACKED_TYPES,)
     assert right.shape == (NUM_TRACKED_TYPES,)
 
-    expected = np.array(
-        [float(PIECE_COUNTS[t]) for t in TRACKED_TYPES], dtype=np.float32
-    )
-    assert np.array_equal(left, expected)
-    assert np.array_equal(right, expected)
+    belief = BeliefTensor.initial(st, Seat.SOUTH)
+    for actual, seat in ((left, Seat.SOUTH.left_side_enemy),
+                         (right, Seat.SOUTH.right_side_enemy)):
+        expected = sum((belief.probs[pos] for pos, piece in st.pieces.items()
+                        if piece.seat is seat), np.zeros(NUM_TRACKED_TYPES))
+        np.testing.assert_allclose(actual, expected, rtol=1e-6)
+        assert actual.sum() == pytest.approx(25.0)
+
 
 
 def test_global_flag_revealed_scalars_zero_at_opening() -> None:

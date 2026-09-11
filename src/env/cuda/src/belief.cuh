@@ -12,8 +12,8 @@
  *   289 = flat board cells (17×17)
  *
  * The belief at [env, obs, type, cell] is the observer's posterior probability
- * that the piece at `cell` is of `type`.  Own/teammate pieces are always
- * one-hot (known); enemy pieces carry a non-degenerate distribution.
+ * that the piece at `cell` is of `type`.  In native DARK rollout, own pieces are
+ * one-hot; teammate and enemy pieces start with slot priors.
  */
 
 #pragma once
@@ -26,7 +26,7 @@ namespace junqi_cuda {
 // Forward declaration — full definition lives in junqi_cuda.h / game_state.cu.
 struct DeviceGameStateBatch;
 
-// Per-slot prior table for enemy piece initialization (HALF_DARK mode).
+// Per-slot prior table for hidden piece initialization (DARK mode).
 // Indexed [slot_in_seat * 12 + type_idx].  Camp slots are all-zero.
 // Uploaded once at startup via upload_belief_prior_table().
 extern __constant__ float BELIEF_PRIOR_TABLE[30 * 12];
@@ -41,8 +41,8 @@ extern __constant__ int16_t SEAT_STRONGHOLDS[4 * 2];
 // Called AFTER reset_terminated_envs_kernel has written fresh piece arrays.
 // For each terminated env (just reset):
 //   - For each observer seat, iterate over all 120 pieces:
-//     * Own/teammate pieces → one-hot (type known under HALF_DARK)
-//     * Enemy pieces → per-slot prior from BELIEF_PRIOR_TABLE
+//     * Own pieces → one-hot (DARK mode)
+//     * Teammate/enemy pieces → per-slot prior from BELIEF_PRIOR_TABLE
 //     * Dead/camp pieces → zero
 //
 // Grid: (num_envs,)  Block: 128 threads

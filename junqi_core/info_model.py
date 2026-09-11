@@ -316,7 +316,9 @@ class BeliefTensor:
         if (
             event is Event.EAT
             and prev_dst_piece is not None
-            and prev_dst_piece.piece_type is PieceType.DILEI
+            and defender_belief is not None
+            and _is_one_hot(defender_belief)
+            and defender_belief[TRACKED_TYPES.index(PieceType.DILEI)] == 1.0
             and attacker_belief is not None
             and not _is_one_hot(attacker_belief)
         ):

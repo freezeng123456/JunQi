@@ -82,7 +82,8 @@ def eval_head_to_head(
     first_policy.eval()
     second_policy.eval()
     n = min(16, num_games)
-    env = VectorJunqiEnv(num_envs=n, max_num_moves=max_steps)
+    from junqi_core.rules import ShowMode
+    env = VectorJunqiEnv(num_envs=n, max_num_moves=max_steps, show_mode=ShowMode.DARK)
     obs_sp, obs_gl = env.reset(seed_base=seed_base)
     next_game_id = n
     active = np.ones(n, dtype=bool)

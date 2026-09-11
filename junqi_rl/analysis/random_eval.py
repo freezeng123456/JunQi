@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
+from junqi_core.rules import ShowMode
 from junqi_rl.analysis.protocol import EvaluationCounts, merge_evaluations
 
 if TYPE_CHECKING:
@@ -57,6 +58,7 @@ def evaluate_vs_random_gpu(
     if cache_key not in _GPU_ROLLOUT_CACHE:
         _GPU_ROLLOUT_CACHE[cache_key] = GpuRollout(
             num_envs=batch_size,
+            show_mode=ShowMode.DARK,
             device_id=device_id,
             max_num_moves=max_moves,
         )
@@ -167,7 +169,7 @@ def evaluate_vs_random_cpu(
     dev = torch.device(device)
     policy.eval()
     batch_size = min(num_envs, num_games)
-    env = VectorJunqiEnv(num_envs=batch_size, max_num_moves=max_moves)
+    env = VectorJunqiEnv(num_envs=batch_size, max_num_moves=max_moves, show_mode=ShowMode.DARK)
     obs_spatial, obs_global = env.reset(seed_base=seed)
     rng = np.random.default_rng(seed)
     next_game_id = batch_size
@@ -344,6 +346,7 @@ def evaluate_head_to_head_gpu(
     if cache_key not in _GPU_ROLLOUT_CACHE:
         _GPU_ROLLOUT_CACHE[cache_key] = GpuRollout(
             num_envs=batch_size,
+            show_mode=ShowMode.DARK,
             device_id=device_id,
             max_num_moves=max_moves,
         )

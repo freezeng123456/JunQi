@@ -435,6 +435,8 @@ __global__ void observation_kernel(
             // ch 93..104 : death_reason (3 me + 3 teammate + 3 left + 3 right)
             int16_t dloc = death_loc[p];
             int8_t  dr   = death_reason[p];
+            // A hidden defender's private type is not part of KILLED.
+            if (show_mode != 0 && dr == 1) dr = 0;
             if (dloc >= 0 && dr >= 0 && dr <= 2) {
                 int dxw = (int)(dloc % BOARD_SIZE);
                 int dyw = (int)(dloc / BOARD_SIZE);

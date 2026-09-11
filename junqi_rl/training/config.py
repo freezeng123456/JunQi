@@ -28,6 +28,7 @@ class EnvConfig:
     max_num_moves: int = 4000
     seed: int = 42
     use_gpu_rollout: bool = False
+    show_mode: str = "DARK"
 
 
 @dataclass
@@ -280,6 +281,8 @@ _NON_CONFIG_ARGS = {"config", "extra", "resume_cli", "validate_only"}
 
 def validate_config(cfg: TrainConfig) -> None:
     """Fail before allocating models when a configuration is inconsistent."""
+    if cfg.env.show_mode != "DARK":
+        raise ValueError("training and evaluation currently support env.show_mode=DARK only")
 
     positive = {
         "env.num_envs": cfg.env.num_envs,

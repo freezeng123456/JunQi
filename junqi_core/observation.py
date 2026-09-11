@@ -1115,7 +1115,8 @@ def _write_death_reason(
     Planes  6- 8: left-side enemy
     Planes  9-11: right-side enemy
 
-    Each group has 3 planes for DeathReason: KILLED_BY_ENEMY / HIT_MINE_OR_BOMB / MUTUAL.
+    BRIGHT: KILLED_BY_ENEMY / HIT_MINE_OR_BOMB / MUTUAL.
+    Hidden modes: non-mutual / reserved zero / mutual; private causes stay in state.
     Anchored at the world-frame death location.
     """
     if not state.deaths:
@@ -1127,6 +1128,10 @@ def _write_death_reason(
     if pids.size == 0:
         return
     reason_vals = state.death_reason_arr[pids]
+    # Hidden defender identities cannot be recovered from a public KILLED event.
+    # Keep the private cause in GameState; expose only non-mutual versus mutual.
+    if state.show_mode is not ShowMode.BRIGHT:
+        reason_vals = np.where(reason_vals == 1, 0, reason_vals)
     step_vals = state.death_step_arr[pids]
     seat_vals = state.piece_seat_arr[pids]
     flat = state.death_loc_flat_arr[pids]
@@ -1425,13 +1430,11 @@ def _write_combat_memory(
             ix = np.where(public_isg)[0]
             out_my_is_gongb[0, my[ix], mx[ix]] = 1.0
 
-        # dilei_candidate from opponents' AND.  Uses ``attacked_by_known_gongb``
-        # — if either opponent has seen a known-GONGB attack on me, the AND
-        # includes that fact (i.e. NOT both → not_attacked = OR).  But for
-        # candidate we want "neither opponent knows of a GONGB attack".
+        # Only knowledge shared by both opponents can be treated as public.
+        # The attacker's owner knowing its private type is not a public reveal.
         l_atk = cm.attacked_by_known_gongb[left_opp,  mpids]
         r_atk = cm.attacked_by_known_gongb[right_opp, mpids]
-        public_attacked_by_gongb = l_atk | r_atk  # if any opponent saw it, info is public
+        public_attacked_by_gongb = l_atk & r_atk
         zero_x = state.zero_x[mpids]
         zero_y = state.zero_y[mpids]
         mc = state.move_count_arr[mpids]
@@ -1631,17 +1634,19 @@ def _write_global_features(
     ``order_vals`` = ``(me, teammate, left_side_enemy, right_side_enemy)``
     pre-computed by :meth:`ObservationBuilder.build`.
 
-    Phase 0.4 M3 (ADR-120): vectorized.  Reads
-    ``belief.remaining_arr[(4, 12)]`` directly (one slice per side) and
-    ``state.seat_flag_revealed_arr`` for the 4 flag-reveal scalars.
+    Sum the observer's belief mass over surviving pieces, matching CUDA.
+    Internal unrevealed-inventory counters are not live-piece counts.
+    Read ``state.seat_flag_revealed_arr`` for the 4 flag-reveal scalars.
     """
     left_val = order_vals[2]
     right_val = order_vals[3]
 
     left_base = GLOBAL_LAYOUT["remaining_left_side"].start
     right_base = GLOBAL_LAYOUT["remaining_right_side"].start
-    out[left_base:left_base + NUM_TRACKED_TYPES] = belief.remaining_arr[left_val]
-    out[right_base:right_base + NUM_TRACKED_TYPES] = belief.remaining_arr[right_val]
+    belief.ensure_synced(state)
+    for base, seat in ((left_base, left_val), (right_base, right_val)):
+        live = state.alive & (state.piece_seat_arr == seat)
+        out[base:base + NUM_TRACKED_TYPES] = belief.probs_arr[live].sum(axis=0)
 
     flag_base = GLOBAL_LAYOUT["flag_revealed"].start
     fr = state.seat_flag_revealed_arr

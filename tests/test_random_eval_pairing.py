@@ -63,6 +63,8 @@ def test_cpu_unique_game_seeds(monkeypatch, head_to_head, team):
     original_step = JunqiEnv._step_game_only
 
     def reset(self, *args, **kwargs):
+        from junqi_core.rules import ShowMode
+        assert self.show_mode is ShowMode.DARK
         self._test_seed = kwargs.get("seed")
         started.append(self._test_seed)
         self.max_num_moves = 1 + self._test_seed % 3

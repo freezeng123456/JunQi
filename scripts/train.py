@@ -401,6 +401,8 @@ def train(cfg: TrainConfig) -> None:
                   f"Consider lowering ppo.lr_decay or raising ppo.lr_floor.")
 
     # ---- Environments ----
+    from junqi_core.rules import ShowMode
+    show_mode = ShowMode[cfg.env.show_mode]
     if cfg.env.use_gpu_rollout:
         from junqi_rl.gpu_rollout import GpuRollout
         # Each rank pins its GpuRollout to its own GPU. Without this, every
@@ -417,6 +419,7 @@ def train(cfg: TrainConfig) -> None:
         mixed_own_team_styles = tuple(cfg.mixed_own_team_styles)
         env = GpuRollout(
             num_envs=cfg.env.num_envs,
+            show_mode=show_mode,
             device_id=env_device_id,
             canonical_setup_styles=canonical_styles,
             mixed_setup=mixed_setup,
@@ -437,6 +440,7 @@ def train(cfg: TrainConfig) -> None:
     else:
         env = VectorJunqiEnv(
             num_envs=cfg.env.num_envs,
+            show_mode=show_mode,
             max_num_moves=cfg.env.max_num_moves,
         )
         if is_rank0:

@@ -267,3 +267,24 @@ def test_gpu_evaluation_honors_move_limit_and_cache():
             assert metrics[f"{prefix}/draw_rate"] == 1
             assert metrics[f"{prefix}/ongoing_rate"] == 0
             assert metrics[f"{prefix}/avg_game_len"] == limit
+
+
+def test_dark_missing_belief_fallback_keeps_teammate_unknown():
+    """Exercise native I5 recovery, not CPU-uploaded posterior parity."""
+    import torch
+    from junqi_core.observation import CHANNEL_LAYOUT
+
+    rollout = GpuRollout(num_envs=1)
+    rollout.reset(seed_base=42)
+    rollout.upload_beliefs(np.zeros((1, 4, 12, 289), dtype=np.float32))
+    acting = rollout.turn_torch().clone()
+    mask = rollout.legal_mask_canonical_torch_device(acting)
+    # Policy masks and device stepping both use canonical compact IDs.
+    action_id = int(mask[0].nonzero()[0, 0].item())
+    result = rollout.step_device_torch(torch.tensor([action_id], dtype=torch.int32, device='cuda'), acting)
+    rollout.update_beliefs_device(result, acting)
+    spatial, _ = rollout.build_all_seat_observations()
+    teammate = spatial[0, 0, CHANNEL_LAYOUT['prob_teammate']]
+    occupied = teammate.sum(axis=0) > 0
+    assert occupied.any()
+    assert np.all(teammate[:, occupied].max(axis=0) < 1.0)
