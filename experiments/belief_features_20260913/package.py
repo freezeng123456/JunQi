@@ -36,7 +36,8 @@ def package(root, output):
     for name in ('historical_vs_random_audit.json', 'phase_a_config_validation.log',
                  'phase_a_initializer_validation.log', 'source_inputs/phase_a_initializer_v4.pt',
                  'source_inputs/phase_a_initializer_v4.json', 'recovery_policy_status.json',
-                 'run_current_gpu.py', 'recover_policy_results.py'):
+                 'run_current_gpu.py', 'recover_policy_results.py', 'finalize_policy.py',
+                 'policy_analysis_stage.json'):
         path = root / name
         assert path.is_file(), path
         files.append(path)
