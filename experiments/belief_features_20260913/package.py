@@ -18,7 +18,7 @@ def package(root, output):
     assert not source.exists(), source
     subprocess.run(['git', 'bundle', 'create', str(source), 'HEAD'], check=True)
     files = [source]
-    for name in ('analysis_final', 'analysis_training', 'analysis_scale', 'analysis_early'):
+    for name in ('analysis_final', 'analysis_training', 'analysis_scale', 'analysis_early', 'analysis_policy'):
         files.extend(sorted((root / name).glob('*')))
     for name in ('dataset_audit.json', 'ambiguity_probe.json', 'opening_prior.json',
                  'tabular_diagnostics.json', 'recovery_status.json', 'recovery_scale_status.json',
@@ -33,6 +33,17 @@ def package(root, output):
         path = root / name
         assert path.is_file(), path
         files.append(path)
+    for name in ('historical_vs_random_audit.json', 'phase_a_config_validation.log',
+                 'phase_a_initializer_validation.log', 'source_inputs/phase_a_initializer_v4.pt',
+                 'source_inputs/phase_a_initializer_v4.json', 'recovery_policy_status.json',
+                 'run_current_gpu.py', 'recover_policy_results.py'):
+        path = root / name
+        assert path.is_file(), path
+        files.append(path)
+    for backend in ('cpu', 'gpu'):
+        for role in 'AB':
+            files.extend(path for path in sorted((root / f'current_{backend}_{role}').rglob('*'))
+                         if path.is_file())
     for prefix in ('training', 'scale', 'diagnostics', 'early'):
         for role in 'AB':
             folder = root / f'{prefix}_{role}'

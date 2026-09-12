@@ -45,6 +45,34 @@ def make_report(root, result):
     sections = ['# BeliefNet 公开特征与可学习性实验报告',
         '实验日期：2026-09-13。两台 H20；参数 EMA 全程关闭。所有数值来自完整运行、回收到本地并通过 SHA-256 校验的结果。']
 
+    policy_rows = []
+    for backend, label in [('cpu', 'CPU / FP32 / 新 512 局'), ('gpu', 'GPU / BF16 / 新 2,048 局')]:
+        path = root / f'analysis_policy/current_{backend}.json'
+        if not path.exists():
+            continue
+        policy_result = read(path)
+        assert policy_result['status'] == 'all_paired_policy_results_verified'
+        for role, name in [('A', '当前采样策略 guarded_s501'), ('B', '原始策略 ckpt_001000，在 v4 输入下复测')]:
+            run = policy_result['runs'][role]
+            m = run['summary']['metrics']
+            policy_rows.append([label, name, int(m['eval/wins']), int(m['eval/losses']),
+                                int(m['eval/draws']), int(m['eval/ongoing']),
+                                f"{m['eval/win_rate'] * 100:.4f}%",
+                                f"{run['both_teams_won_pairs']}/{run['independent_setup_pairs']}"])
+    if policy_rows:
+        sections += ['## 优先目标：对均匀随机对手的实际胜率',
+            table(['测试', '权重', '胜', '负', '和', '未完成', '胜率', '双方均胜的布阵对'], policy_rows),
+            '以上独立复测均只使用原始行棋参数和当前公开规则观测，不接入学习型 BeliefNet 或 EMA。'
+            '两份策略在同一后端使用完全相同的布阵、随机种子及换边协议，逐局布阵哈希已核对。'
+            'CPU 与 GPU 使用不同的测试种子及随机数流，数值精度也不同；有限测试集全胜不代表任意新局面都必胜。',
+            '旧观测 v3 的独立结果是 512/512 胜；旧训练最后的另一组监控结果是 127/128 胜。'
+            '这些历史结果与当前 v4 复测分开保留，不能只挑选全胜记录。'
+            '原始 ckpt_001000 的本轮测试明确保持权重不变、改用当前输入；没有改写旧检查点。',
+            'Ataraxos 的训练顺序也是先得到最终行棋与布阵策略，再训练供搜索使用的 belief。'
+            '本项目因此优先稳定策略，同时完成以下离线特征对照；延后接入 BeliefNet 不等于取消公开规则推理。'
+            '[论文 §2.5](https://arxiv.org/html/2511.07312v1#S2.SS5)；'
+            '本地阶段配置与候选初始化已验证，但准备工作本身不算新增训练结果。']
+
     opening = []
     for arm in ('temporal', 'relational'):
         a = primary['paired_comparisons'][arm]['test']['nll']
@@ -74,7 +102,7 @@ def make_report(root, result):
                for label, report in [('主实验', primary), ('扩充数据复核', expanded)]]),
         '训练批量为 256，Adam 学习率 5e-5，梯度裁剪 0.5，dropout 0.1，BF16 前向、FP32 概率与损失。每 500 步在独立验证集比较 NLL，选择最优原始参数；测试集不参与优化和 checkpoint 选择。训练目标是公开规则候选集合内、仍有歧义的存活敌方棋子身份交叉熵。没有 belief PPO 项或在线策略联训。',
         '本轮在公开规则允许的类型集合内归一化概率，且只统计仍有歧义的存活敌棋；与此前联合训练路径直接对 12 类 logits 做 log-softmax 的原始交叉熵口径不同。不能把两个任务的损失数值直接横向比较。',
-        '采样策略采用上一轮 guarded_s501 checkpoint 的原始 policy 参数，并在本轮全程冻结。所有 BeliefNet 均从零初始化，不复用该历史文件中的 belief 或 EMA 参数。该固定策略只用于生成本轮数据，本轮没有重新证明它的棋力或对强对手的代表性；来源、哈希与保留文件见 source_inputs/SOURCE_INPUTS.json。']
+        '采样策略采用上一轮 guarded_s501 checkpoint 的原始 policy 参数，并在本轮全程冻结。所有 BeliefNet 均从零初始化，不复用该历史文件中的 belief 或 EMA 参数。特征对照中该固定策略只用于生成数据；另行对随机对手的复测见前文，这仍不能证明对强对手的代表性。来源、哈希与保留文件见 source_inputs/SOURCE_INPUTS.json。']
 
     for title, prefix, report in [('1,024 个独立训练对局：主实验', 'training', primary),
                                    ('5,120 个独立训练对局：探索性复核', 'scale', expanded)]:
@@ -222,7 +250,7 @@ def make_report(root, result):
             ['保存模型诊断', '0c10407d1c58e3cd5888facb46b49e093c5c1a93'],
             ['汇总分析', result['analysis_commit']]]),
         'A 的训练硬截止为北京时间 08:20，B 为 09:20，分别比释放时间提前 40 分钟。启动时一次性计算截止计时器；阶段衔接和本地回收只响应完成标记。本轮代码和结果保留在本地，没有推送 GitHub。',
-        '尚未验证：将新特征接回在线 belief／策略联合训练后的稳定性、搜索价值或实际胜率；所有长局面和对手分布；全局联合隐藏布局的建模收益。本轮结果只支持固定策略生成数据上的离线条件身份预测结论。',
+        '尚未验证：将新特征接回在线 belief／策略联合训练后的稳定性、搜索价值或实际胜率；所有长局面和对手分布；全局联合隐藏布局的建模收益。本轮特征对照只支持固定策略生成数据上的离线条件身份预测结论，前文原始行棋策略复测不能归因于新特征。',
         '逐种子与逐对局统计见 [完整汇总](synthesis.json)、[主实验明细](../analysis_training/analysis.json)、'
         '[扩充实验明细](../analysis_scale/analysis.json)；协议见同目录 PROTOCOL.md。']
     return '\n\n'.join(sections) + '\n'
