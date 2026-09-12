@@ -66,7 +66,8 @@ def make_report(root, result):
                 else '存在差异：详见 analysis.json，不能声称完全一致']
                for label, report in [('主实验', primary), ('扩充数据复核', expanded)]]),
         '训练批量为 256，Adam 学习率 5e-5，梯度裁剪 0.5，dropout 0.1，BF16 前向、FP32 概率与损失。每 500 步在独立验证集比较 NLL，选择最优原始参数；测试集不参与优化和 checkpoint 选择。训练目标是公开规则候选集合内、仍有歧义的存活敌方棋子身份交叉熵。没有 belief PPO 项或在线策略联训。',
-        '本轮在公开规则允许的类型集合内归一化概率，且只统计仍有歧义的存活敌棋；与此前联合训练路径直接对 12 类 logits 做 log-softmax 的原始交叉熵口径不同。不能把两个任务的损失数值直接横向比较。']
+        '本轮在公开规则允许的类型集合内归一化概率，且只统计仍有歧义的存活敌棋；与此前联合训练路径直接对 12 类 logits 做 log-softmax 的原始交叉熵口径不同。不能把两个任务的损失数值直接横向比较。',
+        '采样策略采用上一轮 guarded_s501 checkpoint 的原始 policy 参数，并在本轮全程冻结。所有 BeliefNet 均从零初始化，不复用该历史文件中的 belief 或 EMA 参数。该固定策略只用于生成本轮数据，本轮没有重新证明它的棋力或对强对手的代表性；来源、哈希与保留文件见 source_inputs/SOURCE_INPUTS.json。']
 
     for title, prefix, report in [('1,024 个独立训练对局：主实验', 'training', primary),
                                    ('5,120 个独立训练对局：探索性复核', 'scale', expanded)]:

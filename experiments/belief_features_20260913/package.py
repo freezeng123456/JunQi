@@ -27,7 +27,9 @@ def package(root, output):
                  'main_provenance_A.json', 'main_provenance_B.json',
                  'remote_completion_A.json', 'remote_completion_B.json',
                  'run_main.py', 'run_expanded.py', 'expanded_stages.py',
-                 'run_diagnostics_v2.py', 'verify_remote_completion.py'):
+                 'run_diagnostics_v2.py', 'verify_remote_completion.py',
+                 'source_inputs/SOURCE_INPUTS.json', 'source_inputs/frozen_policy_v4.pt',
+                 'junqi_cuda.cpython-312-x86_64-linux-gnu.so', 'native-inputs.sha256', 'runtime-deps.tgz'):
         path = root / name
         assert path.is_file(), path
         files.append(path)
@@ -48,7 +50,7 @@ def package(root, output):
         '# BeliefNet 公开特征实验交付包\n\n'
         '请先阅读 analysis_final/REPORT.md。图、完整逐种子统计、协议、运行配置、日志、'
         '诊断与源代码 bundle 均包含在本包。\n\n'
-        '大体积原始数据和 best.pt／last.pt 不重复放入本包，已分别完整保存在本地 '
+        '数据生成用的冻结策略、对应原生扩展及源代码包含在本包。大体积原始数据和 best.pt／last.pt 不重复放入本包，已分别完整保存在本地 '
         + str(root) + ' 下的 data_main、data_expanded、training_A/B、scale_A/B。'
         '对应原始文件哈希保留在各目录 artifacts.sha256 或数据元信息中；'
         '这些原始清单包含未装入 ZIP 的大文件，不能直接作为 ZIP 文件清单验证。\n\n'
