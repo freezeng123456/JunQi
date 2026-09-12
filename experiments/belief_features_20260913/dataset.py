@@ -157,6 +157,7 @@ def main():
     p.add_argument('--smoke',action='store_true')
     p.add_argument('--cohorts',nargs='+')
     p.add_argument('--status-suffix',default='')
+    p.add_argument('--extra-train-cohorts',type=int,default=0)
     args=p.parse_args()
     root=Path(args.output); root.mkdir(parents=True,exist_ok=True)
     status_name=f'generation_{args.role}{args.status_suffix}'
@@ -175,6 +176,10 @@ def main():
         observation_semantics=OBSERVATION_SEMANTICS_VERSION)
     del state
     cohorts=COHORTS[args.role] if not args.smoke else [(f'smoke_{args.role}',990100,4,'policy')]
+    if args.extra_train_cohorts:
+        if args.smoke or not 1<=args.extra_train_cohorts<=16:
+            raise ValueError('Expanded data must use one to sixteen full training cohorts')
+        cohorts=[(f'train_e{i:02d}',700100+2000*i,256,'policy') for i in range(args.extra_train_cohorts)]
     if args.cohorts:
         if set(args.cohorts)-{c[0] for c in cohorts}: raise ValueError('Unknown cohort selection')
         cohorts=[c for c in cohorts if c[0] in args.cohorts]

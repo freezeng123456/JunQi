@@ -134,3 +134,21 @@ def test_paired_intervals_resample_games_not_their_thousand_repeated_labels():
     assert answer['equal_game_weight_delta']==0
     assert answer['paired_seed_and_game_ci95']==[-1.,1.]
     assert answer['test_games']==2 and answer['labels_per_seed']==1001
+
+
+def test_diagnostics_separate_public_movement_and_late_int16_steps():
+    import math
+    from experiments.belief_features_20260913.diagnostics import score_predictions
+    obs=torch.zeros(2,OBS_CHANNELS,17,17)
+    move=CHANNEL_LAYOUT['move_bucket'].start+4
+    obs[0,move,0,0]=1; obs[1,move+1,0,0]=1
+    probs=torch.zeros(2,289,12); probs[:,:,0]=.7; probs[:,:,1]=.3
+    labels=torch.full((2,289),-1,dtype=torch.int8); labels[0,0]=0; labels[1,0]=1
+    data={'spatial':obs,'labels':labels,'step':torch.tensor([0,512],dtype=torch.int16),
+          'game_id':torch.tensor([3,3])}
+    result=score_predictions(probs,data)
+    assert result['all']['nll']==pytest.approx(-math.log(.21)/2)
+    assert result['all']['brier']==pytest.approx(.58)
+    assert result['moved']['labels']==result['never_moved']['labels']==result['late']['labels']==1
+    assert result['moved']['accuracy']==0 and result['never_moved']['accuracy']==1
+    assert result['all']['games'][0]['labels']==2

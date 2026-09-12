@@ -48,8 +48,8 @@ def supervised_loss(logits,obs,labels):
     return F.nll_loss(log_probs.reshape(-1,log_probs.shape[-1]),labels.long().reshape(-1),ignore_index=-1)
 
 
-def load_data(root,direction,*,smoke=False):
-    names=('smoke_A',) if smoke else (*TRAIN_FILES,*EVAL_FILES)
+def load_data(root,direction,*,smoke=False,train_files=TRAIN_FILES):
+    names=('smoke_A',) if smoke else (*train_files,*EVAL_FILES)
     loaded={}; manifest={}; all_games={}
     for name in names:
         path=root/(name+'.pt.gz')
@@ -67,8 +67,8 @@ def load_data(root,direction,*,smoke=False):
         for i,a in enumerate(names):
             for b in names[i+1:]:
                 if all_games[a] & all_games[b]: raise ValueError(f'Game leakage: {a} / {b}')
-        loaded['train']={k:torch.cat([loaded[n][k] for n in TRAIN_FILES]) for k in loaded[TRAIN_FILES[0]]}
-        for n in TRAIN_FILES: del loaded[n]
+        loaded['train']={k:torch.cat([loaded[n][k] for n in train_files]) for k in loaded[train_files[0]]}
+        for n in train_files: del loaded[n]
     else:
         loaded['train']=loaded.pop('smoke_A')
         loaded['validation']=loaded['train']
@@ -267,12 +267,15 @@ def main():
     p.add_argument('--eval-every',type=int,default=500)
     p.add_argument('--smoke',action='store_true')
     p.add_argument('--seeds',nargs='+',type=int,default=list(SEEDS))
+    p.add_argument('--train-files',nargs='+',default=list(TRAIN_FILES))
     args=p.parse_args()
     root=Path(args.output); root.mkdir(parents=True,exist_ok=False)
     torch.set_num_threads(1)
     torch.backends.cudnn.benchmark=False; torch.backends.cudnn.deterministic=True
     torch.use_deterministic_algorithms(True)
-    data,manifest=load_data(Path(args.data),args.direction,smoke=args.smoke)
+    if len(args.train_files)!=len(set(args.train_files)) or set(args.train_files)&set(EVAL_FILES):
+        raise ValueError('Training shards must be unique and separate from held-out shards')
+    data,manifest=load_data(Path(args.data),args.direction,smoke=args.smoke,train_files=args.train_files)
     cfg=BeliefNetConfig(n_encoder_layer=4,n_head=8,embed_dim=256,cnn_channels=64,
                         cnn_layers=2,ff_factor=2,dropout=.1)
     write_json(root/'data_manifest.json',manifest)
