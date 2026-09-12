@@ -42,7 +42,10 @@ def masked_log_probs(logits,obs):
 
 
 def supervised_loss(logits,obs,labels):
-    return F.nll_loss(masked_log_probs(logits,obs).transpose(1,2),labels.long(),ignore_index=-1)
+    # The 2-D classification kernel supports deterministic CUDA reduction;
+    # the spatial nll_loss2d kernel does not in this pinned PyTorch runtime.
+    log_probs=masked_log_probs(logits,obs)
+    return F.nll_loss(log_probs.reshape(-1,log_probs.shape[-1]),labels.long().reshape(-1),ignore_index=-1)
 
 
 def load_data(root,direction,*,smoke=False):
