@@ -40,6 +40,8 @@ def table(headers, rows):
 def make_report(root, result):
     assert result['status'] == 'all_experiments_and_diagnostics_verified'
     primary, expanded = result['primary'], result['expanded']
+    early_path=root/'analysis_early/resolution_check.json'
+    early=read(early_path) if early_path.exists() else None
     sections = ['# BeliefNet 公开特征与可学习性实验报告',
         '实验日期：2026-09-13。两台 H20；参数 EMA 全程关闭。所有数值来自完整运行、回收到本地并通过 SHA-256 校验的结果。']
 
@@ -53,6 +55,11 @@ def make_report(root, result):
     opening.append(f"**数据量复核：**基线从 1,024 个独立训练对局扩至 5,120 个后，主测试 NLL 改变量为 {interval(volume)}；{evidence(volume)}。这项复核是观察到过拟合后追加的探索性实验。")
     sections += ['## 当前证据支持什么', '\n\n'.join(opening),
         '以下差值均为候选减去参照，NLL/Brier 越低越好，准确率越高越好。方括号是同时按本轮训练种子与完整测试对局配对重采样得到的 95% 区间。只有三组主训练种子，区间用于描述本轮证据；分组和分布比较没有做多重检验校正。']
+    if early:
+        assert early['status']=='early_resolution_verified'
+        selections=early['selected_steps']['baseline']['dense_steps']
+        difference=early['dense_selection_minus_primary_selection']['baseline']['test']['nll']
+        sections.append(f"**早期选模分辨率复核：**每 50 步验证时，三个基线分别选中第 {', '.join(map(str,selections))} 步；相对主实验选模的测试 NLL 变化为 {interval(difference)}。具体特征比较见后文，不能把重跑相同种子当作额外独立重复。")
 
     sections += ['## 实验覆盖与共同基线', table(
         ['阶段', 'A：长期轨迹与基线', 'B：关系特征与基线', '每单元更新数', '结果状态'],
@@ -164,6 +171,27 @@ def make_report(root, result):
     sections += [table(['数据', '模型', '推理时干预', '相对正常输入的 NLL 变化', '准确率变化（百分点）'], rows),
         '推理时干预会使输入偏离训练分布，可检验模型对新增特征的依赖；它不能单独证明特征带来泛化收益，也不能代替配对训练基线。']
 
+    sections += ['## 早期选模分辨率的探索性检查']
+    if early:
+        report=early['early_analysis']
+        sections += ['两个方向各 6/6 个单元完成，每单元 1,000 步，每 50 步验证。使用原 1,024 个对局、相同初始化与优化设置，在第 500、1,000 步核对全部验证指标完全一致，合并的小批量损失也与主实验对应区间一致；选择同一步时，实际权重亦一致。',
+                     '此检查判断较粗的每 500 步验证是否漏掉早期最优模型。它不是新的数据量实验，也不是新增的独立种子证据。']
+        rows=[]
+        for arm in ARM:
+            chosen=early['selected_steps'][arm]['dense_steps']
+            for split in SPLITS:
+                score=report['primary_means'][arm][split]
+                delta=early['dense_selection_minus_primary_selection'][arm][split]['nll']
+                feature='—' if arm=='baseline' else interval(report['paired_comparisons'][arm][split]['nll'])
+                rows.append([ARM[arm],SPLIT[split],', '.join(map(str,chosen)),f"{score['nll']:.6f}",
+                             f"{score['accuracy']*100:.3f}%",interval(delta),feature])
+        sections += [table(['输入','分布','选中步骤','NLL','准确率','相对原选模的 NLL 变化','相对密集选模基线的 NLL 差'],rows),
+                     '![早期学习曲线](../analysis_early/belief_feature_results.png)',
+                     '完整数值与重跑一致性核对见 [早期复核](../analysis_early/resolution_check.json)。']
+    else:
+        counts={role:len(list((root/f'early_{role}').glob('*/done'))) for role in 'AB'}
+        sections.append(f"该补充项未形成完整分析：A 已完成 {counts['A']}/6，B 已完成 {counts['B']}/6。没有据此给出完整配对结论；原主实验、扩充复核和 26 个模型的重评分结果独立有效。退出状态与部分文件保留在 early_A/B。")
+
     extra = primary['supplementary_seed_604']
     if extra:
         rows = []
@@ -175,7 +203,7 @@ def make_report(root, result):
 
     maximum = max(x['maximum_absolute_metric_difference'] for x in result['independent_rescoring_agreement'])
     sections += ['## 校验、来源和未验证范围',
-        f"全部 26 个已保存模型重新评分，五项总体指标与原始评估记录的最大绝对差为 {maximum:.3g}，低于检查阈值 2e-6。"
+        f"主实验与扩充复核的 26 个已保存模型重新评分，五项总体指标与原始评估记录的最大绝对差为 {maximum:.3g}，低于检查阈值 2e-6。"
         '这是另一路指标汇总代码对同一模型和数据的复算；它不等于独立团队复现。',
         '训练前校验数据哈希及完整对局 ID 分区。原始 8 个、扩充后 24 个分片全部在本地通过哈希校验；扩充训练包含 5,120 个独立对局，验证与三种测试各为 128 个独立对局。所有已完成单元保存最优及最后原始参数、优化器、配置、曲线、结果和完成标记，整体退出码均为 0。',
         '本地完整回归最近一次为 1,392 项通过、171 项跳过、70 条警告；后续涵盖分析、公开移动分组及完整文件清单校验的定向检查为 15 项通过。两台服务器各通过 16 项原生 GPU 检查，并在正式训练前完成相同网络的 80 步执行预检。跳过项及既有警告没有被计作通过。',

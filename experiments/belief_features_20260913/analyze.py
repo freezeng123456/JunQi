@@ -80,8 +80,8 @@ def state_hash(path):
 
 def collect(root,*,prefix='training'):
     loaded={}; coverage={}; configs={}
-    steps=50000 if prefix=='training' else 5000
-    source='57940a09dd3ad0b24534a827e0c7b3ffda252ffd' if prefix=='training' else 'd958f70b9822a711354f1eb047fdb02f09a26f04'
+    steps={'training':50000,'scale':5000,'early':1000}[prefix]
+    source='d958f70b9822a711354f1eb047fdb02f09a26f04' if prefix=='scale' else '57940a09dd3ad0b24534a827e0c7b3ffda252ffd'
     b_seeds=(*SEEDS,604) if prefix=='training' else SEEDS
     for role,seeds,direction in [('A',SEEDS,'temporal'),('B',b_seeds,'relational')]:
         path=root/f'{prefix}_{role}'
@@ -139,7 +139,7 @@ def analyze(root,*,draws=5000,prefix='training'):
     assert references==read(root/f'{prefix}_B/reference_metrics.json')
     parameters={str(k):v['parameters'] for k,v in configs.items()}
     assert len(set(parameters.values()))==1
-    return {'status':'complete','experiment':prefix,'steps_per_cell':50000 if prefix=='training' else 5000,
+    return {'status':'complete','experiment':prefix,'steps_per_cell':{'training':50000,'scale':5000,'early':1000}[prefix],
         'primary_seeds':list(SEEDS),'coverage':coverage,
         'parameters_per_arm':next(iter(parameters.values())),'cross_host_baseline_agreement':agreement,
         'primary_means':means,'paired_comparisons':paired,'stages':stages,'feature_control_minus_full':controls,
@@ -205,7 +205,7 @@ def markdown(analysis):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True); parser.add_argument('--draws',type=int,default=5000)
-    parser.add_argument('--prefix',choices=['training','scale'],default='training')
+    parser.add_argument('--prefix',choices=['training','scale','early'],default='training')
     parser.add_argument('--no-plot',action='store_true'); args=parser.parse_args()
     args.output.mkdir(exist_ok=True,parents=True)
     result=analyze(args.root,draws=args.draws,prefix=args.prefix)

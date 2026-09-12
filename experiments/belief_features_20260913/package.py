@@ -18,22 +18,22 @@ def package(root, output):
     assert not source.exists(), source
     subprocess.run(['git', 'bundle', 'create', str(source), 'HEAD'], check=True)
     files = [source]
-    for name in ('analysis_final', 'analysis_training', 'analysis_scale'):
+    for name in ('analysis_final', 'analysis_training', 'analysis_scale', 'analysis_early'):
         files.extend(sorted((root / name).glob('*')))
     for name in ('dataset_audit.json', 'ambiguity_probe.json', 'opening_prior.json',
                  'tabular_diagnostics.json', 'recovery_status.json', 'recovery_scale_status.json',
-                 'recovery_diagnostics_status.json', 'data_main/recovery_verified.json',
+                 'recovery_diagnostics_status.json', 'recovery_early_status.json', 'early_analysis_stage.json', 'data_main/recovery_verified.json',
                  'data_expanded/recovery_verified.json', 'local-regression-final.log', 'analysis-targeted-tests.log',
                  'main_provenance_A.json', 'main_provenance_B.json',
                  'remote_completion_A.json', 'remote_completion_B.json',
                  'run_main.py', 'run_expanded.py', 'expanded_stages.py',
-                 'run_diagnostics_v2.py', 'verify_remote_completion.py',
+                 'run_diagnostics_v2.py', 'run_early.py', 'verify_remote_completion.py',
                  'source_inputs/SOURCE_INPUTS.json', 'source_inputs/frozen_policy_v4.pt',
                  'junqi_cuda.cpython-312-x86_64-linux-gnu.so', 'native-inputs.sha256', 'runtime-deps.tgz'):
         path = root / name
         assert path.is_file(), path
         files.append(path)
-    for prefix in ('training', 'scale', 'diagnostics'):
+    for prefix in ('training', 'scale', 'diagnostics', 'early'):
         for role in 'AB':
             folder = root / f'{prefix}_{role}'
             files.extend(path for path in sorted(folder.rglob('*'))
@@ -51,7 +51,7 @@ def package(root, output):
         '请先阅读 analysis_final/REPORT.md。图、完整逐种子统计、协议、运行配置、日志、'
         '诊断与源代码 bundle 均包含在本包。\n\n'
         '数据生成用的冻结策略、对应原生扩展及源代码包含在本包。大体积原始数据和 best.pt／last.pt 不重复放入本包，已分别完整保存在本地 '
-        + str(root) + ' 下的 data_main、data_expanded、training_A/B、scale_A/B。'
+        + str(root) + ' 下的 data_main、data_expanded、training_A/B、scale_A/B、early_A/B。'
         '对应原始文件哈希保留在各目录 artifacts.sha256 或数据元信息中；'
         '这些原始清单包含未装入 ZIP 的大文件，不能直接作为 ZIP 文件清单验证。\n\n'
         '本包自身以 PACKAGE_SHA256.txt 校验。源代码 bundle 可由 git clone final-source.bundle 恢复；'
