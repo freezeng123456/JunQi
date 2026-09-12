@@ -53,7 +53,10 @@ def make_report(root, result):
             continue
         policy_result = read(path)
         assert policy_result['status'] == 'all_paired_policy_results_verified'
-        for role, name in [('A', '当前采样策略 guarded_s501'), ('B', '原始策略 ckpt_001000，在 v4 输入下复测')]:
+        policy_names = {'guarded_s501_v4': '当前采样策略 guarded_s501',
+                        'raw_001000_evaluated_on_v4': '原始策略 ckpt_001000，在 v4 输入下复测'}
+        for role in 'AB':
+            name = policy_names[policy_result['labels'][role]]
             run = policy_result['runs'][role]
             m = run['summary']['metrics']
             policy_rows.append([label, name, int(m['eval/wins']), int(m['eval/losses']),

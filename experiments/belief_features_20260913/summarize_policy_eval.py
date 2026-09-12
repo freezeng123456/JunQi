@@ -51,6 +51,14 @@ def main():
     results, keyed = {}, {}
     for role in 'AB':
         results[role], keyed[role] = inspect(args.root / f'{args.prefix}_{role}')
+    checkpoints = {role: Path(results[role]['provenance']['checkpoint']).name for role in 'AB'}
+    assert set(checkpoints.values()) == {'frozen_policy_v4.pt', 'ckpt_001000.pt'}
+    guarded_role = next(role for role in 'AB' if checkpoints[role] == 'frozen_policy_v4.pt')
+    raw_role = next(role for role in 'AB' if checkpoints[role] == 'ckpt_001000.pt')
+    for role in 'AB':
+        provenance = results[role]['provenance']
+        assert provenance['effective_checkpoint_metadata']['observation_semantics_version'] == 4
+        assert provenance['ema'] is False and provenance['learned_belief_in_policy'] is False
     left, right = keyed['A'], keyed['B']
     assert left.keys() == right.keys()
     for key in left:
@@ -59,6 +67,7 @@ def main():
     for name in ('source_commit', 'runner_sha256', 'backend', 'dtype', 'greedy',
                  'games_per_block', 'blocks', 'setup_seed', 'random_seed', 'max_moves'):
         assert results['A']['provenance'][name] == results['B']['provenance'][name], name
+    left, right = keyed[guarded_role], keyed[raw_role]
     seeds = sorted({key[0] for key in left})
     deltas = np.array([sum((left[(seed, team)]['outcome'] == 'win') -
                           (right[(seed, team)]['outcome'] == 'win') for team in (0, 1)) / 2 for seed in seeds])
@@ -66,7 +75,8 @@ def main():
     bootstrap = deltas[rng.integers(len(seeds), size=(5000, len(seeds)))].mean(1)
     comparison = {
         'status': 'all_paired_policy_results_verified', 'runs': results,
-        'labels': {'A': 'guarded_s501_v4', 'B': 'raw_001000_evaluated_on_v4'},
+        'labels': {guarded_role: 'guarded_s501_v4', raw_role: 'raw_001000_evaluated_on_v4'},
+        'roles_by_policy': {'guarded': guarded_role, 'raw': raw_role},
         'same_setup_and_random_seeds_and_paired_teams_verified': True,
         'guarded_minus_raw_win_rate': float(deltas.mean()),
         'paired_setup_bootstrap_ci95': np.quantile(bootstrap, [.025, .975]).tolist(),
