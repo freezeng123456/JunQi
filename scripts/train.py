@@ -893,6 +893,7 @@ def train(cfg: TrainConfig) -> None:
                 seed_base=cfg.env.seed + rollout_idx,
             )
         t_collect = time.time() - t0
+        mc.update(getattr(rollout, "_collect_combat_metrics", {}))
 
         # ---- PPO update ----
         t0 = time.time()
@@ -1087,19 +1088,12 @@ def train(cfg: TrainConfig) -> None:
                                            device=device if device.type == "cuda" else "cpu")
             if is_rank0:
                 print(f"[train] Evaluating (rollout {rollout_idx + 1})…")
-                pool_size = 0
                 try:
                     eval_seed = cfg.eval_game_seed
-                    if (
-                        cfg.eval_fixed_setup_pool
-                        and cfg.env.use_gpu_rollout
-                        and hasattr(env, "upload_fixed_evaluation_setup_pool")
-                    ):
-                        pool_size = env.upload_fixed_evaluation_setup_pool(
-                            seed=cfg.eval_setup_seed,
-                        )
-                    else:
-                        pool_size = 0
+                    # A fixed seed per game covers the first and all later
+                    # batches. Evaluation no longer mutates the global setup pool.
+                    setup_seed = cfg.eval_setup_seed if cfg.eval_fixed_setup_pool else None
+                    eval_records = []
                     eval_policy = trainer.policy
                     eval_policy.eval()
                     eval_metrics = evaluate_paired_vs_random(
@@ -1108,16 +1102,20 @@ def train(cfg: TrainConfig) -> None:
                         num_envs=cfg.env.num_envs,
                         use_gpu=cfg.env.use_gpu_rollout,
                         device=device,
-                        seed=eval_seed,
+                        seed=eval_seed, setup_seed=setup_seed, game_records=eval_records,
                         max_moves=cfg.env.max_num_moves,
                         autocast_dtype=cfg.ppo.get_dtype(),
                         greedy=True,
                     )
                     eval_metrics["eval/game_seed"] = float(eval_seed)
                     eval_metrics["eval/greedy"] = 1.0
-                    if pool_size:
-                        eval_metrics["eval/fixed_setup_pool_size"] = float(pool_size)
-                        eval_metrics["eval/fixed_setup_seed"] = float(cfg.eval_setup_seed)
+                    from junqi_rl.analysis.protocol import write_game_records
+                    write_game_records(
+                        os.path.join(cfg.save_dir, f"eval_{rollout_idx + 1:06d}_random.jsonl"),
+                        eval_records,
+                    )
+                    if setup_seed is not None:
+                        eval_metrics["eval/fixed_setup_seed"] = float(setup_seed)
                     logger.log(eval_metrics, step=rollout_idx)
                     win_rate = eval_metrics.get("eval/win_rate", 0.0)
                     loss_rate = eval_metrics.get("eval/loss_rate", 0.0)
@@ -1135,16 +1133,21 @@ def train(cfg: TrainConfig) -> None:
                     if cfg.eval_baseline_ckpt:
                         baseline_games = cfg.eval_baseline_games or cfg.eval_num_games
                         h2h_seed = eval_seed + 17
+                        h2h_records = []
                         h2h = evaluate_paired_head_to_head(
                             eval_policy,
                             _eval_baseline_policy,
                             num_games=baseline_games,
                             num_envs=cfg.env.num_envs,
                             device=device,
-                            seed=h2h_seed,
+                            seed=h2h_seed, setup_seed=setup_seed, game_records=h2h_records,
                             max_moves=cfg.env.max_num_moves,
                             autocast_dtype=cfg.ppo.get_dtype(),
                             greedy=True,
+                        )
+                        write_game_records(
+                            os.path.join(cfg.save_dir, f"eval_{rollout_idx + 1:06d}_h2h.jsonl"),
+                            h2h_records,
                         )
                         h2h["h2h/game_seed"] = float(h2h_seed)
                         h2h["h2h/greedy"] = 1.0
@@ -1247,9 +1250,6 @@ def train(cfg: TrainConfig) -> None:
                 except Exception:
                     print("[train] Evaluation failed:")
                     traceback.print_exc()
-                finally:
-                    if pool_size and hasattr(env, "restore_training_setup_pool"):
-                        env.restore_training_setup_pool()
             # Broadcast the should-stop flag to every rank so they all exit
             # the loop together. Without this, only rank 0 would see the
             # verdict and the others would deadlock at the next all-reduce.

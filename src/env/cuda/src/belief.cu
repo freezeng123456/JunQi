@@ -701,4 +701,36 @@ void update_beliefs_after_step(
     KERNEL_CHECK();
 }
 
+// One thread per world-frame (env, observer, cell). The rule support is
+// independent of neural weights, so floating-point underflow cannot create
+// a new permanent exclusion. Zero soft mass falls back to the rule prior.
+__global__ void constrain_beliefs_kernel(int total, float* soft, const float* rules) {
+    int item = blockIdx.x * blockDim.x + threadIdx.x;
+    if (item >= total) return;
+    int cell = item % NUM_CELLS;
+    int base = (item / NUM_CELLS) * NUM_TRACKED_TYPES * NUM_CELLS + cell;
+    float mass = 0.f, rule_mass = 0.f;
+    for (int t = 0; t < NUM_TRACKED_TYPES; ++t) {
+        int i = base + t * NUM_CELLS;
+        float r = rules[i], p = soft[i];
+        p = (r > 0.f && isfinite(p) && p > 0.f) ? p : 0.f;
+        soft[i] = p;
+        mass += p;
+        rule_mass += r;
+    }
+    for (int t = 0; t < NUM_TRACKED_TYPES; ++t) {
+        int i = base + t * NUM_CELLS;
+        soft[i] = mass > 0.f ? soft[i] / mass :
+            (rule_mass > 0.f ? rules[i] / rule_mass : 0.f);
+    }
+}
+
+void constrain_beliefs_to_rules(DeviceGameStateBatch& state) {
+    const int total = state.num_envs * NUM_SEATS * NUM_CELLS;
+    if (!total || !state.d_rule_belief) return;
+    constrain_beliefs_kernel<<<(total + 255) / 256, 256>>>(
+        total, state.d_belief, state.d_rule_belief);
+    KERNEL_CHECK();
+}
+
 }  // namespace junqi_cuda

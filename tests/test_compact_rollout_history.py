@@ -189,3 +189,44 @@ def test_compact_history_is_independent_across_two_ddp_ranks() -> None:
         nprocs=world_size,
         join=True,
     )
+
+
+def test_compressed_history_retains_all_features_through_long_play_and_reuse():
+    """Full input equivalence, including the derived reverse capture channels."""
+    from junqi_rl.networks.combat_features import CombatOutcomeHead
+    num_envs, num_steps = 4, 128
+    world = GpuRollout(num_envs=num_envs)
+    world.reset(seed_base=800)
+    history = world.create_rollout_history(num_steps)
+    head = CombatOutcomeHead().cuda()
+    spatial_rows, global_rows, legal_rows, seats, chosen, features = [], [], [], [], [], []
+    generator = torch.Generator(device='cuda').manual_seed(912)
+    for step in range(num_steps):
+        acting = world.turn_torch().clone()
+        sp, gl = world.build_acting_seat_observation_torch(acting)
+        legal = world.legal_mask_canonical_torch_device(acting)
+        action = torch.multinomial(legal.float(), 1, generator=generator).squeeze(1).int()
+        spatial_rows.append(sp.clone())
+        global_rows.append(gl.clone())
+        legal_rows.append(legal.clone())
+        seats.append(acting)
+        chosen.append(action)
+        features.append(head.for_actions(sp, action, legal).clone())
+        history.snapshot(world.state, acting, step)
+        result = world.step_device_torch(action, acting)
+        world.update_beliefs_device(result, acting)
+        world.reset_terminated_device(seed=9900 + step)
+    expected = [torch.cat(x) for x in (spatial_rows, global_rows, legal_rows)]
+    all_seats, actions, expected_features = map(torch.cat, (seats, chosen, features))
+    from junqi_core.observation import CHANNEL_LAYOUT
+    reverse = expected[0][:, CHANNEL_LAYOUT['cm_eaten_by_pid']]
+    assert reverse.count_nonzero() > 0, 'trace must exercise reverse capture memory'
+    order = torch.randperm(num_envs * num_steps, device='cuda', generator=generator)
+    # Grow, shrink, duplicate and revisit samples to catch stale replay rows.
+    for indices in (order[:32], order[:5], order[:64], order[:1].expand(9), order[-31:]):
+        sp, gl, legal = history.reconstruct(indices, all_seats[indices], dtype=torch.float32)
+        for actual, reference in zip((sp, gl, legal), expected):
+            torch.testing.assert_close(actual, reference[indices], rtol=0, atol=0)
+        torch.testing.assert_close(head.for_actions(sp, actions[indices], legal),
+                                   expected_features[indices], rtol=0, atol=0)
+    assert history.history_bytes == num_envs * num_steps * COMPACT_HISTORY_BYTES_PER_TRANSITION

@@ -33,6 +33,9 @@ def current_checkpoint_metadata(policy: Module | None = None) -> dict[str, Any]:
         "num_on_board_cells": NUM_ON_BOARD_CELLS,
     }
     if policy is not None:
+        from junqi_rl.networks.combat_features import COMBAT_FEATURE_VERSION
+        enabled = getattr(getattr(policy, "cfg", None), "combat_outcome_features", False)
+        metadata["combat_feature_version"] = COMBAT_FEATURE_VERSION if enabled else 0
         metadata["policy_class"] = type(policy).__name__
         stem = getattr(policy, "stem", None)
         metadata["stem_class"] = type(stem).__name__ if stem is not None else None
@@ -86,7 +89,7 @@ def validate_policy_checkpoint(
     if isinstance(saved_meta, Mapping):
         current_meta = current_checkpoint_metadata(policy)
         for key in ("observation_channels", "action_dim", "num_on_board_cells",
-                    "observation_semantics_version"):
+                    "observation_semantics_version", "combat_feature_version"):
             if key in saved_meta and saved_meta[key] != current_meta[key]:
                 metadata_mismatches.append(
                     f"{key}: checkpoint={saved_meta[key]!r} runtime={current_meta[key]!r}"

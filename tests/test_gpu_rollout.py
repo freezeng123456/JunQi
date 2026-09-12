@@ -335,3 +335,91 @@ def test_native_public_mine_and_engineer_inference_chain():
             np.testing.assert_allclose(global_[0, observer.value], expected.global_, atol=1e-5)
     pid = state.pieces[(1, 7)].piece_id
     assert rollout.state.cm_copy_to_host()['is_gongb'].reshape(1, 4, 120)[0, :, pid].all()
+
+
+def test_beliefs_and_observer_mapping_are_owned_by_each_rollout():
+    import torch
+    first = GpuRollout(num_envs=2)
+    first.reset(seed_base=55)
+    expected = tuple(x.copy() for x in first.build_all_seat_observations())
+    rules = first.rule_beliefs_torch().clone()
+    for n in (1, 3, 2):
+        other = GpuRollout(num_envs=n)
+        other.reset(seed_base=900)
+        other.set_observer_seats(np.tile(np.array([3, 2, 1, 0], dtype=np.int8), (n, 1)))
+        other.upload_beliefs(np.zeros((n, 4, 12, 289), dtype=np.float32))
+        other.build_all_seat_observations()
+        actual = first.build_all_seat_observations()
+        for a, b in zip(actual, expected):
+            np.testing.assert_array_equal(a, b)
+        torch.testing.assert_close(first.rule_beliefs_torch(), rules, rtol=0, atol=0)
+
+
+def test_bulk_reset_clears_history_and_combat_memory():
+    import torch
+    used = GpuRollout(num_envs=2)
+    used.reset(seed_base=33)
+    used.rule_beliefs_torch()  # both soft and independent rule buffers reset
+    for _ in range(40):
+        acting = used.turn_torch().clone()
+        mask = used.legal_mask_canonical_torch_device(acting)
+        action = mask.long().argmax(-1).to(torch.int32)
+        result = used.step_device_torch(action, acting)
+        used.update_beliefs_device(result, acting)
+    used.reset(seed_base=81)
+    fresh = GpuRollout(num_envs=2)
+    fresh.reset(seed_base=81)
+    for a, b in zip(used.build_all_seat_observations(), fresh.build_all_seat_observations()):
+        np.testing.assert_array_equal(a, b)
+    for key, value in used.state.cm_copy_to_host().items():
+        np.testing.assert_array_equal(value, fresh.state.cm_copy_to_host()[key])
+    torch.testing.assert_close(used.rule_beliefs_torch(), fresh.rule_beliefs_torch(), rtol=0, atol=0)
+
+
+def test_native_neural_refresh_keeps_public_mine_then_engineer_facts():
+    import torch
+    from junqi_core.board import FLAT_TO_COMPACT
+    from junqi_core.info_model import BeliefTensor, TRACKED_TYPES
+    from junqi_core.rotation import world_to_canonical
+    from junqi_core.rules import PieceType, Seat
+    from junqi_rl.belief.inference import refresh_beliefs_neural
+    from tests.test_belief_refresh_constraints import ConstantNet
+    from tests.test_feature_information_boundaries import public_mine_sequence
+    from tests.test_gpu_combat_memory_parity import _push_state
+
+    state, actions = public_mine_sequence()
+    world = GpuRollout(num_envs=1)
+    world.state = _push_state(BatchedGameState.from_game_states([state]))
+    prior = np.zeros((1, 4, 12, 289), dtype=np.float32)
+    for seat in Seat:
+        belief = BeliefTensor.initial(state, seat)
+        for (x, y), vector in belief.probs.items():
+            prior[0, seat.value, :, y*17+x] = vector
+    world.upload_beliefs(prior)
+    # Establish the independent rule buffer before injecting neural certainty.
+    refresh_beliefs_neural(world, ConstantNet(0).cuda(), empty_cache=False)
+    for index, (seat, src, dst) in enumerate(actions):
+        sx, sy = world_to_canonical(*src, seat)
+        dx, dy = world_to_canonical(*dst, seat)
+        action_id = int(FLAT_TO_COMPACT[sy*17+sx])*129 + int(FLAT_TO_COMPACT[dy*17+dx])
+        acting = torch.tensor([seat.value], device='cuda', dtype=torch.int8)
+        result = world.step_device_torch(torch.tensor([action_id], device='cuda', dtype=torch.int32), acting)
+        world.update_beliefs_device(result, acting)
+        refresh_beliefs_neural(world, ConstantNet().cuda(), empty_cache=False)
+        rule = world.rule_beliefs_torch().cpu().numpy()
+        soft = world._beliefs
+        assert np.count_nonzero(soft[rule == 0]) == 0
+        kind = PieceType.GONGB if index == 2 else PieceType.DILEI
+        assert np.all(soft[0, :, TRACKED_TYPES.index(kind), 7*17+1] == 1)
+
+
+def test_actor_only_observation_does_not_allocate_all_seat_output():
+    world = GpuRollout(num_envs=2)
+    world.reset(seed_base=801)
+    world.build_acting_seat_observation_torch(world.turn_torch())
+    assert world._obs_all is None
+    expected = world.build_all_seat_observations()
+    assert world._obs_all is not None
+    current = world.build_all_seat_observations()
+    for a, b in zip(expected, current):
+        np.testing.assert_array_equal(a, b)

@@ -175,3 +175,15 @@ __all__ = [
     "merge_evaluations",
     "wilson_interval",
 ]
+
+
+def write_game_records(path, records) -> None:
+    """Persist every requested game, including censored outcomes, as JSONL."""
+    import json
+    from pathlib import Path
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+        encoding="utf-8",
+    )

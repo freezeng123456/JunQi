@@ -764,6 +764,8 @@ def collect_rollout_gpu_v2(
     callbacks_enabled = on_termination is not None or on_reset is not None
 
     step_counter = 0
+    from junqi_rl.networks.combat_features import CombatFeatureMetrics
+    combat_metrics = CombatFeatureMetrics(policy)
     collect_ent_sum = None
     collect_ent_n = 0
 
@@ -794,6 +796,11 @@ def collect_rollout_gpu_v2(
             m = ent_t.detach().to(torch.float32).mean()
             collect_ent_sum = m if collect_ent_sum is None else collect_ent_sum + m
             collect_ent_n += 1
+
+        learner_rows = ~done_t
+        if random_opponent:
+            learner_rows = learner_rows & ((acting_t % 2) == 0)
+        combat_metrics.add(obs_sp_t, actions_can, lm_t, learner_rows)
 
         # ---- Random opponent: replace actions for enemy seats (1, 3) ---------
         if random_opponent:
@@ -977,6 +984,7 @@ def collect_rollout_gpu_v2(
 
         step_counter += 1
 
+    buffer._collect_combat_metrics = combat_metrics.finish()
     if collect_ent_n:
         buffer._collect_entropy = float((collect_ent_sum / collect_ent_n).item())
 

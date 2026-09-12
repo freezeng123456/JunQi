@@ -96,6 +96,8 @@ class TrainConfig:
     # GPU setup pools are process-global. Re-upload this fixed pool before
     # every primary evaluation so ArrangementNet refreshes cannot silently
     # change the test distribution from checkpoint to checkpoint.
+    # Legacy flag name retained: now one uniform seeded lineup per game ID
+    # across every batch, without uploading a process-global setup pool.
     eval_fixed_setup_pool: bool = True
     eval_setup_seed: int = 20_260_817
     # Keep game/reset seeds fixed across checkpoints so monitoring differences
