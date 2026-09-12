@@ -167,6 +167,17 @@ def test_successful_capture_counts_as_movement_without_a_quiet_move():
     assert result['moved'][0,0] and not result['never_moved'][0,0]
 
 
+def test_analytic_opening_prior_respects_inventory_and_constrained_slots():
+    from junqi_core.info_model import TRACKED_TYPES
+    from junqi_core.rules import PieceType,PIECE_COUNTS
+    from experiments.belief_features_20260913.opening_prior import exact_marginal_table
+    slots,table=exact_marginal_table()
+    assert table[slots.index(26),TRACKED_TYPES.index(PieceType.JUNQI)]==.5
+    assert table[slots.index(20),TRACKED_TYPES.index(PieceType.DILEI)]==pytest.approx(1/3)
+    assert table[slots.index(0),TRACKED_TYPES.index(PieceType.ZHADAN)]==0
+    assert table.sum(0).tolist()==pytest.approx([PIECE_COUNTS[t] for t in TRACKED_TYPES])
+
+
 def test_expanded_loader_uses_requested_training_shards_and_rejects_game_leakage(tmp_path,monkeypatch):
     import gzip
     import json
