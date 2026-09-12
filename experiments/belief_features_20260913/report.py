@@ -86,7 +86,7 @@ def make_report(root, result):
     volume = result['data_volume_comparisons']['baseline']['test']['nll']
     opening.append(f"**数据量复核：**基线从 1,024 个独立训练对局扩至 5,120 个后，主测试 NLL 改变量为 {interval(volume)}；{evidence(volume)}。这项复核是观察到过拟合后追加的探索性实验。")
     sections += ['## 当前证据支持什么', '\n\n'.join(opening),
-        '以下差值均为候选减去参照，NLL/Brier 越低越好，准确率越高越好。方括号是同时按本轮训练种子与完整测试对局配对重采样得到的 95% 区间。只有三组主训练种子，区间用于描述本轮证据；分组和分布比较没有做多重检验校正。']
+        '以下差值均为候选减去参照，NLL/Brier 越低越好，准确率越高越好。方括号是同时按本轮训练种子与完整测试对局配对重采样得到的 95% 区间。训练集、验证集和数据生成策略均固定，区间不包含重新抽取这些条件的不确定性。只有三组主训练种子，区间用于描述本轮证据；分组和分布比较没有做多重检验校正。']
     if early:
         assert early['status']=='early_resolution_verified'
         selections=early['selected_steps']['baseline']['dense_steps']
