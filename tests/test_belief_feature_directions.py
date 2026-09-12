@@ -121,3 +121,16 @@ def test_legal_hidden_swap_is_indistinguishable_to_both_feature_arms():
     proof=construct()
     assert proof['status']=='verified_constructive_ambiguity'
     assert proof['configuration_1']!=proof['configuration_2']
+
+
+def test_paired_intervals_resample_games_not_their_thousand_repeated_labels():
+    from experiments.belief_features_20260913.analyze import paired_bootstrap
+    reference={'games':[{'game_id':10,'labels':1000,'nll':2.},
+                        {'game_id':11,'labels':1,'nll':2.}]}
+    candidate={'games':[{'game_id':10,'labels':1000,'nll':1.},
+                        {'game_id':11,'labels':1,'nll':3.}]}
+    answer=paired_bootstrap([reference]*3,[candidate]*3,'nll',draws=400)
+    assert answer['delta_candidate_minus_reference']==pytest.approx(-999/1001)
+    assert answer['equal_game_weight_delta']==0
+    assert answer['paired_seed_and_game_ci95']==[-1.,1.]
+    assert answer['test_games']==2 and answer['labels_per_seed']==1001
