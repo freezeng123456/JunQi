@@ -128,7 +128,16 @@ def make_report(root, result):
         '即使选中步骤落在共同区间，两阶段的数据曝光次数与候选选择范围仍不完全相同；不能把这项探索性比较当作严格等 epoch 或等总计算量结论。']
 
     sections += ['## 长期轨迹在哪些局面得到检验',
+        '现有观测已经包含最近 32 步的起点／终点平面，以及若干累计移动和战斗计数。本轮增加的是 32 维公开轨迹摘要：更长窗口、位移距离、方向变化和访问记录等；没有测试读取完整历史序列的循环网络或历史 Transformer。',
         '主测试以开局和中局为主，后期标签很少。“曾移动”同时包括空走和成功吃子后的位移；全部原始数据分片已逐标签验证该公开分组与独立轨迹记录一致。同一对局的多个棋子、时间点和四个观察者视角始终作为一个重采样单位。']
+    audit=read(root/'dataset_audit.json')['shards']
+    rows=[]
+    for split in SPLITS:
+        feature=audit[split]['features']
+        values=[feature['temporal']['nonzero_by_channel'][i] for i in (2,7,9,21)]
+        values.append(feature['relational']['nonzero_by_channel'][28])
+        rows.append([SPLIT[split],*[f'{v*100:.2f}%' for v in values]])
+    sections.append(table(['分布','曾移动','曾有长距离移动','曾反向移动','曾重访位置','己方棋子局部密度非零'],rows))
     rows = []
     for prefix, label in [('training', '1,024 对局'), ('scale', '5,120 对局')]:
         for split in SPLITS:
