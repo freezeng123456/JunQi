@@ -70,10 +70,13 @@ def state_hash(path):
     return digest.hexdigest()
 
 
-def collect(root):
+def collect(root,*,prefix='training'):
     loaded={}; coverage={}; configs={}
-    for role,seeds,direction in [('A',SEEDS,'temporal'),('B',(*SEEDS,604),'relational')]:
-        path=root/f'training_{role}'
+    steps=50000 if prefix=='training' else 5000
+    source='57940a09dd3ad0b24534a827e0c7b3ffda252ffd' if prefix=='training' else 'd958f70b9822a711354f1eb047fdb02f09a26f04'
+    b_seeds=(*SEEDS,604) if prefix=='training' else SEEDS
+    for role,seeds,direction in [('A',SEEDS,'temporal'),('B',b_seeds,'relational')]:
+        path=root/f'{prefix}_{role}'
         verified=verify_manifest(path)
         overview=read(path/'summary.json'); exit_info=read(path/'launcher_exit.json')
         assert overview['status']=='completed' and exit_info['exit_code']==0 and not exit_info['deadline_fired']
@@ -84,8 +87,8 @@ def collect(root):
                 cell=path/f'{arm}_s{seed}'
                 summary=read(cell/'summary.json'); config=read(cell/'config.json')
                 assert (cell/'done').exists() and summary['status']=='completed'
-                assert summary['steps']==config['max_steps']==50000
-                assert not config['parameter_ema'] and config['source_commit']=='57940a09dd3ad0b24534a827e0c7b3ffda252ffd'
+                assert summary['steps']==config['max_steps']==steps
+                assert not config['parameter_ema'] and config['source_commit']==source
                 key=(role,arm,seed)
                 loaded[key]=summary; configs[key]=config
         coverage[role]={'expected_cells':expected,'completed_cells':expected,'verified_files':verified,
@@ -98,15 +101,15 @@ def collect(root):
             'data_identical':ca['data']==cb['data'],'steps_identical':a['steps']==b['steps'],
             'last_parameters_identical':a['final_parameter_sha256']==b['final_parameter_sha256'],
             'best_step_identical':a['best_step']==b['best_step'],
-            'best_parameters_identical':state_hash(root/f'training_A/baseline_s{seed}/best.pt')==state_hash(root/f'training_B/baseline_s{seed}/best.pt'),
+            'best_parameters_identical':state_hash(root/f'{prefix}_A/baseline_s{seed}/best.pt')==state_hash(root/f'{prefix}_B/baseline_s{seed}/best.pt'),
             'max_holdout_scalar_difference':max(abs(a['evaluations'][s][m]-b['evaluations'][s][m]) for s in SPLITS for m in SCALARS)}
         facts['passed']=all(facts[k] for k in facts if k not in ('seed','max_holdout_scalar_difference')) and facts['max_holdout_scalar_difference']==0
         agreement.append(facts)
     return loaded,configs,coverage,agreement
 
 
-def analyze(root,*,draws=5000):
-    loaded,configs,coverage,agreement=collect(root)
+def analyze(root,*,draws=5000,prefix='training'):
+    loaded,configs,coverage,agreement=collect(root,prefix=prefix)
     means={}; paired={}; stages={}; controls={}; trajectories={}
     for arm,role in [('baseline','A'),('temporal','A'),('relational','B')]:
         models=[loaded[role,arm,seed] for seed in SEEDS]
@@ -114,7 +117,7 @@ def analyze(root,*,draws=5000):
         stages[arm]={split:{stage:{m:float(np.mean([model['evaluations'][split]['stages'][stage][m] for model in models]))
             for m in ('nll','brier','accuracy','labels')} for stage in models[0]['evaluations'][split]['stages']} for split in SPLITS}
         trajectories[arm]=[{'seed':seed,'best_step':model['best_step'],'selected_model_training_subset':model['training_subset'],
-            'last_metrics':json.loads((root/f'training_{role}/{arm}_s{seed}/metrics.jsonl').read_text().splitlines()[-1]),
+            'last_metrics':json.loads((root/f'{prefix}_{role}/{arm}_s{seed}/metrics.jsonl').read_text().splitlines()[-1]),
             'train_seconds':model['train_seconds'],'elapsed_seconds':model['elapsed_seconds']} for seed,model in zip(SEEDS,models,strict=True)]
         if arm=='baseline': continue
         baseline=[loaded[role,'baseline',seed] for seed in SEEDS]
@@ -123,12 +126,13 @@ def analyze(root,*,draws=5000):
         controls[arm]={control:{m:float(np.mean([model['feature_controls'][control][m]-model['evaluations']['test'][m] for model in models]))
             for m in ('nll','brier','accuracy')} for control in ('zero','shuffle')}
     extra={arm:{'best_step':loaded['B',arm,604]['best_step'],'evaluations':{s:{m:loaded['B',arm,604]['evaluations'][s][m]
-        for m in SCALARS} for s in SPLITS}} for arm in ('baseline','relational')}
-    references=read(root/'training_A/reference_metrics.json')
-    assert references==read(root/'training_B/reference_metrics.json')
+        for m in SCALARS} for s in SPLITS}} for arm in ('baseline','relational')} if prefix=='training' else None
+    references=read(root/f'{prefix}_A/reference_metrics.json')
+    assert references==read(root/f'{prefix}_B/reference_metrics.json')
     parameters={str(k):v['parameters'] for k,v in configs.items()}
     assert len(set(parameters.values()))==1
-    return {'status':'complete','primary_seeds':list(SEEDS),'coverage':coverage,
+    return {'status':'complete','experiment':prefix,'steps_per_cell':50000 if prefix=='training' else 5000,
+        'primary_seeds':list(SEEDS),'coverage':coverage,
         'parameters_per_arm':next(iter(parameters.values())),'cross_host_baseline_agreement':agreement,
         'primary_means':means,'paired_comparisons':paired,'stages':stages,'feature_control_minus_full':controls,
         'learning_trajectories':trajectories,'supplementary_seed_604':extra,
@@ -141,10 +145,11 @@ def plot(root,analysis,out):
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     colors={'baseline':'#526173','temporal':'#D77830','relational':'#188C8A'}
+    prefix=analysis['experiment']
     plt.rcParams.update({'font.size':10,'axes.spines.top':False,'axes.spines.right':False,'figure.facecolor':'white'})
     fig,axs=plt.subplots(1,2,figsize=(13,4.5),gridspec_kw={'width_ratios':[1.25,1]})
     for arm,role in [('baseline','A'),('temporal','A'),('relational','B')]:
-        curves=[[json.loads(line) for line in (root/f'training_{role}/{arm}_s{s}/metrics.jsonl').read_text().splitlines()] for s in SEEDS]
+        curves=[[json.loads(line) for line in (root/f'{prefix}_{role}/{arm}_s{s}/metrics.jsonl').read_text().splitlines()] for s in SEEDS]
         steps=[row['step'] for row in curves[0]]
         assert all([row['step'] for row in curve]==steps for curve in curves)
         for kind,style in [('validation','-'),('training','--')]:
@@ -170,7 +175,7 @@ def plot(root,analysis,out):
 
 def markdown(analysis):
     lines=['# BeliefNet 两类特征实验结果','',
-        '本表只汇总完成并通过文件哈希校验的固定步数实验。主比较采用配对种子 601–603；补充种子 604 单独保存。','',
+        '本表只汇总完成并通过文件哈希校验的固定步数实验。主比较采用配对种子 601–603；若有补充种子，则单独保存。','',
         '| 测试分布 | 规则 NLL | 标签频率 NLL | 基线 NLL | 长期轨迹 NLL | 空间关系 NLL |',
         '|---|---:|---:|---:|---:|---:|']
     names={'test':'冻结策略','ood_attack':'偏好攻击的随机行为','ood_random':'均匀随机行为'}
@@ -184,7 +189,7 @@ def markdown(analysis):
             m=analysis['paired_comparisons'][arm][split]['nll']; lo,hi=m['paired_seed_and_game_ci95']
             lines.append(f"| {arm} | {names[split]} | {m['delta_candidate_minus_reference']:+.6f} | [{lo:+.6f}, {hi:+.6f}] | "+', '.join(f'{v:+.6f}' for v in m['paired_seed_deltas'])+' |')
     lines+=['','共有三组主训练种子，区间只描述当前实验的数据和随机初始化，不等于对所有策略、布局分布和长局面的普遍结论。',
-        '',f"已完成 A {analysis['coverage']['A']['completed_cells']}/6、B {analysis['coverage']['B']['completed_cells']}/8 个主单元；各单元 50,000 步。两机基线完全一致：{all(a['passed'] for a in analysis['cross_host_baseline_agreement'])}。",'',
+        '',f"已完成 A {analysis['coverage']['A']['completed_cells']}/{analysis['coverage']['A']['expected_cells']}、B {analysis['coverage']['B']['completed_cells']}/{analysis['coverage']['B']['expected_cells']} 个单元；各单元 {analysis['steps_per_cell']:,} 步。两机基线完全一致：{all(a['passed'] for a in analysis['cross_host_baseline_agreement'])}。",'',
         '完整校准指标、阶段指标、特征干预、末期训练曲线、补充种子及完成证据见 analysis.json；解释性结论另见最终研究报告。','']
     return '\n'.join(lines)
 
@@ -192,9 +197,10 @@ def markdown(analysis):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True); parser.add_argument('--draws',type=int,default=5000)
+    parser.add_argument('--prefix',choices=['training','scale'],default='training')
     parser.add_argument('--no-plot',action='store_true'); args=parser.parse_args()
     args.output.mkdir(exist_ok=True,parents=True)
-    result=analyze(args.root,draws=args.draws)
+    result=analyze(args.root,draws=args.draws,prefix=args.prefix)
     (args.output/'analysis.json').write_text(json.dumps(result,indent=2,allow_nan=False)+'\n')
     (args.output/'RESULT_TABLES.md').write_text(markdown(result))
     if not args.no_plot: plot(args.root,result,args.output)
