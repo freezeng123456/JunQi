@@ -31,7 +31,6 @@ def save_checkpoint(
     save_dir: str,
     *,
     arr_trainer: Any | None = None,
-    arr_ema: Any | None = None,
     belief_trainer: Any | None = None,
 ) -> str:
     """Save move-policy and optional auxiliary-network training state."""
@@ -44,7 +43,6 @@ def save_checkpoint(
     if arr_trainer is not None:
         state["arrangement"] = {
             "trainer": arr_trainer.state_dict(),
-            "ema": arr_ema.state_dict() if arr_ema is not None else None,
         }
     if belief_trainer is not None:
         state["belief"] = belief_trainer.state_dict()

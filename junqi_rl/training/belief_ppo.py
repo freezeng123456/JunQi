@@ -1,23 +1,12 @@
-"""junqi_rl.training.belief_ppo — BeliefNet trainer (CE + uniform-KL diagnostic).
+"""Supervised BeliefNet trainer using current parameters for inference.
 
-Trains :class:`~junqi_rl.networks.belief_net.BeliefNet` on
-``(obs, enemy_mask, true_type_idx)`` tuples emitted by
-:class:`~junqi_rl.belief.buffer.BeliefBuffer`. The training signal is
-purely supervised: per-cell cross-entropy against the ground-truth piece
-type (revealed only when the piece dies or the game ends).
+Cross-entropy is computed only where enemy labels are supplied. Labels may
+come from public reveal tracking or simulator truth used solely as a training
+target; hidden truth is never added to the observation. The diagnostic baseline
+is uniform over all 12 types, not a remaining-inventory prior.
 
-Design (docs/P1_BELIEF_NET_PLAN.md §4)
--------------------------------------
-* **CE loss**: only from revealed cells, i.e. mask = ``(label >= 0) & enemy_mask``.
-* **Uniform baseline diagnostic**: report CE under the uniform-over-
-  remaining-inventory belief. If our CE is not below this, the net has
-  learned nothing beyond "average".
-* **EMA** with decay 0.999 for inference (matches Ataraxos).
-* **Optimizer**: Adam (not AdamW) lr=5e-5, max_grad_norm=0.5 (paper D.6).
-
-No RL terms (no advantage, no KL, no clip). Belief learning is offline
-supervised on a replay buffer — this is simpler than the main PPO loop
-and is isolated in its own trainer class deliberately.
+The optimizer defaults are local engineering choices. This is supervised
+learning on a replay buffer, with no policy-gradient loss or parameter EMA.
 """
 
 from __future__ import annotations
@@ -55,21 +44,13 @@ __all__ = [
 
 @dataclass
 class BeliefPPOConfig:
-    """Hyper-parameters for :class:`BeliefPPOTrainer`.
-
-    Defaults match Ataraxos Appendix D.6 (belief learning):
-    - Adam lr=5e-5
-    - max_grad_norm=0.5
-    - batch=64 (we use 64 on T4; paper used larger on H100)
-    - epochs_per_rollout=2
-    - EMA decay=0.999
-    """
+    """Local hyper-parameters for supervised belief learning."""
 
     lr: float = 5e-5
     """Adam learning rate."""
 
     weight_decay: float = 0.0
-    """Adam weight decay (0 = pure Adam, matches paper)."""
+    """Adam weight decay (0 = pure Adam)."""
 
     max_grad_norm: float = 0.5
     """Gradient clipping L2 norm."""
@@ -82,45 +63,10 @@ class BeliefPPOConfig:
     batch_size=64 and epochs_per_rollout=2, each main-PPO rollout
     contributes 128 samples worth of belief gradient steps."""
 
-    ema_decay: float = 0.999
-    """EMA decay for the eval/inference copy of the belief net."""
-
     autocast_dtype: str = "float32"
     """Autocast precision for the forward pass. Use "float16" on T4 for
     throughput, "bfloat16" on A100/H100. Set to "float32" to disable
     autocast entirely (safest default for supervised learning)."""
-
-
-# ---------------------------------------------------------------------------
-# EMA helper (mirror of training/ppo.py::EMAPolicy)
-# ---------------------------------------------------------------------------
-
-
-class _EMABelief:
-    """Exponential moving average of a BeliefNet's parameters.
-
-    Simple wrapper that keeps a detached shadow copy; inference should
-    use ``ema.model`` rather than the trainable network.
-    """
-
-    def __init__(self, model: BeliefNet, decay: float = 0.999) -> None:
-        self.decay = decay
-        # Clone on CPU first to isolate from the trainable graph, then move.
-        self.model = BeliefNet(model.cfg).to(next(model.parameters()).device)
-        self.model.load_state_dict(model.state_dict())
-        self.model.eval()
-        for p in self.model.parameters():
-            p.requires_grad_(False)
-
-    @torch.no_grad()
-    def update(self, model: BeliefNet) -> None:
-        d = self.decay
-        for ema_p, p in zip(self.model.parameters(), model.parameters()):
-            ema_p.mul_(d).add_(p.detach(), alpha=1.0 - d)
-        # Copy buffers (batchnorm running stats, etc.) verbatim; the
-        # trainable side has already updated them.
-        for ema_b, b in zip(self.model.buffers(), model.buffers()):
-            ema_b.copy_(b)
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +191,7 @@ class BeliefPPOTrainer:
         self.device = torch.device(device)
 
         net = net.to(self.device)
-        # ``self.net`` is the unwrapped BeliefNet (used by EMA, save/load,
+        # ``self.net`` is the unwrapped BeliefNet (used by save/load,
         # and inference paths like ``refresh_beliefs_neural``). DDP wraps a
         # parallel copy whose only purpose is the supervised CE forward/
         # backward inside ``_update_step``.
@@ -260,7 +206,6 @@ class BeliefPPOTrainer:
             )
         else:
             self._net_for_train = net
-        self.ema = _EMABelief(net, decay=self.cfg.ema_decay)
 
         self.optimizer = torch.optim.Adam(
             net.parameters(),
@@ -297,7 +242,7 @@ class BeliefPPOTrainer:
     def _update_step(self, batch: BeliefSample) -> dict[str, Tensor]:
         cfg = self.cfg
         # A zero-gradient Adam step can still move parameters through stored
-        # momentum. Empty supervision must skip forward, optimizer, and EMA.
+        # momentum. Empty supervision must skip the forward pass and optimizer.
         # Decide before DDP forward, on every rank, to keep collectives aligned.
         n_labels = ((batch.true_type_idx >= 0) & batch.enemy_mask).sum().to(self.device)
         has_labels = (n_labels > 0).to(torch.long)
@@ -384,7 +329,6 @@ class BeliefPPOTrainer:
                 "belief_train/updated": zero,
             }
         self.optimizer.step()
-        self.ema.update(self.net)
 
         self.num_train_step += 1
 
@@ -466,7 +410,6 @@ class BeliefPPOTrainer:
     def state_dict(self) -> dict[str, Any]:
         return {
             "net": self.net.state_dict(),
-            "ema": self.ema.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "num_train_step": self.num_train_step,
             "num_rollout": self.num_rollout,
@@ -477,7 +420,7 @@ class BeliefPPOTrainer:
 
     def load_state_dict(self, sd: dict[str, Any]) -> None:
         self.net.load_state_dict(sd["net"])
-        self.ema.model.load_state_dict(sd["ema"])
+        # Legacy EMA entries are ignored; only the trained net is restored.
         self.optimizer.load_state_dict(sd["optimizer"])
         self.num_train_step = int(sd["num_train_step"])
         self.num_rollout = int(sd["num_rollout"])

@@ -53,7 +53,6 @@ ppo:
   max_grad_norm: 0.5
 
   # EMA
-  ema_decay: 0.999
 
   # Schedule
   num_epochs_per_rollout: 4

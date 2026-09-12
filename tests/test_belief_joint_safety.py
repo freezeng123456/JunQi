@@ -111,14 +111,13 @@ def test_hidden_truth_changes_targets_without_changing_player_input():
     assert np.any(buffers[0]._label[0] != buffers[1]._label[0])
 
 
-def test_empty_supervision_skips_adam_momentum_and_ema():
+def test_empty_supervision_skips_adam_momentum():
     world = CPUWorld(generate_random_setup(random.Random(3)))
     buf = BeliefBuffer(capacity=8, seed=3)
     MidgameBeliefSampler(buf, every_steps=1)(rollout_world=world)
     net = BeliefNet(BeliefNetConfig(n_encoder_layer=1, n_head=2, embed_dim=16,
                                   cnn_channels=8, cnn_layers=1, ff_factor=2))
-    trainer = BeliefPPOTrainer(net, BeliefPPOConfig(batch_size=2, epochs_per_rollout=1,
-                                                  ema_decay=.5))
+    trainer = BeliefPPOTrainer(net, BeliefPPOConfig(batch_size=2, epochs_per_rollout=1))
     assert trainer.train_epoch(buf)['belief_train/num_updates'] == 1
     before = copy.deepcopy(trainer.state_dict())
     buf._label[:len(buf)] = -1
@@ -128,9 +127,8 @@ def test_empty_supervision_skips_adam_momentum_and_ema():
     assert metrics['belief_train/empty_skip'] == 1
     assert trainer.num_train_step == 1
     after = trainer.state_dict()
-    for group in ('net', 'ema'):
-        for key in before[group]:
-            torch.testing.assert_close(before[group][key], after[group][key], atol=0, rtol=0)
+    for key in before['net']:
+        torch.testing.assert_close(before['net'][key], after['net'][key], atol=0, rtol=0)
     for pid in before['optimizer']['state']:
         for key in before['optimizer']['state'][pid]:
             torch.testing.assert_close(before['optimizer']['state'][pid][key],

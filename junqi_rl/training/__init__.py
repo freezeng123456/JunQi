@@ -5,15 +5,13 @@ Exports
 PPOConfig
     Training hyper-parameters.
 PPOTrainer
-    PPO algorithm implementation with EMA.
+    PPO algorithm implementation.
 RolloutBuffer
     Fixed-size trajectory store with GAE.
 RolloutBatch
     Minibatch container for gradient updates.
 collect_rollout
     Rollout collection from VectorJunqiEnv.
-EMAPolicy
-    Exponential moving average of model weights.
 power_schedule
     Learning rate / temperature annealing schedule.
 """
@@ -33,7 +31,7 @@ from .gpu_collector import (
     collect_rollout_gpu,
     collect_rollout_gpu_v2,
 )
-from .ppo import EMAPolicy, PPOConfig, PPOTrainer, power_schedule
+from .ppo import PPOConfig, PPOTrainer, power_schedule
 from .rollout import RolloutBatch, RolloutBuffer
 from .rollout_gpu import RolloutBufferGPU
 from .rollout_storage import RolloutStorageEstimate, estimate_rollout_storage
@@ -41,7 +39,6 @@ from .rollout_storage import RolloutStorageEstimate, estimate_rollout_storage
 __all__ = [
     "ArrangementTrainConfig",
     "BeliefTrainConfig",
-    "EMAPolicy",
     "EnvConfig",
     "PPOConfig",
     "PPOTrainer",

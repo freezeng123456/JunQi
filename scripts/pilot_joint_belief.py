@@ -162,7 +162,7 @@ def run(args):
     belief_cfg = BeliefNetConfig(n_encoder_layer=2,n_head=4,embed_dim=64,cnn_channels=32,
                                  cnn_layers=2,ff_factor=2,dropout=0)
     belief_train_cfg = BeliefPPOConfig(lr=5e-5,batch_size=32,epochs_per_rollout=4,
-                                      ema_decay=.99,autocast_dtype='bfloat16')
+                                      autocast_dtype='bfloat16')
     order = [(501,'shadow'),(501,'guarded'),(502,'guarded'),(502,'shadow')]
     provenance = dict(commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         input_checkpoint=str(args.init_policy),input_sha256=hashlib.sha256(Path(args.init_policy).read_bytes()).hexdigest(),
@@ -199,7 +199,7 @@ def run(args):
             adv_filt_thresh=policy_cfg.adv_filt_thresh,adv_filter_scope=policy_cfg.adv_filter_scope,
             minibatch_group=policy_cfg.minibatch_group,gamma=policy_cfg.gamma,
             gae_lambda=policy_cfg.gae_lambda,td_lambda=policy_cfg.td_lambda)
-        initial=probe_metrics(belief_trainer.ema.model,policy,probe,0)
+        initial=probe_metrics(belief_trainer.net,policy,probe,0)
         save_json(cell/'initial-probe.json',initial)
         bad_probe=0; publications=0; cell_start=time.monotonic(); probes=[]; effective_beta=0.0
         initial_belief={k:v.detach().cpu().clone() for k,v in belief.state_dict().items()}
@@ -211,7 +211,7 @@ def run(args):
             metrics.update(belief_trainer.train_epoch(buffer)); metrics.update(sampler.stats())
             beta=.25*min(1,(r-7)/16) if arm=='guarded' and r>=8 else 0.0
             if beta:
-                metrics.update(guarded_refresh_beliefs_neural(world,belief_trainer.ema.model,policy,
+                metrics.update(guarded_refresh_beliefs_neural(world,belief_trainer.net,policy,
                     neural_weight=beta,max_kl=.05,rule_only_input=True,chunk_size=32))
                 publications+=int(metrics.get('belief_infer/neural_weight',0)>0)
                 if not metrics.get('belief_guard/rejected',0):
@@ -225,7 +225,7 @@ def run(args):
             record={'rollout':r+1,'elapsed':time.monotonic()-cell_start,**metrics}
             with (cell/'metrics.jsonl').open('a') as f: f.write(json.dumps(record,allow_nan=False)+'\n')
             if (r+1)%8==0 or r+1==args.rollouts:
-                p=probe_metrics(belief_trainer.ema.model,policy,probe,effective_beta)
+                p=probe_metrics(belief_trainer.net,policy,probe,effective_beta)
                 p['requested_neural_weight']=beta
                 p['last_accepted_neural_weight']=effective_beta
                 p['rollout']=r+1; probes.append(p)

@@ -48,5 +48,4 @@ belief:
     lr: 0.00005
     batch_size: 32
     epochs_per_rollout: 4
-    ema_decay: 0.99
     autocast_dtype: bfloat16

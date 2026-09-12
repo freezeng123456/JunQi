@@ -233,8 +233,9 @@ def refresh_beliefs_neural(
         The :class:`GpuRollout` whose device-resident belief buffer will be
         overwritten. Must have been constructed with ``enable_beliefs=True``.
     belief_net
-        The inference-time belief net. Typically the EMA shadow copy from
-        :class:`BeliefPPOTrainer` (not the trainable network).
+        The current trained belief net from :class:`BeliefPPOTrainer`.
+        Inference uses eval mode and disables gradients; the trainer restores
+        train mode before the next supervised update.
     apply_softmax
         If True (default), softmax the logits before uploading. Pass False
         if ``belief_net`` already returns probabilities.

@@ -45,7 +45,7 @@ def test_joint_cycle_preserves_collected_observations_and_supplies_real_labels()
                               device='cuda')
     metrics = trainer.train_epoch(labels)
     assert metrics['belief_train/num_updates'] == 2
-    refresh = guarded_refresh_beliefs_neural(world, trainer.ema.model, policy, neural_weight=.25,
+    refresh = guarded_refresh_beliefs_neural(world, trainer.net, policy, neural_weight=.25,
                                     max_kl=.05, rule_only_input=True, empty_cache=False)
     assert refresh['belief_infer/max_kl_to_rules'] <= .050001
     assert refresh['belief_guard/max_policy_kl'] <= .020001

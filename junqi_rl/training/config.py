@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import os
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, get_args, get_type_hints
 
@@ -45,7 +46,6 @@ class ArrangementTrainConfig:
     storage_duration: int = 4
     net: ArrangementNetConfig = field(default_factory=ArrangementNetConfig)
     ppo: ArrangementPPOConfig = field(default_factory=ArrangementPPOConfig)
-    ema_decay: float = 0.999
     reg_temp_init: float = 0.1
     reg_temp_decay: float = 0.3
     reg_temp_floor: float = 0.0
@@ -62,7 +62,6 @@ class BeliefTrainConfig:
     warmup_rollouts: int = 20
     net: BeliefNetConfig | dict[str, Any] | None = None
     ppo: BeliefPPOConfig | dict[str, Any] | None = None
-    ema_decay: float = 0.999
     infer_chunk_size: int = 128
     sample_every_steps: int = 0  # 0 preserves legacy terminal-only sampling
     sample_envs: int = 4
@@ -233,6 +232,17 @@ def _dict_to_dataclass(
 
     if not dataclasses.is_dataclass(cls) or not isinstance(values, dict):
         return values
+
+    # Read historical YAML without reintroducing an averaging path. Keep
+    # every other unknown-key error so typos cannot silently change a run.
+    if cls in (PPOConfig, ArrangementTrainConfig, BeliefTrainConfig, BeliefPPOConfig) and "ema_decay" in values:
+        location = f"{path}.ema_decay" if path else f"{cls.__name__}.ema_decay"
+        warnings.warn(
+            f"{location} is ignored: parameter EMA has been removed; current parameters are used",
+            UserWarning,
+            stacklevel=2,
+        )
+        values = {name: value for name, value in values.items() if name != "ema_decay"}
 
     fields = {item.name: item for item in dataclasses.fields(cls)}
     unknown = sorted(set(values) - set(fields))

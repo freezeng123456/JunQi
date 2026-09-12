@@ -235,28 +235,28 @@ def test_trainer_loss_decreases_with_gradient_steps():
     )
 
 
-def test_trainer_ema_tracks_but_lags():
-    """After a training step, EMA params should be close to but not equal
-    to the trainable params (EMA lags with decay 0.999)."""
+def test_inference_uses_current_trained_weights_and_ignores_legacy_ema():
     torch.manual_seed(0)
-    net = BeliefNet(BeliefNetConfig(embed_dim=128, cnn_channels=32, cnn_layers=2))
-    trainer = BeliefPPOTrainer(net, BeliefPPOConfig(lr=1e-2, autocast_dtype="float32"))
-
-    # Grab initial weights.
-    init_ema_weight = trainer.ema.model.head.weight.clone()
-
-    # Train a bit.
-    buf = BeliefBuffer(capacity=64, seed=0)
-    _fill_buffer(buf, n=64, seed=0)
-    for _ in range(3):
-        trainer.train_epoch(buf)
-
-    # EMA should have moved.
-    assert not torch.allclose(trainer.ema.model.head.weight, init_ema_weight)
-    # But NOT all the way to the trainable net (decay 0.999).
-    assert not torch.allclose(
-        trainer.ema.model.head.weight, trainer.net.head.weight
-    )
+    cfg = BeliefNetConfig(embed_dim=32, cnn_channels=8, cnn_layers=1,
+                         n_encoder_layer=1, n_head=2)
+    net = BeliefNet(cfg)
+    trainer = BeliefPPOTrainer(net, BeliefPPOConfig(lr=1e-2, batch_size=4))
+    initial = net.head.weight.detach().clone()
+    buf = BeliefBuffer(capacity=8, seed=0)
+    _fill_buffer(buf, n=8, seed=0)
+    trainer.train_epoch(buf)
+    assert trainer.net is net
+    assert not torch.equal(net.head.weight, initial)
+    assert not hasattr(trainer, "ema")
+    state = trainer.state_dict()
+    assert "ema" not in state
+    # Deliberately different old average: restoring it would corrupt inference.
+    state["ema"] = {k: torch.zeros_like(v) for k, v in state["net"].items()}
+    restored = BeliefPPOTrainer(BeliefNet(cfg))
+    restored.load_state_dict(state)
+    for name, value in net.state_dict().items():
+        torch.testing.assert_close(restored.net.state_dict()[name], value, atol=0, rtol=0)
+    assert "ema" not in restored.state_dict()
 
 
 def test_trainer_state_dict_roundtrip():
