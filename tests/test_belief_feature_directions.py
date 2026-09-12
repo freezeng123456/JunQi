@@ -71,3 +71,35 @@ def test_adapter_starts_with_identical_predictions_then_learns_features():
     torch.testing.assert_close(candidate,baseline,rtol=0,atol=0)
     candidate[0,100,3].backward()
     assert net.adapter.weight.grad.abs().sum()>0
+
+
+def test_loss_respects_hard_support_and_excludes_unlabelled_cells():
+    from experiments.belief_features_20260913.train import supervised_loss
+    obs=torch.zeros(1,OBS_CHANNELS,17,17)
+    obs[0,CHANNEL_LAYOUT['belief_left_side'].start:CHANNEL_LAYOUT['belief_left_side'].start+2,0,0]=.5
+    logits=torch.zeros(1,289,12,requires_grad=True)
+    labels=torch.full((1,289),-1,dtype=torch.long); labels[0,0]=1
+    loss=supervised_loss(logits,obs,labels)
+    assert float(loss.detach())==pytest.approx(.69314718056)
+    loss.backward()
+    assert logits.grad[0,0,1]<0
+    assert logits.grad[0,0,2:].count_nonzero()==0
+    assert logits.grad[0,1:].count_nonzero()==0
+
+
+def test_reported_scores_match_hand_computation_and_group_games():
+    import math
+    from experiments.belief_features_20260913.train import evaluate
+    obs=torch.zeros(2,OBS_CHANNELS,17,17)
+    start=CHANNEL_LAYOUT['belief_left_side'].start
+    obs[:,start,0,0]=.7; obs[:,start+1,0,0]=.3
+    labels=torch.full((2,289),-1,dtype=torch.long)
+    labels[0,0]=0; labels[1,0]=1
+    data=dict(spatial=obs,labels=labels,game_id=torch.tensor([101,102]),step=torch.tensor([0,128]))
+    metrics=evaluate(torch.nn.Identity(),data,'temporal','baseline',predictor='rule')
+    assert metrics['labels']==2
+    assert metrics['nll']==pytest.approx((-math.log(.7)-math.log(.3))/2)
+    assert metrics['brier']==pytest.approx(.58)
+    assert metrics['accuracy']==.5
+    assert metrics['games'][0]['nll']==pytest.approx(-math.log(.7))
+    assert metrics['stages']['middle']['accuracy']==0
