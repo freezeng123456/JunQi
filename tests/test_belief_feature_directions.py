@@ -114,3 +114,10 @@ def test_reported_scores_match_hand_computation_and_group_games():
     assert metrics['accuracy']==.5
     assert metrics['games'][0]['nll']==pytest.approx(-math.log(.7))
     assert metrics['stages']['middle']['accuracy']==0
+
+
+def test_legal_hidden_swap_is_indistinguishable_to_both_feature_arms():
+    from experiments.belief_features_20260913.ambiguity_probe import construct
+    proof=construct()
+    assert proof['status']=='verified_constructive_ambiguity'
+    assert proof['configuration_1']!=proof['configuration_2']
