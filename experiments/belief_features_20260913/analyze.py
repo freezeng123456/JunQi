@@ -15,14 +15,22 @@ def read(path): return json.loads(Path(path).read_text())
 
 
 def verify_manifest(root):
-    count=0
+    count=0; listed=set()
     for line in (root/'artifacts.sha256').read_text().splitlines():
         digest,name=line.split('  ',1)
+        if name in listed: raise ValueError(f'Duplicate manifest entry: {name}')
+        listed.add(name)
         path=root/name
         assert '..' not in Path(name).parts and path.is_relative_to(root)
         with path.open('rb') as f: actual=hashlib.file_digest(f,'sha256').hexdigest()
         if actual!=digest: raise ValueError(f'Artifact mismatch: {path}')
         count+=1
+    actual_files={path.relative_to(root).as_posix() for path in root.rglob('*')
+                  if path.is_file() and path.name!='artifacts.sha256'}
+    if listed!=actual_files:
+        raise ValueError(f'Incomplete artifact manifest at {root}: '
+                         f'unlisted={sorted(actual_files-listed)}, absent={sorted(listed-actual_files)}')
+    if not listed: raise ValueError(f'Empty artifact manifest: {root}')
     return count
 
 

@@ -200,3 +200,21 @@ def test_expanded_loader_uses_requested_training_shards_and_rejects_game_leakage
     shard('test',100)
     with pytest.raises(ValueError,match='Game leakage'):
         load_data(tmp_path,'temporal',train_files=('custom0','custom1'))
+
+
+def test_result_manifest_rejects_partial_inventory_and_corrupted_contents(tmp_path):
+    import hashlib
+    from experiments.belief_features_20260913.analyze import verify_manifest
+    (tmp_path/'summary.json').write_text('{}')
+    (tmp_path/'done').touch()
+    summary_hash=hashlib.sha256(b'{}').hexdigest()
+    empty_hash=hashlib.sha256(b'').hexdigest()
+    manifest=tmp_path/'artifacts.sha256'
+    manifest.write_text(f'{summary_hash}  summary.json\n')
+    with pytest.raises(ValueError,match='Incomplete artifact manifest'):
+        verify_manifest(tmp_path)
+    manifest.write_text(f'{summary_hash}  summary.json\n{empty_hash}  done\n')
+    assert verify_manifest(tmp_path)==2
+    (tmp_path/'summary.json').write_text('{"changed": true}')
+    with pytest.raises(ValueError,match='Artifact mismatch'):
+        verify_manifest(tmp_path)

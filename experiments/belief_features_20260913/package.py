@@ -23,7 +23,7 @@ def package(root, output):
     for name in ('dataset_audit.json', 'ambiguity_probe.json', 'opening_prior.json',
                  'tabular_diagnostics.json', 'recovery_status.json', 'recovery_scale_status.json',
                  'recovery_diagnostics_status.json', 'data_main/recovery_verified.json',
-                 'data_expanded/recovery_verified.json', 'local-regression-final.log',
+                 'data_expanded/recovery_verified.json', 'local-regression-final.log', 'analysis-targeted-tests.log',
                  'main_provenance_A.json', 'main_provenance_B.json',
                  'remote_completion_A.json', 'remote_completion_B.json',
                  'run_main.py', 'run_expanded.py', 'expanded_stages.py',
