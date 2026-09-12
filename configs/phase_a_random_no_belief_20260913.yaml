@@ -1,0 +1,40 @@
+# Prepared phase-A warm-start candidate; not a completed training result.
+# Resume ONLY from a separately recorded v4 raw-policy initializer with a fresh
+# optimizer and rollout counter 0. Do not resume an old run in place.
+# Belief feature studies remain independent offline experiments.
+extends: iteration_combat_outcomes.yaml
+save_dir: exps/phase_a_random_no_belief_20260913
+total_rollouts: 128
+seed: 911
+env:
+  seed: 911
+  show_mode: DARK
+  num_envs: 128
+  steps_per_env: 512
+  max_num_moves: 4000
+random_opponent: true
+arr:
+  enabled: false
+belief:
+  enabled: false
+ppo:
+  lr_coef: 0.00001
+  lr_ceil: 0.00001
+  lr_floor: 0.00001
+  lr_decay: 0.0
+  lr_schedule_unit: rollout
+  temperature_coef: 0.002
+  temperature_ceil: 0.002
+  temperature_floor: 0.002
+  temperature_decay: 0.0
+  temperature_schedule_unit: rollout
+  magnet_shape: uniform_legal
+  kl_coef: 0.1
+  adv_filt_rate: 0.75
+  num_epochs_per_rollout: 1
+eval_every: 16
+eval_num_games: 256
+eval_setup_seed: 3011100
+eval_game_seed: 4011100
+save_every: 16
+log_every: 4
