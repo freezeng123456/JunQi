@@ -45,24 +45,26 @@ def segment_sum(index,values,length):
 
 
 @torch.no_grad()
-def score_predictions(probs,data):
+def score_predictions(probs,data,*,include_games=True):
     labels=data['labels'].long(); target=labels.clamp_min(0)
     ptrue=probs.gather(-1,target[...,None]).squeeze(-1)
     nll=-ptrue.clamp_min(1e-12).log()
     brier=probs.square().sum(-1)-2*ptrue+1
     confidence,predicted=probs.max(-1)
     correct=predicted==target
-    game_ids,inverse=torch.unique(data['game_id'],sorted=True,return_inverse=True)
+    if include_games: game_ids,inverse=torch.unique(data['game_id'],sorted=True,return_inverse=True)
     output={}
     for name,mask in groups(data).items():
         count=int(mask.sum())
         if not count: continue
-        row_count=mask.sum(-1).double()
-        grouped=torch.stack([segment_sum(inverse,value,len(game_ids)) for value in
-            (row_count,(nll*mask).sum(-1).double(),(brier*mask).sum(-1).double(),(correct&mask).sum(-1).double())],1).cpu()
-        grouped_ids=game_ids.cpu().tolist()
-        games=[{'game_id':int(game),'labels':int(v[0]),'nll':float(v[1]/v[0]),
-            'brier':float(v[2]/v[0]),'accuracy':float(v[3]/v[0])} for game,v in zip(grouped_ids,grouped,strict=True) if v[0]>0]
+        games=[]
+        if include_games:
+            row_count=mask.sum(-1).double()
+            grouped=torch.stack([segment_sum(inverse,value,len(game_ids)) for value in
+                (row_count,(nll*mask).sum(-1).double(),(brier*mask).sum(-1).double(),(correct&mask).sum(-1).double())],1).cpu()
+            grouped_ids=game_ids.cpu().tolist()
+            games=[{'game_id':int(game),'labels':int(v[0]),'nll':float(v[1]/v[0]),
+                'brier':float(v[2]/v[0]),'accuracy':float(v[3]/v[0])} for game,v in zip(grouped_ids,grouped,strict=True) if v[0]>0]
         bins=(confidence[mask]*10).long().clamp_max(9)
         confidence_sum=segment_sum(bins,confidence[mask].double(),10)
         correct_sum=segment_sum(bins,correct[mask].double(),10)
