@@ -14,6 +14,7 @@ def package(root, output):
     assert analysis['status'] == 'all_experiments_and_diagnostics_verified'
     assert (root / 'analysis_final/REPORT.md').is_file()
     assert (root / 'analysis_final/PROTOCOL.md').is_file()
+    assert (root / 'analysis_final/FEATURE_CATALOG.md').is_file()
     source = root / 'final-source.bundle'
     assert not source.exists(), source
     subprocess.run(['git', 'bundle', 'create', str(source), 'HEAD'], check=True)
