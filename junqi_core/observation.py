@@ -1720,7 +1720,7 @@ def numpy_view_of_torch_cpu(tensor: Any) -> np.ndarray:
     bridge have torch installed; callers that only use numpy paths never
     pay the import cost.
     """
-    import torch  # type: ignore[import-not-found]  # optional runtime dependency
+    import torch  # type: ignore[import-not-found, unused-ignore]  # optional dependency
     if not isinstance(tensor, torch.Tensor):
         raise TypeError(f"expected torch.Tensor, got {type(tensor).__name__}")
     if tensor.device.type != "cpu":

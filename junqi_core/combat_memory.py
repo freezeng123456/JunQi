@@ -374,7 +374,10 @@ def publicly_revealed_mines(cm: CombatMemoryState) -> np.ndarray:
     mine inherits the chain mask, which must not identify it as another mine.
     Own-piece knowledge and slot priors are deliberately not consulted.
     """
-    return np.any((cm.direct_ate_my_type_mask & _COMMANDER_TYPE_BIT) != 0, axis=0)
+    mines: np.ndarray = np.any(
+        (cm.direct_ate_my_type_mask & _COMMANDER_TYPE_BIT) != 0, axis=0
+    )
+    return mines
 
 
 def apply_combat_event(

@@ -1367,7 +1367,8 @@ class GameState:
         Includes the full ADR-117 SoA mirror so ``from_dict`` can
         reconstruct the state byte-identically (including
         ``move_count`` / ``active_eat`` / ``passive_surv`` counters and
-        ``deaths`` metadata — closes the L5 perf-debt item).
+        ``deaths`` metadata — closes the L5 perf-debt item), plus the recent
+        moves consumed by the observation's src/dst history planes.
         """
         pieces_json = [
             {
@@ -1433,6 +1434,7 @@ class GameState:
             "zero_board": zero_board_json,
             "piece_state": piece_state_json,
             "deaths": deaths_json,
+            "move_history": [[src, dst] for src, dst in self.move_history],
             "combat_memory": {
                 f.name: getattr(self.combat_memory, f.name).tolist()
                 for f in fields(CombatMemoryState)
@@ -1539,6 +1541,9 @@ class GameState:
                 pid = ref.piece_id
                 if pid >= 0:
                     piece_seat_arr[pid] = ref.seat.value
+                    # Dead identities still supply victim types to combat-memory
+                    # count features; the live-piece loop cannot restore them.
+                    piece_type_arr[pid] = ref.piece_type.value
                     zero_x[pid] = pos[0]
                     zero_y[pid] = pos[1]
             for entry in d.get("piece_state", []):
@@ -1637,6 +1642,9 @@ class GameState:
             cell_piece_id=cell_piece_id,
             seat_dead_arr=seat_dead_arr,
             seat_flag_revealed_arr=seat_flag_revealed_arr,
+            # Older snapshots omitted this field. Their lost history cannot be
+            # inferred from the board, so retain the existing empty fallback.
+            move_history=[(int(src), int(dst)) for src, dst in d.get("move_history", [])],
             zobrist=zobrist_val,
         )
 

@@ -34,7 +34,7 @@ from typing import Final
 import numpy as np
 
 from .board import BOARD_SIZE, index_to_pos
-from .combat_memory import publicly_revealed_mines, is_publicly_revealed_mine
+from .combat_memory import is_publicly_revealed_mine, publicly_revealed_mines
 from .rules import (
     ALL_PLACEABLE_PIECES,
     ALL_SEATS,
