@@ -46,6 +46,12 @@ def save_json(path, data):
     Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False)+'\n')
 
 
+def max_parameter_delta(model, initial_state):
+    """Exclude running statistics/counters from evidence of learned weights."""
+    return max(float((value.detach().cpu()-initial_state[name]).abs().max())
+               for name, value in model.named_parameters())
+
+
 def make_probe(path):
     fields = {key: [] for key in ('spatial', 'global_', 'rules', 'labels', 'mask', 'legal')}
     for seed in range(910000, 910008):
@@ -231,8 +237,8 @@ def run(args):
                 print(json.dumps({'cell':cell.name,**p}),flush=True)
         trainer_state=trainer.state_dict(); trainer_state['belief']=belief_trainer.state_dict()
         torch.save(trainer_state,cell/'checkpoint.pt')
-        policy_delta=max(float((v.detach().cpu()-checkpoint['policy'][k]).abs().max()) for k,v in policy.state_dict().items())
-        belief_delta=max(float((v.detach().cpu()-initial_belief[k]).abs().max()) for k,v in belief.state_dict().items())
+        policy_delta=max_parameter_delta(policy, checkpoint['policy'])
+        belief_delta=max_parameter_delta(belief, initial_belief)
         summary=dict(status='completed',seed=seed,arm=arm,rollouts=args.rollouts,
             environment_steps=args.rollouts*32*128,policy_updates=trainer.num_train_step,
             belief_updates=belief_trainer.num_train_step,publications=publications,
