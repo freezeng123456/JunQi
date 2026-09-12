@@ -38,6 +38,7 @@ cheap) and risk NaN overflow in softmax at the tail of training.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+import math
 
 import numpy as np
 import torch
@@ -147,8 +148,15 @@ def constrain_neural_beliefs(
     probabilities: torch.Tensor,
     rules: torch.Tensor,
     live_enemy: torch.Tensor,
+    *,
+    neural_weight: float = 1.0,
+    max_kl: float | None = None,
 ) -> torch.Tensor:
     """Return world (N,4,12,289) beliefs without changing deductive support."""
+    if not math.isfinite(neural_weight) or not 0 <= neural_weight <= 1:
+        raise ValueError("neural_weight must be finite and in [0, 1]")
+    if max_kl is not None and (not math.isfinite(max_kl) or max_kl <= 0):
+        raise ValueError("max_kl must be finite and positive")
     soft = belief_logits_to_upload_shape(probabilities)
     permitted = (rules > 0) & torch.isfinite(soft) & (soft > 0)
     soft = torch.where(permitted, soft, 0.0)
@@ -156,7 +164,34 @@ def constrain_neural_beliefs(
     rule_mass = rules.sum(dim=2, keepdim=True)
     fallback = rules / rule_mass.clamp_min(1e-30)
     projected = torch.where(mass > 0, soft / mass.clamp_min(1e-30), fallback)
+    if neural_weight < 1.0 or max_kl is not None:
+        weight = torch.full_like(mass, neural_weight)
+        if max_kl is not None:
+            # Convexity: KL((1-b) r + b q || r) <= b KL(q || r).
+            # This bounds an individual publication, while keeping a positive
+            # fraction of every rule-allowed type when neural_weight < 1.
+            divergence = (projected * (projected.clamp_min(1e-30).log()
+                          - fallback.clamp_min(1e-30).log())).sum(dim=2, keepdim=True)
+            weight = torch.minimum(weight, max_kl / divergence.clamp_min(1e-30))
+        projected = (1 - weight) * fallback + weight * projected
     return torch.where(live_enemy.unsqueeze(2), projected, rules).contiguous()
+
+
+def rule_only_belief_observations(obs: torch.Tensor, rules: torch.Tensor) -> torch.Tensor:
+    """Canonical (N,4,C,17,17) input, without the net's earlier predictions.
+
+    The rule-only buffer is an observer information state, not hidden truth.
+    Each copied identity block is restricted to its original occupied cells.
+    """
+    clean = obs.detach().clone()
+    for seat, rotation in enumerate((0, 1, 2, -1)):
+        canonical = torch.rot90(rules[:, seat].reshape(-1, 12, 17, 17),
+                                rotation, dims=(-2, -1))
+        for name in ("prob_teammate", "belief_left_side", "belief_right_side"):
+            group = CHANNEL_LAYOUT[name]
+            occupied = obs[:, seat, group].sum(dim=1, keepdim=True) > 0
+            clean[:, seat, group] = canonical * occupied
+    return clean
 
 
 def refresh_beliefs_neural(
@@ -167,6 +202,9 @@ def refresh_beliefs_neural(
     autocast: bool = False,
     empty_cache: bool = True,
     chunk_size: int = 128,
+    neural_weight: float = 1.0,
+    max_kl: float | None = None,
+    rule_only_input: bool = False,
 ) -> dict[str, float]:
     """Run BeliefNet on the current rollout state and push results to d_belief.
 
@@ -234,6 +272,8 @@ def refresh_beliefs_neural(
     # need .clone(); that isn't the current integration pattern.)
     rules = rollout.rule_beliefs_torch()
     live_enemy = _live_enemy_world_mask(obs_sp_all)
+    if rule_only_input:
+        obs_sp_all = rule_only_belief_observations(obs_sp_all, rules)
     C_in, H, W = obs_sp_all.shape[2:]
     obs_flat = obs_sp_all.reshape(N * N_SEATS, C_in, H, W)
     seat_flat = (
@@ -279,7 +319,8 @@ def refresh_beliefs_neural(
         probs = logits
     probs_5d = probs.reshape(N, N_SEATS, NUM_CELLS, N_BELIEF_TYPES)
 
-    upload = constrain_neural_beliefs(probs_5d, rules, live_enemy)
+    upload = constrain_neural_beliefs(probs_5d, rules, live_enemy,
+                                     neural_weight=neural_weight, max_kl=max_kl)
     upload_cpu = upload.detach().cpu().numpy()
     rollout.upload_beliefs(upload_cpu)
 
@@ -296,6 +337,18 @@ def refresh_beliefs_neural(
             "belief_infer/mean_entropy": float(entropy),
             "belief_infer/max_prob_mean": float(max_prob),
         }
+        ambiguous = live_enemy & ((rules > 0).sum(dim=2) > 1)
+        ambiguous_probs = upload.transpose(-1, -2)[ambiguous]
+        if ambiguous_probs.numel():
+            metrics["belief_infer/ambiguous_entropy"] = float(
+                -(ambiguous_probs * ambiguous_probs.clamp_min(1e-30).log()).sum(-1).mean())
+            metrics["belief_infer/ambiguous_max_prob"] = float(ambiguous_probs.max(-1).values.mean())
+            prior = rules.transpose(-1, -2)[ambiguous]
+            divergence = (ambiguous_probs * (ambiguous_probs.clamp_min(1e-30).log()
+                          - prior.clamp_min(1e-30).log())).sum(-1)
+            metrics["belief_infer/max_kl_to_rules"] = float(divergence.max())
+            metrics["belief_infer/mean_kl_to_rules"] = float(divergence.mean())
+        metrics["belief_infer/neural_weight"] = neural_weight
 
     # Release remaining CUDA tensors + fragments so the main PPO forward
     # gets a clean allocator pool.
@@ -304,6 +357,71 @@ def refresh_beliefs_neural(
         torch.cuda.empty_cache()
 
     return metrics
+
+
+@torch.no_grad()
+def _publication_policy_distribution(rollout, policy):
+    spatial, global_ = rollout.build_all_seat_observations_torch()
+    distributions, active = [], []
+    for seat in range(4):
+        seats = torch.full((rollout.num_envs,), seat, dtype=torch.int8, device=spatial.device)
+        legal = rollout.legal_mask_canonical_torch_device(seats)
+        actions = legal.to(torch.int8).argmax(-1)
+        result = policy(spatial[:, seat], global_[:, seat], legal, actions=actions)
+        logp = result['log_probs']
+        if not torch.isfinite(logp).all():
+            raise FloatingPointError('Non-finite policy during belief publication')
+        distributions.append(logp)
+        active.append(legal.sum(-1) > 1)
+    return torch.stack(distributions, dim=1), torch.stack(active, dim=1)
+
+
+def guarded_refresh_beliefs_neural(rollout, belief_net, policy, *,
+                                  max_policy_kl: float = .02,
+                                  min_entropy_ratio: float = .95,
+                                  **kwargs):
+    """Back off a publication if it abruptly changes a fixed policy.
+
+    This is a local safeguard, not a convergence guarantee. The policy is
+    held fixed; no actions are sampled and no policy/belief gradients flow.
+    Failed attempts restore the exact active distribution, not an older host
+    cache. Rule facts remain protected by every candidate projection.
+    """
+    if not math.isfinite(max_policy_kl) or max_policy_kl <= 0:
+        raise ValueError('max_policy_kl must be finite and positive')
+    if not 0 < min_entropy_ratio <= 1:
+        raise ValueError('min_entropy_ratio must be in (0, 1]')
+    previous = rollout.current_beliefs_torch().detach().cpu().numpy().copy()
+    was_training = policy.training
+    policy.eval()
+    weight = float(kwargs.pop('neural_weight', 1.0))
+    kwargs['empty_cache'] = False
+    try:
+        before, active = _publication_policy_distribution(rollout, policy)
+        entropy_before = -(before.exp() * before).sum(-1)
+        for attempt in range(9):
+            metrics = refresh_beliefs_neural(rollout, belief_net, neural_weight=weight, **kwargs)
+            after, _ = _publication_policy_distribution(rollout, policy)
+            divergence = (after.exp() * (after - before)).sum(-1).clamp_min(0)
+            entropy_after = -(after.exp() * after).sum(-1)
+            maximum = float(divergence[active].max()) if active.any() else 0.0
+            ratio = (float((entropy_after[active].mean() + 1e-8) / (entropy_before[active].mean() + 1e-8))
+                     if active.any() else 1.0)
+            if maximum <= max_policy_kl and ratio >= min_entropy_ratio:
+                metrics.update({'belief_guard/max_policy_kl': maximum,
+                                'belief_guard/entropy_ratio': ratio,
+                                'belief_guard/backoffs': float(attempt),
+                                'belief_guard/rejected': 0.0})
+                return metrics
+            rollout.upload_beliefs(previous)
+            weight *= .5
+        return {'belief_infer/neural_weight': 0.0, 'belief_guard/rejected': 1.0,
+                'belief_guard/backoffs': 9.0}
+    except Exception:
+        rollout.upload_beliefs(previous)
+        raise
+    finally:
+        policy.train(was_training)
 
 
 class _NullContext:

@@ -973,6 +973,14 @@ class GpuRollout:
             torch.as_tensor(gl_view, device="cuda"),
         )
 
+    def current_beliefs_torch(self) -> "torch.Tensor":
+        """Active world-frame beliefs, as a borrowed view before stepping."""
+        import torch
+        ptr = _cuda.state_beliefs_ptr(self.state, False)
+        return torch.as_tensor(_CudaArrayInterfaceView(
+            ptr, (self.num_envs, 4, NUM_TRACKED_TYPES, BOARD_SIZE * BOARD_SIZE), "<f4"
+        ), device="cuda")
+
     def rule_beliefs_torch(self) -> "torch.Tensor":
         """World-frame deductive beliefs, independent of neural confidence.
 

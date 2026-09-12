@@ -1,0 +1,52 @@
+# New observation-v4 self-play protocol. No historical run is resumed in place.
+extends: iteration_combat_outcomes.yaml
+save_dir: exps/iteration_joint_belief
+total_rollouts: 48
+random_opponent: false
+disable_arr_train: true
+arr:
+  enabled: false
+env:
+  num_envs: 32
+  steps_per_env: 128
+ppo:
+  num_epochs_per_rollout: 1
+  minibatch_size: 128
+  lr_coef: 0.00001
+  lr_ceil: 0.00001
+  lr_floor: 0.00001
+  lr_decay: 0.0
+  lr_schedule_unit: rollout
+  temperature_coef: 0.03
+  temperature_floor: 0.03
+  temperature_ceil: 0.03
+  temperature_decay: 0.0
+  temperature_schedule_unit: rollout
+belief:
+  enabled: true
+  sample_every_steps: 16
+  sample_envs: 2
+  buffer_capacity: 2048
+  warmup_rollouts: 8
+  min_train_updates: 32
+  neural_weight: 0.25
+  neural_ramp_rollouts: 16
+  max_kl_to_rules: 0.05
+  rule_only_input: true
+  max_policy_kl_on_refresh: 0.02
+  min_policy_entropy_ratio: 0.95
+  infer_chunk_size: 32
+  net:
+    n_encoder_layer: 2
+    n_head: 4
+    embed_dim: 64
+    cnn_channels: 32
+    cnn_layers: 2
+    ff_factor: 2
+    dropout: 0.0
+  ppo:
+    lr: 0.00005
+    batch_size: 32
+    epochs_per_rollout: 4
+    ema_decay: 0.99
+    autocast_dtype: bfloat16

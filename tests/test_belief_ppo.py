@@ -79,7 +79,8 @@ def test_compute_loss_no_revealed_returns_zero():
     enemy = torch.zeros(B, 289, dtype=torch.bool)
     out = compute_belief_loss(logits, label, enemy)
     assert out["ce_loss"].item() == 0.0
-    assert out["n_revealed"].item() == 1.0  # clamp(min=1)
+    assert out["n_revealed"].item() == 0.0
+    assert out["uniform_kl"].item() == 0.0
 
 
 def test_compute_loss_uniform_kl_near_zero_for_random_net():

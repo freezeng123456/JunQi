@@ -567,6 +567,7 @@ def train(cfg: TrainConfig) -> None:
     belief_trainer = None
     belief_buffer = None
     reveal_tracker = None
+    belief_sampler = None
     if belief_enabled:
         from junqi_rl.belief.buffer import BeliefBuffer
         from junqi_rl.belief.reveal_tracker import RevealTracker
@@ -602,6 +603,12 @@ def train(cfg: TrainConfig) -> None:
             seed=cfg.seed,
         )
         reveal_tracker = RevealTracker(belief_buffer=belief_buffer)
+        if cfg.belief.sample_every_steps:
+            from junqi_rl.belief.sampling import MidgameBeliefSampler
+            belief_sampler = MidgameBeliefSampler(
+                belief_buffer, every_steps=cfg.belief.sample_every_steps,
+                envs_per_sample=cfg.belief.sample_envs, seed=cfg.seed,
+            )
         if is_rank0:
             print(f"[train] Belief training enabled: "
                   f"buffer_capacity={cfg.belief.buffer_capacity}, "
@@ -863,7 +870,9 @@ def train(cfg: TrainConfig) -> None:
             if arr_enabled and _collect is collect_rollout_gpu_v2:
                 callbacks.append(_arr_on_termination)
                 needs_arr_snapshot_refresh = True
-            if belief_enabled and _collect is collect_rollout_gpu_v2:
+            if belief_sampler is not None and _collect is collect_rollout_gpu_v2:
+                kwargs["on_observation"] = belief_sampler
+            elif belief_enabled and _collect is collect_rollout_gpu_v2:
                 # Reveal tracker needs the same env_arr_snapshot the arr
                 # callback reads. `env_arr_snapshot` is built just above
                 # inside the ``if arr_enabled:`` branch; if arr is off we
@@ -963,6 +972,8 @@ def train(cfg: TrainConfig) -> None:
                 mc.update(belief_metrics)
             # Expose the RevealTracker insertion counters too.
             mc.update(reveal_tracker.stats())
+            if belief_sampler is not None:
+                mc.update(belief_sampler.stats())
             mc.update(belief_buffer.stats())
             mc.inc("time/belief_train_s", time.time() - t_belief0)
 
@@ -973,13 +984,28 @@ def train(cfg: TrainConfig) -> None:
                 and rollout_idx >= cfg.belief.warmup_rollouts
                 and (rollout_idx - start_rollout) % cfg.belief.refresh_every == 0
                 and len(belief_buffer) > 0
+                and belief_trainer.num_train_step >= cfg.belief.min_train_updates
             ):
                 t_refresh0 = time.time()
-                from junqi_rl.belief.inference import refresh_beliefs_neural
-                refresh_metrics = refresh_beliefs_neural(
+                from junqi_rl.belief.inference import refresh_beliefs_neural, guarded_refresh_beliefs_neural
+                ramp = (min(1.0, (rollout_idx - cfg.belief.warmup_rollouts + 1)
+                            / cfg.belief.neural_ramp_rollouts)
+                        if cfg.belief.neural_ramp_rollouts else 1.0)
+                refresh_fn = refresh_beliefs_neural
+                guard_kwargs = {}
+                if cfg.belief.max_policy_kl_on_refresh:
+                    refresh_fn = guarded_refresh_beliefs_neural
+                    guard_kwargs = dict(policy=trainer.policy,
+                        max_policy_kl=cfg.belief.max_policy_kl_on_refresh,
+                        min_entropy_ratio=cfg.belief.min_policy_entropy_ratio)
+                refresh_metrics = refresh_fn(
                     rollout=env,
                     belief_net=belief_trainer.ema.model,
                     chunk_size=cfg.belief.infer_chunk_size,
+                    neural_weight=cfg.belief.neural_weight * ramp,
+                    max_kl=cfg.belief.max_kl_to_rules,
+                    rule_only_input=cfg.belief.rule_only_input,
+                    **guard_kwargs,
                 )
                 mc.update(refresh_metrics)
                 mc.inc("time/belief_refresh_s", time.time() - t_refresh0)

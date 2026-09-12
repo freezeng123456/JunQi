@@ -64,6 +64,15 @@ class BeliefTrainConfig:
     ppo: BeliefPPOConfig | dict[str, Any] | None = None
     ema_decay: float = 0.999
     infer_chunk_size: int = 128
+    sample_every_steps: int = 0  # 0 preserves legacy terminal-only sampling
+    sample_envs: int = 4
+    neural_weight: float = 1.0
+    neural_ramp_rollouts: int = 0
+    max_kl_to_rules: float | None = None
+    rule_only_input: bool = False
+    min_train_updates: int = 0
+    max_policy_kl_on_refresh: float = 0.0  # 0 disables the optional publication guard
+    min_policy_entropy_ratio: float = .95
 
 
 @dataclass
@@ -300,6 +309,7 @@ def validate_config(cfg: TrainConfig) -> None:
         "belief.refresh_every": cfg.belief.refresh_every,
         "belief.buffer_capacity": cfg.belief.buffer_capacity,
         "belief.infer_chunk_size": cfg.belief.infer_chunk_size,
+        "belief.sample_envs": cfg.belief.sample_envs,
         "rollout.csr_k_max": cfg.rollout.csr_k_max,
         "ppo.value_minibatch_size": cfg.ppo.value_minibatch_size,
     }
@@ -312,6 +322,17 @@ def validate_config(cfg: TrainConfig) -> None:
         raise ValueError("arr.n_arr must be a positive multiple of 4")
     if cfg.arr.pool_size < 0:
         raise ValueError("arr.pool_size must be >= 0 (0 = zip-only pairing)")
+    if min(cfg.belief.sample_every_steps, cfg.belief.neural_ramp_rollouts,
+           cfg.belief.min_train_updates) < 0:
+        raise ValueError("belief cadence, ramp, and minimum updates must be nonnegative")
+    if not 0 <= cfg.belief.neural_weight <= 1:
+        raise ValueError("belief.neural_weight must be in [0, 1]")
+    if cfg.belief.max_kl_to_rules is not None and not 0 < cfg.belief.max_kl_to_rules < float('inf'):
+        raise ValueError("belief.max_kl_to_rules must be finite and positive")
+    if not 0 <= cfg.belief.max_policy_kl_on_refresh < float('inf'):
+        raise ValueError("belief.max_policy_kl_on_refresh must be finite and nonnegative")
+    if not 0 < cfg.belief.min_policy_entropy_ratio <= 1:
+        raise ValueError("belief.min_policy_entropy_ratio must be in (0, 1]")
     if cfg.ppo.lr_schedule_unit not in {"grad_step", "rollout"}:
         raise ValueError(
             "ppo.lr_schedule_unit must be 'grad_step' or 'rollout'"
