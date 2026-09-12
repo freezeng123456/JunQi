@@ -57,6 +57,12 @@ def canonicalize_labels(labels):
                         for s,k in enumerate((0,1,2,-1))],1).flatten(-2)
 
 
+def public_enemy_destinations(spatial):
+    board=torch.as_tensor(COMPACT_TO_FLAT,device=spatial.device,dtype=torch.long)
+    return (spatial[:,CHANNEL_LAYOUT['piece_left_side_enemy']]
+            +spatial[:,CHANNEL_LAYOUT['piece_right_side_enemy']]).flatten(1).index_select(1,board)>0
+
+
 @torch.inference_mode()
 def snapshot(world,tracker,relations,seed,step,storage):
     n=world.num_envs
@@ -101,7 +107,6 @@ def generate_cohort(path,policy,cohort,*,snapshots=SNAPSHOTS):
     relations=PublicRelations().cuda()
     storage={k:[] for k in ('spatial','temporal','relational','labels','seat','game_id','step')}
     facts=[]; started=time.monotonic(); completed=0
-    board=torch.tensor(COMPACT_TO_FLAT,device='cuda')
     for step in range(max(snapshots)+1):
         if step in snapshots:
             fact=snapshot(world,tracker,relations,seed,step,storage)
@@ -118,8 +123,7 @@ def generate_cohort(path,policy,cohort,*,snapshots=SNAPSHOTS):
         else:
             scores=torch.rand(legal.shape,device='cuda')
             if behavior=='attack':
-                enemy=(sp[:,CHANNEL_LAYOUT['piece_left_side_enemy']]
-                      +sp[:,CHANNEL_LAYOUT['piece_right_side_enemy']]).flatten(1).index_select(1,board)>0
+                enemy=public_enemy_destinations(sp)
                 scores += enemy[:,None].expand(-1,129,-1).reshape(n,-1)*2
             action=scores.masked_fill(~legal,-1e9).argmax(-1).to(torch.int32)
         result=world.step_device_torch(action.to(torch.int32),acting)
@@ -151,9 +155,13 @@ def main():
     p.add_argument('--policy',required=True)
     p.add_argument('--output',required=True)
     p.add_argument('--smoke',action='store_true')
+    p.add_argument('--cohorts',nargs='+')
+    p.add_argument('--status-suffix',default='')
     args=p.parse_args()
     root=Path(args.output); root.mkdir(parents=True,exist_ok=True)
-    status=root/f'generation_{args.role}.json'
+    status_name=f'generation_{args.role}{args.status_suffix}'
+    status=root/f'{status_name}.json'
+    if status.exists(): raise FileExistsError(status)
     write_json(status,dict(status='running',role=args.role))
     torch.set_num_threads(1)
     state=torch.load(args.policy,map_location='cpu',weights_only=False)
@@ -167,6 +175,9 @@ def main():
         observation_semantics=OBSERVATION_SEMANTICS_VERSION)
     del state
     cohorts=COHORTS[args.role] if not args.smoke else [(f'smoke_{args.role}',990100,4,'policy')]
+    if args.cohorts:
+        if set(args.cohorts)-{c[0] for c in cohorts}: raise ValueError('Unknown cohort selection')
+        cohorts=[c for c in cohorts if c[0] in args.cohorts]
     results=[]
     try:
         for cohort in cohorts:
@@ -174,7 +185,7 @@ def main():
             if path.exists(): raise FileExistsError(path)
             results.append(generate_cohort(path,policy,cohort,snapshots=(0,4,8,16) if args.smoke else SNAPSHOTS))
         write_json(status,dict(status='completed',**meta,expected_cohorts=len(cohorts),cohorts=results))
-        (root/f'generation_{args.role}.done').touch()
+        (root/f'{status_name}.done').touch()
     except BaseException as e:
         write_json(status,dict(status='failed',**meta,error=repr(e),cohorts=results))
         raise

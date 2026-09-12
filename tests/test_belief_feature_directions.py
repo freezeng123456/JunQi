@@ -44,6 +44,17 @@ def test_feature_interfaces_exclude_hidden_types_and_labels():
     assert list(inspect.signature(PublicRelations.forward).parameters)==['self','obs']
 
 
+def test_attack_behavior_scores_only_public_enemy_destinations():
+    from junqi_core.board import COMPACT_TO_FLAT
+    from experiments.belief_features_20260913.dataset import public_enemy_destinations
+    obs=torch.zeros(2,OBS_CHANNELS,17,17)
+    flat=int(COMPACT_TO_FLAT[10])
+    obs[0,CHANNEL_LAYOUT['piece_left_side_enemy'],flat//17,flat%17]=1
+    enemy=public_enemy_destinations(obs)
+    assert enemy.shape==(2,len(COMPACT_TO_FLAT))
+    assert enemy[0,10] and enemy.sum()==1
+
+
 def test_relations_proximity_and_own_type_are_observer_only():
     obs=torch.zeros(1,OBS_CHANNELS,17,17)
     own=CHANNEL_LAYOUT['piece_own'].start
