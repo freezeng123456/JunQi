@@ -152,3 +152,27 @@ def test_diagnostics_separate_public_movement_and_late_int16_steps():
     assert result['moved']['labels']==result['never_moved']['labels']==result['late']['labels']==1
     assert result['moved']['accuracy']==0 and result['never_moved']['accuracy']==1
     assert result['all']['games'][0]['labels']==2
+
+
+def test_expanded_loader_uses_requested_training_shards_and_rejects_game_leakage(tmp_path,monkeypatch):
+    import gzip
+    import json
+    from experiments.belief_features_20260913.dataset import sha256
+    from experiments.belief_features_20260913.train import load_data,EVAL_FILES
+    monkeypatch.setattr(torch.Tensor,'cuda',lambda self,*args,**kwargs:self)
+    def shard(name,game):
+        path=tmp_path/(name+'.pt.gz')
+        data={'spatial':torch.zeros(1,OBS_CHANNELS,17,17,dtype=torch.float16),
+            'temporal':torch.zeros(1,32,17,17,dtype=torch.float16),
+            'labels':torch.full((1,289),-1,dtype=torch.int8),'seat':torch.zeros(1,dtype=torch.int8),
+            'game_id':torch.tensor([game]),'step':torch.zeros(1,dtype=torch.int16),'meta':{'name':name}}
+        with gzip.open(path,'wb') as f: torch.save(data,f)
+        path.with_suffix('.json').write_text(json.dumps({'sha256':sha256(path)}))
+    names=('custom0','custom1',*EVAL_FILES)
+    for i,name in enumerate(names): shard(name,100+i)
+    data,manifest=load_data(tmp_path,'temporal',train_files=('custom0','custom1'))
+    assert data['train']['game_id'].tolist()==[100,101]
+    assert set(manifest)==set(names)
+    shard('test',100)
+    with pytest.raises(ValueError,match='Game leakage'):
+        load_data(tmp_path,'temporal',train_files=('custom0','custom1'))
