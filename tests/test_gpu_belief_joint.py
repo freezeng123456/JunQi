@@ -1,4 +1,5 @@
 """A real collector/supervision/update/publication cycle preserves PPO history."""
+import math
 import pytest
 import torch
 
@@ -16,6 +17,7 @@ def test_joint_cycle_preserves_collected_observations_and_supplies_real_labels()
     from junqi_rl.belief.inference import guarded_refresh_beliefs_neural
     from junqi_rl.networks.belief_net import BeliefNet, BeliefNetConfig
     from junqi_rl.training.belief_ppo import BeliefPPOTrainer, BeliefPPOConfig
+    from junqi_rl.training.ppo import PPOTrainer, PPOConfig
     world = GpuRollout(num_envs=4)
     history = world.create_rollout_history(8)
     buf = RolloutBufferGPU(num_envs=4, steps_per_env=8, storage_mode='compact_history',
@@ -31,6 +33,12 @@ def test_joint_cycle_preserves_collected_observations_and_supplies_real_labels()
     indices = torch.arange(32, device='cuda', dtype=torch.int64)
     seats = buf.seats.reshape(-1)
     before = tuple(t.clone() for t in history.reconstruct(indices, seats, dtype=torch.float32))
+    policy_trainer = PPOTrainer(policy, PPOConfig(net=policy.cfg,
+        num_epochs_per_rollout=1, minibatch_size=16), device='cuda')
+    policy_metrics = policy_trainer.train_epoch(buf)
+    assert policy_metrics['train/num_updates'] > 0
+    assert all(math.isfinite(value) for value in policy_metrics.values()), {
+        key: value for key, value in policy_metrics.items() if not math.isfinite(value)}
     net = BeliefNet(BeliefNetConfig(n_encoder_layer=1, n_head=2, embed_dim=32,
                                    cnn_channels=16, cnn_layers=1, ff_factor=2)).cuda()
     trainer = BeliefPPOTrainer(net, BeliefPPOConfig(batch_size=4, epochs_per_rollout=2),

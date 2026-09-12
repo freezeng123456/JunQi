@@ -210,8 +210,10 @@ def run(args):
                 publications+=int(metrics.get('belief_infer/neural_weight',0)>0)
                 if not metrics.get('belief_guard/rejected',0):
                     effective_beta=metrics['belief_infer/neural_weight']
-            if any(not np.isfinite(v) for v in metrics.values()):
-                raise FloatingPointError('Non-finite pilot metric')
+            nonfinite = {key: str(value) for key, value in metrics.items() if not np.isfinite(value)}
+            if nonfinite:
+                save_json(cell/'nonfinite-metrics.json', {'rollout':r+1,'metrics':nonfinite})
+                raise FloatingPointError(f'Non-finite pilot metrics: {sorted(nonfinite)}')
             if trainer._nan_skip_count or trainer._grad_nan_skip_count or belief_trainer._nan_skip_count or belief_trainer._grad_skip_count:
                 raise FloatingPointError('Pilot encountered a numerical update skip')
             record={'rollout':r+1,'elapsed':time.monotonic()-cell_start,**metrics}

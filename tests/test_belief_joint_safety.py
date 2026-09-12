@@ -143,3 +143,62 @@ def test_invalid_coupling_settings_fail_closed(weight, cap):
         constrain_neural_beliefs(torch.ones(1,4,289,12), torch.ones(1,4,12,289),
                                 torch.ones(1,4,289,dtype=torch.bool),
                                 neural_weight=weight, max_kl=cap)
+
+
+@pytest.mark.parametrize('outcome', ['backoff', 'reject', 'exception'])
+def test_publication_guard_restores_live_state_and_policy_mode(monkeypatch, outcome):
+    from junqi_rl.belief import inference
+
+    class PublicationWorld:
+        def __init__(self):
+            self.current = torch.tensor([.37, .63])
+            self.weight = 0.0
+
+        def current_beliefs_torch(self):
+            return self.current
+
+        def upload_beliefs(self, values):
+            self.current = torch.as_tensor(values).clone()
+            self.weight = 0.0
+
+    world = PublicationWorld()
+    original = world.current.clone()
+    policy = torch.nn.Linear(1, 1)
+    policy.train()
+    weights = []
+
+    def distribution(current_world, _policy):
+        assert not _policy.training
+        disruptive = current_world.weight > 0 and (
+            outcome != 'backoff' or current_world.weight > .125)
+        probabilities = torch.tensor([.999, .001] if disruptive else [.5, .5])
+        return probabilities.log().reshape(1, 1, 2), torch.ones(1, 1, dtype=torch.bool)
+
+    def refresh(current_world, _belief, *, neural_weight, **kwargs):
+        weights.append(neural_weight)
+        current_world.current = torch.tensor([neural_weight, 1-neural_weight])
+        current_world.weight = neural_weight
+        if outcome == 'exception':
+            raise FloatingPointError('injected failure after upload')
+        return {'belief_infer/neural_weight': neural_weight}
+
+    monkeypatch.setattr(inference, '_publication_policy_distribution', distribution)
+    monkeypatch.setattr(inference, 'refresh_beliefs_neural', refresh)
+    rng_before = torch.random.get_rng_state().clone()
+    if outcome == 'exception':
+        with pytest.raises(FloatingPointError, match='injected failure'):
+            inference.guarded_refresh_beliefs_neural(world, None, policy, neural_weight=.25)
+    else:
+        metrics = inference.guarded_refresh_beliefs_neural(world, None, policy, neural_weight=.25)
+        if outcome == 'backoff':
+            assert weights == [.25, .125]
+            assert metrics['belief_guard/backoffs'] == 1
+            assert metrics['belief_guard/rejected'] == 0
+            torch.testing.assert_close(world.current, torch.tensor([.125, .875]))
+        else:
+            assert len(weights) == 9
+            assert metrics['belief_guard/rejected'] == 1
+    if outcome != 'backoff':
+        torch.testing.assert_close(world.current, original, atol=0, rtol=0)
+    assert policy.training
+    torch.testing.assert_close(torch.random.get_rng_state(), rng_before, atol=0, rtol=0)
