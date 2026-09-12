@@ -49,6 +49,7 @@ def make_report(root, result):
     for backend, label in [('cpu', 'CPU / FP32 / 新 512 局'), ('gpu', 'GPU / BF16 / 新 2,048 局')]:
         path = root / f'analysis_policy/current_{backend}.json'
         if not path.exists():
+            sections.append(f'策略复测 {label}：尚无通过完整配对校验的汇总，不能计作已完成或全胜；原始完成状态保留在对应目录。')
             continue
         policy_result = read(path)
         assert policy_result['status'] == 'all_paired_policy_results_verified'
