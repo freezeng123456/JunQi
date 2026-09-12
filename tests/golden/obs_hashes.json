@@ -152,7 +152,7 @@
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
     "hash_kind": "quantized_i32_1e6",
-    "sha256": "9f3d1989631937e72dec06bcd71b1db53653a95dd1deb9426edc7e643d0d2e76",
+    "sha256": "2760cc0a056f341e1a5171e41689673bb688c4e0ad6730169db04da10556d8b7",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 21.0,
@@ -190,7 +190,7 @@
       "cm_eaten_by_pid": 6.0
     },
     "global_sums": {
-      "remaining_left_side": 19.000003814697266,
+      "remaining_left_side": 19.000001907348633,
       "remaining_right_side": 19.000001907348633,
       "flag_revealed": 1.0
     }
@@ -348,7 +348,7 @@
     "show_mode": "HALF_DARK",
     "observer": "SOUTH",
     "hash_kind": "quantized_i32_1e6",
-    "sha256": "4629747413642a4d284506cdf114184994e41e8be23857243696f1ba33d67e54",
+    "sha256": "535a329b70b2ad7b131608a14776bc4738d216f1d80ee832715b5697be1672c7",
     "spatial_sums": {
       "piece_own": 18.0,
       "prob_teammate": 20.0,

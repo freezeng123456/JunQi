@@ -417,6 +417,8 @@ class BeliefTensor:
                 known = new_state.combat_memory.is_gongb
                 if known[0, pid] and known[1, pid] and known[2, pid] and known[3, pid]:
                     self.probs[dst] = one_hot(PieceType.GONGB)
+        if result.flag_reveal_src or result.flag_reveal_dst:
+            self._apply_revealed_flags(new_state)
         self._dirty_state = new_state
 
     def _apply_public_identities(self, state: GameState) -> None:
@@ -426,6 +428,32 @@ class BeliefTensor:
         for pid in np.flatnonzero(state.alive & (mines | engineers)):
             pos = (int(state.pos_x[pid]), int(state.pos_y[pid]))
             self.probs[pos] = one_hot(PieceType.DILEI if mines[pid] else PieceType.GONGB)
+        self._apply_revealed_flags(state)
+
+    def _apply_revealed_flags(self, state: GameState) -> None:
+        """A commander death publicly reveals the flag's exact location.
+
+        The truth read is gated by the public reveal, including restoration of
+        a mid-game state. Other pieces of that army can no longer be the flag.
+        """
+        flag_idx = _TYPE_TO_IDX[PieceType.JUNQI]
+        for pos, piece in state.pieces.items():
+            if not state.info[piece.seat].flag_revealed:
+                continue
+            if piece.piece_type is PieceType.JUNQI:
+                self.probs[pos] = one_hot(PieceType.JUNQI)
+            else:
+                prior = self.probs[pos]
+                if prior[flag_idx] == 0:
+                    continue
+                updated = prior.copy()
+                updated[flag_idx] = 0.0
+                mass = updated.sum()
+                if mass <= 0:
+                    updated.fill(1.0)
+                    updated[flag_idx] = 0.0
+                    mass = updated.sum()
+                self.probs[pos] = updated / mass
 
     def ensure_synced(self, state: GameState | None = None) -> None:
         """Refresh ``probs_arr`` / ``remaining_arr`` if they are stale.
@@ -568,12 +596,9 @@ def _observer_sees_truth(
     observer: Seat, owner: Seat, show_mode: ShowMode
 ) -> bool:
     """True iff the observer can see the true type of `owner`'s pieces."""
-    if show_mode is ShowMode.BRIGHT:
-        return True
-    if observer is owner:
-        return True
-    # HALF_DARK / DARK: teammate pieces are visible iff HALF_DARK (Q11)
-    return show_mode is ShowMode.HALF_DARK and same_team(observer, owner)
+    from .player_view import sees_army_types
+
+    return sees_army_types(observer, owner, show_mode)
 
 
 def _is_one_hot(vec: np.ndarray, eps: float = 1e-6) -> bool:

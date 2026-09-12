@@ -1,7 +1,8 @@
 const $ = (selector) => document.querySelector(selector);
 
 const SEAT_LABELS = { SOUTH: "南", WEST: "西", NORTH: "北", EAST: "东" };
-const EVENT_LABELS = { MOVE: "移动", EAT: "吃子", KILLED: "被击杀", BOMB: "炸弹同归" };
+const EVENT_LABELS = { MOVE: "移动", EAT: "吃子", KILLED: "被击杀", BOMB: "同归于尽" };
+const MODE_LABELS = { DARK: "四暗棋", HALF_DARK: "双明棋", BRIGHT: "明棋" };
 
 const state = {
   meta: null,
@@ -9,6 +10,8 @@ const state = {
   frame: null,
   playing: false,
   timer: null,
+  observer: "SOUTH",
+  requestId: 0,
 };
 
 function position(node, x, y) {
@@ -46,6 +49,7 @@ function renderPieces(frame) {
     node.className = `piece ${piece.seat}`;
     node.textContent = piece.label;
     node.title = `${piece.seat} · ${piece.label} · #${piece.piece_id}`;
+    if (piece.deduced_label) node.title += ` · 公开推断：${piece.deduced_label}`;
     if (action && action.src[0] === piece.x && action.src[1] === piece.y) node.classList.add("last-src");
     if (action && action.dst[0] === piece.x && action.dst[1] === piece.y) node.classList.add("last-dst");
     position(node, piece.x, piece.y);
@@ -130,6 +134,11 @@ function renderPolicy(policy) {
   const summary = $("#policy-summary");
   const source = $("#policy-source");
   list.replaceChildren();
+  if (state.observer !== "OMNISCIENT") {
+    source.textContent = "玩家视角";
+    summary.textContent = "本视角显示盘面及公开事件";
+    return;
+  }
   if (!policy || !policy.top_actions?.length) {
     source.textContent = "Top-K";
     summary.textContent = "普通对局没有策略数据";
@@ -210,10 +219,14 @@ function renderSourceMeta() {
 }
 
 async function loadFrame(step) {
-  const response = await fetch(`/api/frame/${step}`, { cache: "no-store" });
+  const requestId = ++state.requestId;
+  const observer = state.observer;
+  const response = await fetch(`/api/frame/${step}?observer=${observer}`, { cache: "no-store" });
   if (!response.ok) throw new Error(await response.text());
   const frame = await response.json();
+  if (requestId !== state.requestId || observer !== state.observer) return;
   state.frame = frame;
+  state.meta.key_events = frame.key_events;
   state.step = frame.step;
   $("#step-number").textContent = frame.step;
   if (frame.terminated) {
@@ -266,15 +279,8 @@ function togglePlayback() {
 }
 
 async function boot() {
-  const response = await fetch("/api/meta", { cache: "no-store" });
-  state.meta = await response.json();
-  $("#filename").textContent = state.meta.filename;
-  $("#replay-kind").textContent = state.meta.kind === "policy"
-    ? `强化学习轨迹 · ${state.meta.length} 步`
-    : `普通对局 · ${state.meta.length} 步`;
-  $("#scrubber").max = state.meta.length;
-  renderCells(state.meta.cells);
-  renderSourceMeta();
+  await loadPerspective();
+  $("#perspective").addEventListener("change", loadPerspective);
 
   $("#first").addEventListener("click", () => loadFrame(0));
   $("#previous").addEventListener("click", () => loadFrame(Math.max(0, state.step - 1)));
@@ -286,6 +292,7 @@ async function boot() {
     $("#board").classList.toggle("hide-labels", !event.target.checked);
   });
   document.addEventListener("keydown", (event) => {
+    if (event.target.closest("input, select, textarea, button, [contenteditable=true]")) return;
     if (event.key === "ArrowLeft") loadFrame(Math.max(0, state.step - 1));
     if (event.key === "ArrowRight") loadFrame(Math.min(state.meta.length, state.step + 1));
     if (event.key === " ") {
@@ -293,7 +300,36 @@ async function boot() {
       togglePlayback();
     }
   });
-  await loadFrame(0);
+}
+
+async function loadPerspective() {
+  stopPlayback();
+  const requestId = ++state.requestId;
+  const observer = $("#perspective").value;
+  state.observer = observer;
+  // Clear the previous perspective before waiting for its replacement.
+  $("#piece-layer").replaceChildren();
+  $("#src-piece").textContent = "—";
+  $("#dst-piece").textContent = "—";
+  $("#value").textContent = "—";
+  $("#action-source").textContent = "—";
+  $("#event-list").replaceChildren();
+  $("#run-meta").textContent = "—";
+  renderPolicy(null);
+  const response = await fetch(`/api/meta?observer=${observer}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(await response.text());
+  const meta = await response.json();
+  if (requestId !== state.requestId || observer !== state.observer) return;
+  state.meta = meta;
+  $("#filename").textContent = meta.filename;
+  $("#replay-kind").textContent = `${MODE_LABELS[meta.show_mode] || meta.show_mode} · ${meta.length} 步`;
+  $("#visibility-note").textContent = observer === "OMNISCIENT"
+    ? "全知复盘：显示所有真实棋型及训练记录"
+    : "仅显示所选玩家可见的身份；悬浮可查看公开推断";
+  $("#scrubber").max = meta.length;
+  renderCells(meta.cells);
+  renderSourceMeta();
+  await loadFrame(state.step);
 }
 
 boot().catch((error) => {

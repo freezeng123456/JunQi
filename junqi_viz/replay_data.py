@@ -9,9 +9,11 @@ from typing import Any
 from junqi_core.board import CELL_TABLE
 from junqi_core.replay_viewer import ReplayViewer, frame_summary, load_replay
 from junqi_core.replay_with_policy import TrajectoryWithPolicy
-from junqi_core.rules import ALL_SEATS
+from junqi_core.player_view import public_deduced_type, visible_piece_type
+from junqi_core.rules import ALL_SEATS, PieceType, Seat
 
 PIECE_LABELS = {
+    "DARK": "暗棋",
     "JUNQI": "军旗",
     "DILEI": "地雷",
     "ZHADAN": "炸弹",
@@ -37,7 +39,7 @@ EVENT_LABELS = {
     "MOVE": "移动",
     "EAT": "吃子",
     "KILLED": "被击杀",
-    "BOMB": "炸弹同归",
+    "BOMB": "同归于尽",
 }
 
 SOURCE_LABELS = {
@@ -65,11 +67,15 @@ class ReplayData:
         return self._viewer.length
 
     @staticmethod
-    def _piece_payload(piece: Any | None) -> dict[str, Any] | None:
+    def _piece_payload(
+        piece: Any | None, state: Any, observer: Seat | None,
+    ) -> dict[str, Any] | None:
         if piece is None:
             return None
         seat = piece.seat.name
-        piece_type = piece.piece_type.name
+        visible = piece.piece_type if observer is None else visible_piece_type(state, observer, piece)
+        piece_type = visible.name
+        deduced = public_deduced_type(state, piece) if visible is PieceType.DARK else None
         return {
             "piece_id": int(piece.piece_id),
             "seat": seat,
@@ -77,7 +83,16 @@ class ReplayData:
             "team": int(piece.seat.team),
             "type": piece_type,
             "label": PIECE_LABELS.get(piece_type, piece_type),
+            "deduced_label": PIECE_LABELS[deduced.name] if deduced is not None else None,
         }
+
+    def _events(self, observer: Seat | None, step: int) -> list[dict[str, Any]]:
+        if observer is None:
+            return list(self._event_index)
+        return [
+            {**event, "value": None, "source": None, "source_label": None}
+            for event in self._event_index if event["step"] <= step
+        ]
 
     @staticmethod
     def _seat_payload(state: Any) -> dict[str, dict[str, Any]]:
@@ -148,7 +163,7 @@ class ReplayData:
         self._viewer.reset()
         return events
 
-    def metadata(self) -> dict[str, Any]:
+    def metadata(self, observer: Seat | None = None) -> dict[str, Any]:
         is_policy = isinstance(self.source, TrajectoryWithPolicy)
         cells = [
             {
@@ -169,23 +184,25 @@ class ReplayData:
             "kind": "policy" if is_policy else "manual",
             "rules_version": self.source.rules_version,
             "state_version": self.source.state_version,
-            "top_k": self.source.top_k if is_policy else 0,
+            "observer": observer.name if observer is not None else None,
+            "show_mode": self.source.show_mode.name,
+            "top_k": self.source.top_k if is_policy and observer is None else 0,
             "has_beliefs": bool(
-                isinstance(self.source, TrajectoryWithPolicy)
+                observer is None and isinstance(self.source, TrajectoryWithPolicy)
                 and self.source.beliefs is not None
             ),
             "belief_shape": (
                 list(self.source.beliefs.shape)
-                if isinstance(self.source, TrajectoryWithPolicy)
+                if observer is None and isinstance(self.source, TrajectoryWithPolicy)
                 and self.source.beliefs is not None
                 else None
             ),
-            "meta": dict(self.source.meta),
+            "meta": dict(self.source.meta) if observer is None else {},
             "cells": cells,
-            "key_events": list(self._event_index),
+            "key_events": self._events(observer, 0),
         }
 
-    def frame(self, step: int) -> dict[str, Any]:
+    def frame(self, step: int, observer: Seat | None = None) -> dict[str, Any]:
         if not 0 <= step <= self.length:
             raise IndexError(f"replay step {step} outside [0, {self.length}]")
         with self._lock:
@@ -196,13 +213,13 @@ class ReplayData:
                 # Keep the cursor aligned with the frame returned to callers.
                 frame = self._viewer.seek(step)
             payload = frame_summary(frame)
+            payload["observer"] = observer.name if observer is not None else None
+            payload["show_mode"] = frame.state.show_mode.name
+            payload["key_events"] = self._events(observer, step)
             payload["length"] = self.length
             payload["pieces"] = [
                 {
-                    "piece_id": int(piece.piece_id),
-                    "seat": piece.seat.name,
-                    "type": piece.piece_type.name,
-                    "label": PIECE_LABELS.get(piece.piece_type.name, piece.piece_type.name),
+                    **self._piece_payload(piece, frame.state, observer),
                     "x": int(x),
                     "y": int(y),
                 }
@@ -240,10 +257,12 @@ class ReplayData:
                     "src": list(action.src),
                     "dst": list(action.dst),
                     "src_piece": self._piece_payload(
-                        before_state.pieces.get(action.src) if before_state is not None else None
+                        before_state.pieces.get(action.src) if before_state is not None else None,
+                        before_state, observer,
                     ),
                     "dst_piece": self._piece_payload(
-                        before_state.pieces.get(action.dst) if before_state is not None else None
+                        before_state.pieces.get(action.dst) if before_state is not None else None,
+                        before_state, observer,
                     ),
                 }
             else:
@@ -259,7 +278,7 @@ class ReplayData:
                     for seat in result.seats_died_this_step
                 ]
                 payload["result"]["winner_team_after"] = result.winner_team_after
-            if frame.policy is not None:
+            if frame.policy is not None and observer is None:
                 policy = payload["policy"]
                 policy["source_label"] = SOURCE_LABELS.get(
                     frame.policy.action_source_name, frame.policy.action_source_name

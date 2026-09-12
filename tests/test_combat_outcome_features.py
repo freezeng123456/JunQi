@@ -115,6 +115,35 @@ def tiny(enabled):
         combat_outcome_features=enabled)).eval()
 
 
+def test_real_policy_is_invariant_to_a_hidden_mine_vs_ranked_defender():
+    """Equal public information must reach equal action distributions."""
+    torch.manual_seed(20260912)
+    model = tiny(True)
+    with torch.no_grad():
+        # Exercise a learned/nonzero residual, not its neutral initialization.
+        model.combat_head.residual[-1].weight.uniform_(-0.3, 0.3)
+        model.combat_head.residual[-1].bias.fill_(0.2)
+    outputs = []
+    for defender in (PieceType.DILEI, PieceType.LIANZH):
+        state = position(PieceType.PAIZH, defender)
+        belief = BeliefTensor.initial(state, Seat.SOUTH)
+        stages = []
+        for stage in range(2):
+            data = inputs(state, belief, state.legal_actions(Seat.SOUTH))
+            with torch.no_grad():
+                result = model(*data[:3], actions=data[3][:1])
+            stages.append((result['log_probs'], result['value'], model.combat_head(data[0])))
+            if stage == 0:
+                after, event = state.step(Action(Seat.SOUTH, (2, 7), (1, 7)))
+                assert event.event is Event.KILLED
+                belief.update(state, after, event)
+                state = after
+        outputs.append(stages)
+    for left, right in zip(*outputs, strict=True):
+        for a, b in zip(left, right, strict=True):
+            torch.testing.assert_close(a, b, rtol=0, atol=0)
+
+
 def tactical_data():
     state = position(PieceType.GONGB, PieceType.DILEI)
     return inputs(state, BeliefTensor.initial(state, Seat.SOUTH), state.legal_actions())

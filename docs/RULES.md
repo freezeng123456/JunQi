@@ -414,6 +414,11 @@ All 4 setups pass `validate_setup()` which enforces §1.3 constraints C1-C5. Fai
 
 - Every cell's `(x, y, is_occupied, owner_seat_if_occupied, is_camp, is_stronghold, is_railway)`.
 - Every seat's `(alive, flag_revealed)`.
+- Once a seat's flag is revealed by its commander's death, the exact surviving
+  flag cell is public. Every observer must receive one-hot JUNQI at that cell,
+  with JUNQI excluded from all other pieces of that seat. Preserve this on
+  state restoration and neural belief refresh; the seat-level boolean alone
+  does not convey the visible flag location.
 - Move history (sequence of MoveResult broadcasts).
 
 ### 7.2 Belief Channels (observation tensor)

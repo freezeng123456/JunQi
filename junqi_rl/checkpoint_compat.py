@@ -19,7 +19,9 @@ from junqi_core.observation import OBS_CHANNELS
 
 
 CHECKPOINT_FORMAT_VERSION = 2
-OBSERVATION_SEMANTICS_VERSION = 3
+# v4: public commander-death flags identify the exact flag cell and exclude
+# JUNQI from every other piece of that army, on CPU and native CUDA paths.
+OBSERVATION_SEMANTICS_VERSION = 4
 
 
 def current_checkpoint_metadata(policy: Module | None = None) -> dict[str, Any]:

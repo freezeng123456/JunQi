@@ -165,6 +165,7 @@ __global__ void belief_init_kernel(
     const bool*    d_alive,
     const int8_t*  d_pos_x,
     const int8_t*  d_pos_y,
+    const bool*    d_seat_flag_revealed,
     const bool*    d_just_reset,      // (N,) true for envs that need init
     float*         d_belief)
 {
@@ -216,7 +217,8 @@ __global__ void belief_init_kernel(
         for (int obs = 0; obs < 4; ++obs) {
             // DARK mode: only observer's OWN pieces get one-hot.
             // Teammate + enemy pieces all get per-slot prior.
-            if (obs == piece_seat) {
+            bool flag_public = d_seat_flag_revealed[env * 4 + piece_seat];
+            if (obs == piece_seat || (flag_public && piece_type == PT_JUNQI)) {
                 // Own piece: one-hot (known type)
                 float* base = d_belief
                     + (size_t)env * (4 * NUM_TRACKED_TYPES * NUM_CELLS)
@@ -230,8 +232,10 @@ __global__ void belief_init_kernel(
                     + (size_t)env * (4 * NUM_TRACKED_TYPES * NUM_CELLS)
                     + (size_t)obs * (NUM_TRACKED_TYPES * NUM_CELLS)
                     + cell_flat;
+                float mass = flag_public ? 1.0f - prior[PT_JUNQI - 2] : 1.0f;
                 for (int t = 0; t < NUM_TRACKED_TYPES; ++t)
-                    base[t * NUM_CELLS] = prior[t];
+                    base[t * NUM_CELLS] = (flag_public && t == PT_JUNQI - 2)
+                        ? 0.0f : prior[t] / mass;
             }
         }
     }
@@ -404,7 +408,9 @@ __global__ void belief_update_kernel(
                 mine |= (d_cm_direct_type[ci] & ((uint16_t)1 << (PT_SILING - 2))) != 0;
                 engineer &= d_cm_is_gongb[ci];
             }
-            if (mine || engineer)
+            if (seat_flagr[seat_arr[tid]] && type_arr[tid] == PT_JUNQI)
+                s_public_identity[tid] = PT_JUNQI - 2;
+            else if (mine || engineer)
                 s_public_identity[tid] = (mine ? PT_DILEI : PT_GONGB) - 2;
         }
     }
@@ -532,6 +538,7 @@ __global__ void belief_update_kernel(
                 // Cell has a live piece — check if belief is missing.
                 float buf[12];
                 read_belief(d_belief, env, obs, c, buf);
+                bool changed = false;
                 if (is_zero_12(buf)) {
                     // Missing belief entry — provide a fallback.
                     int8_t ps = seat_arr[pid_c];
@@ -540,18 +547,27 @@ __global__ void belief_update_kernel(
 
                     if (obs == ps && type_idx >= 0) {
                         // DARK mode: only the observer's own pieces are known
-                        float oh[12];
-                        write_one_hot(oh, type_idx);
-                        write_belief(d_belief, env, obs, c, oh);
+                        write_one_hot(buf, type_idx);
                     } else {
                         // Enemy: uniform fallback (conservative)
-                        float uf[12];
                         float val = 1.0f / (float)NUM_TRACKED_TYPES;
                         for (int t = 0; t < NUM_TRACKED_TYPES; ++t)
-                            uf[t] = val;
-                        write_belief(d_belief, env, obs, c, uf);
+                            buf[t] = val;
                     }
+                    changed = true;
                 }
+                // The exact flag location is public once its commander dies.
+                // Every other piece of that army is consequently not the flag.
+                if (seat_flagr[seat_arr[pid_c]] && buf[PT_JUNQI - 2] > 0.0f) {
+                    buf[PT_JUNQI - 2] = 0.0f;
+                    float mass = 0.0f;
+                    for (int t = 0; t < NUM_TRACKED_TYPES; ++t) mass += buf[t];
+                    for (int t = 0; t < NUM_TRACKED_TYPES; ++t)
+                        buf[t] = mass > 0.0f ? buf[t] / mass
+                            : (t == PT_JUNQI - 2 ? 0.0f : 1.0f / 11.0f);
+                    changed = true;
+                }
+                if (changed) write_belief(d_belief, env, obs, c, buf);
             }
         }
     }
@@ -608,7 +624,7 @@ void init_beliefs_for_reset_envs(
     belief_init_kernel<<<grid, block>>>(
         N, d_state.d_piece_seat_arr, d_state.d_piece_type_arr,
         d_state.d_alive, d_state.d_pos_x, d_state.d_pos_y,
-        mask, d_belief);
+        d_state.d_seat_flag_revealed_arr, mask, d_belief);
     KERNEL_CHECK();
 }
 
@@ -630,7 +646,7 @@ void init_all_beliefs(
     belief_init_kernel<<<grid, block>>>(
         N, d_state.d_piece_seat_arr, d_state.d_piece_type_arr,
         d_state.d_alive, d_state.d_pos_x, d_state.d_pos_y,
-        d_mask, d_belief);
+        d_state.d_seat_flag_revealed_arr, d_mask, d_belief);
     KERNEL_CHECK();
 
     cudaFree(d_mask);

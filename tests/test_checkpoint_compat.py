@@ -33,6 +33,7 @@ def test_checkpoint_metadata_tracks_runtime_schema() -> None:
     assert metadata["observation_channels"] == OBS_CHANNELS
     assert metadata["action_dim"] == COMPACT_ACTION_DIM
     assert metadata["stem_class"] == "GraphStem"
+    assert metadata["observation_semantics_version"] == 4
 
 
 def test_matching_legacy_checkpoint_without_metadata_is_accepted() -> None:
@@ -67,7 +68,7 @@ def test_checkpoint_metadata_mismatch_is_rejected() -> None:
 def test_observation_semantics_mismatch_is_rejected():
     net = _tiny_net()
     metadata = current_checkpoint_metadata(net)
-    metadata["observation_semantics_version"] = 0
+    metadata["observation_semantics_version"] = 3
     with pytest.raises(ValueError, match="observation_semantics_version"):
         validate_policy_checkpoint(net, {"policy": net.state_dict(), "checkpoint_meta": metadata})
 
