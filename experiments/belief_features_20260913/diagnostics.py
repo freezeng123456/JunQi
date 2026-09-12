@@ -20,7 +20,11 @@ def load(path):
 def slot_and_moves(spatial):
     slots=spatial[:,CHANNEL_LAYOUT['piece_slot']].flatten(-2).argmax(1)
     move_slice=CHANNEL_LAYOUT['move_bucket']
-    moves=spatial[:,move_slice.start+4:move_slice.stop].flatten(-2).argmax(1)
+    quiet=spatial[:,move_slice.start+4:move_slice.stop].flatten(-2).argmax(1)
+    eat=CHANNEL_LAYOUT['active_eat_bucket']
+    # MOVE counts only quiet moves; EAT relocations have their own cumulative counter.
+    captures=(spatial[:,eat.start+4:eat.stop].flatten(-2).sum(1)-1).clamp_min(0).long()
+    moves=(quiet+captures).clamp_max(3)
     return slots.long(),moves.long()
 
 
@@ -117,7 +121,7 @@ def main():
     torch.set_num_threads(1)
     tables,sources=fit_references(args.data)
     output={'fit_shards':sources,'add_one_smoothing':1.,'posthoc_interpretive_reference':True,
-        'inputs':'Only the existing public starting-slot and exact public movement bucket channels, followed by deductive support masking.',
+        'inputs':'Only existing public starting-slot, quiet-move and successful-capture count channels. The movement bucket combines quiet moves and capture relocations, saturated at three, followed by deductive support masking.',
         'tables':{k:v.tolist() for k,v in tables.items()},'evaluations':{}}
     for split in ('validation','test','ood_attack','ood_random'):
         data=load(args.data/(split+'.pt.gz'))

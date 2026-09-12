@@ -154,6 +154,19 @@ def test_diagnostics_separate_public_movement_and_late_int16_steps():
     assert result['all']['games'][0]['labels']==2
 
 
+def test_successful_capture_counts_as_movement_without_a_quiet_move():
+    from experiments.belief_features_20260913.diagnostics import slot_and_moves,groups
+    obs=torch.zeros(1,OBS_CHANNELS,17,17)
+    obs[0,CHANNEL_LAYOUT['move_bucket'].start+4,0,0]=1
+    eat=CHANNEL_LAYOUT['active_eat_bucket'].start+4
+    obs[0,eat:eat+2,0,0]=1  # cumulative capture counter: exactly one capture
+    _,moves=slot_and_moves(obs)
+    assert moves[0,0]==1
+    labels=torch.full((1,289),-1); labels[0,0]=0
+    result=groups({'spatial':obs,'labels':labels,'step':torch.tensor([8])})
+    assert result['moved'][0,0] and not result['never_moved'][0,0]
+
+
 def test_expanded_loader_uses_requested_training_shards_and_rejects_game_leakage(tmp_path,monkeypatch):
     import gzip
     import json

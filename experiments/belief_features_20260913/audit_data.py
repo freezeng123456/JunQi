@@ -24,6 +24,11 @@ def main():
         with gzip.open(path,'rb') as f: data=torch.load(f,map_location='cpu',weights_only=False)
         labels=data['labels'].long(); mask=labels>=0
         obs=data['spatial']
+        from experiments.belief_features_20260913.diagnostics import slot_and_moves
+        _,public_moves=slot_and_moves(obs)
+        base_moved=public_moves>0
+        temporal_moved=data['temporal'][:,2].flatten(-2)>0
+        assert torch.equal(base_moved[mask],temporal_moved[mask]),'Temporal public movement disagrees with baseline public movement'
         q=(obs[:,CHANNEL_LAYOUT['belief_left_side']]+obs[:,CHANNEL_LAYOUT['belief_right_side']]).flatten(-2).transpose(-1,-2).float()
         q=q/q.sum(-1,keepdim=True).clamp_min(1e-12)
         nll=-q.gather(-1,labels.clamp_min(0)[...,None]).squeeze(-1).clamp_min(1e-12).log()
@@ -47,7 +52,7 @@ def main():
         result[name]={'sha256':digest,'rows':len(labels),'games':len(games[name]),
             'labels':int(mask.sum()),'class_counts':torch.bincount(labels[mask],minlength=12).tolist(),
             'rule_nll':float(nll[mask].mean()),'support_size_counts':torch.bincount(sizes[mask],minlength=13).tolist(),
-            'stages':stages,'features':extra,'generation':data['meta']}
+            'stages':stages,'features':extra,'temporal_movement_matches_base':True,'generation':data['meta']}
         print(json.dumps({'shard':name,'rows':len(labels),'labels':int(mask.sum()),'rule_nll':result[name]['rule_nll']}),flush=True)
         del data,labels,mask,obs,q,nll,sizes,values
         gc.collect()
