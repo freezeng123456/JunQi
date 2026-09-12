@@ -237,7 +237,7 @@ def fit_cell(args,data,manifest,seed,arm,*,cfg):
     if arm!='baseline' and not args.smoke:
         for condition in ('zero','shuffle'):
             controls[condition]=evaluate(model,data['test'],args.direction,arm,feature_control=condition)
-    summary=dict(status='completed',seed=seed,arm=arm,direction=args.direction,steps=step,
+    summary=dict(status='completed' if step==args.steps else 'partial',seed=seed,arm=arm,direction=args.direction,steps=step,
         best_step=best_step,stop_reason='cell_budget' if timed_out else 'step_limit',
         train_seconds=train_seconds,elapsed_seconds=time.monotonic()-started,
         initial_validation=initial_val,training_subset=compact(training),
@@ -245,7 +245,7 @@ def fit_cell(args,data,manifest,seed,arm,*,cfg):
         best_adapter_norm=float(model.adapter.weight.detach().norm()),
         evaluations=outputs,feature_controls=controls)
     write_json(cell/'summary.json',summary)
-    (cell/'done').touch()
+    (cell/('done' if step==args.steps else 'partial')).touch()
     print(json.dumps(dict(event='cell_complete',cell=cell.name,steps=step,best_step=best_step,
         evaluations={k:compact(v) for k,v in outputs.items()})),flush=True)
     del model,opt,best_state
@@ -263,6 +263,7 @@ def main():
     p.add_argument('--lr',type=float,default=5e-5)
     p.add_argument('--eval-every',type=int,default=500)
     p.add_argument('--smoke',action='store_true')
+    p.add_argument('--seeds',nargs='+',type=int,default=list(SEEDS))
     args=p.parse_args()
     root=Path(args.output); root.mkdir(parents=True,exist_ok=False)
     torch.set_num_threads(1)
@@ -286,7 +287,7 @@ def main():
     del reference_model
     gc.collect(); torch.cuda.empty_cache()
     order=[]
-    for i,seed in enumerate((601,) if args.smoke else SEEDS):
+    for i,seed in enumerate((601,) if args.smoke else args.seeds):
         arms=['baseline',args.direction]
         if (i+(args.direction=='relational'))%2: arms.reverse()
         order.extend((seed,arm) for arm in arms)
@@ -296,11 +297,12 @@ def main():
     try:
         for seed,arm in order:
             results.append(fit_cell(args,data,manifest,seed,arm,cfg=cfg))
-        write_json(root/'summary.json',dict(status='completed',expected_cells=len(order),
+        complete=all(r['status']=='completed' for r in results)
+        write_json(root/'summary.json',dict(status='completed' if complete else 'partial',expected_cells=len(order),
             completed_cells=len(results),cells=[dict(seed=r['seed'],arm=r['arm'],steps=r['steps'],
                 best_step=r['best_step'],test=compact(r['evaluations'].get('test',r['evaluations']['validation'])))
                 for r in results]))
-        (root/'done').touch()
+        (root/('done' if complete else 'partial')).touch()
     except BaseException as e:
         write_json(root/'failed.json',dict(status='failed',error=repr(e),completed_cells=len(results)))
         raise
