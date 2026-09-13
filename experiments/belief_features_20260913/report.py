@@ -76,6 +76,14 @@ def make_report(root, result):
             '本项目因此优先稳定策略，同时完成以下离线特征对照；延后接入 BeliefNet 不等于取消公开规则推理。'
             '[论文 §2.5](https://arxiv.org/html/2511.07312v1#S2.SS5)；'
             '本地阶段配置与候选初始化已验证，新增训练的实际完成状态单独列在下文。']
+    export_path = root / 'analysis_policy/guarded_s501_raw_policy_v4_2048wins.json'
+    if export_path.exists():
+        exported = read(export_path)
+        assert exported['status'] == 'inference_export_reloaded_and_all_policy_tensors_identical'
+        sections.append('已另行导出 [原始行棋网络推理文件](../analysis_policy/guarded_s501_raw_policy_v4_2048wins.pt)，'
+                        f"通过项目标准加载器重新载入，{exported['policy_tensors']} 个权重与缓冲张量均与被测源模型完全相同。"
+                        '导出文件不包含 BeliefNet、EMA 或优化器，不能直接当作完整训练恢复文件。导出没有新增训练，也没有新增一组胜率测试。'
+                        'CPU 另一批 512 局中的那次失利仍然有效；本轮 GPU 全胜仅对应表中的有限验收。')
 
     phase_path = root / 'analysis_policy/phase_a.json'
     decision_path = root / 'phase_a_decision_B.json'
@@ -107,10 +115,10 @@ def make_report(root, result):
     elif decision_path.exists():
         decision = read(decision_path)
         if decision['status'] == 'no_policy_training':
-            reason = ('另一份原始策略已在本轮 GPU 新 2,048 局中全胜。'
+            reason = ('guarded_s501 的原始行棋策略已在本轮 GPU 新 2,048 局中全胜。'
                       if decision['reason'] == 'guarded_policy_won_all_2048'
                       else '可用阶段预算不足以完成至少 32 轮微调和两份策略的完整新验收。')
-            sections.append('本轮没有新增策略训练：' + reason + '已准备的配置和初始化文件仅作为准备产物保留。')
+            sections.append('本轮没有新增策略训练：' + reason + '原阶段补强与最后余量补强均未触发，已准备的配置和初始化文件仅作为准备产物保留。')
         else:
             sections.append('该条件式后续未形成完整、通过校验的训练与验收结果，不能计作策略提升或新的全胜结论。'
                             '实际步骤、退出状态、剩余覆盖与保存文件见 phase_a_followup_status.json、phase_a_buffer_status.json 及对应的 phase_a_B／phase_a_buffer_B（若存在）。')
