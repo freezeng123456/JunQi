@@ -23,7 +23,7 @@ def package(root, output):
     for name in ('analysis_final', 'analysis_training', 'analysis_scale', 'analysis_early', 'analysis_policy'):
         files.extend(sorted((root / name).glob('*')))
     for name in ('dataset_audit.json', 'ambiguity_probe.json', 'opening_prior.json',
-                 'tabular_diagnostics.json', 'recovery_status.json', 'recovery_scale_status.json',
+                 'tabular_diagnostics.json', 'plot_visual_qa.json', 'recovery_status.json', 'recovery_scale_status.json',
                  'recovery_diagnostics_status.json', 'recovery_early_status.json', 'early_analysis_stage.json', 'data_main/recovery_verified.json',
                  'data_expanded/recovery_verified.json', 'local-regression-final.log', 'analysis-targeted-tests.log',
                  'main_provenance_A.json', 'main_provenance_B.json',
