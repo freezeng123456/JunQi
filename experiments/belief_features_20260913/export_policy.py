@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import hashlib
 import json
 from pathlib import Path
@@ -35,10 +36,12 @@ def export(root):
     cpu_metrics = cpu_run['summary']['metrics']
     state = torch.load(source, map_location='cpu', weights_only=False)
     assert state['checkpoint_meta']['observation_semantics_version'] == 4
+    network = asdict(state['cfg'].net)
+    assert network == verified['provenance']['network'] == cpu_run['provenance']['network']
     output = root / 'analysis_policy/guarded_s501_raw_policy_v4_2048wins.pt'
     assert not output.exists()
     exported = {'policy': state['policy'], 'checkpoint_meta': state['checkpoint_meta'],
-                'train_cfg': {'net': state['train_cfg']['net']},
+                'train_cfg': {'net': network},
                 'inference_export': {'source_sha256': source_hash, 'learned_belief': False,
                                      'ema': False, 'optimizer_included': False}}
     torch.save(exported, output)
