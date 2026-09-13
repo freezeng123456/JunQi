@@ -47,6 +47,23 @@ def package(root, output):
         for role in 'AB':
             files.extend(path for path in sorted((root / f'current_{backend}_{role}').rglob('*'))
                          if path.is_file())
+    for name in ('phase_a_followup_plan.json', 'phase_a_resolved.yaml',
+                 'phase_a_resolved_validation.log', 'phase_a_remote_validation.log',
+                 'phase_a_decision_B.json', 'phase_a_followup_status.json',
+                 'run_b_priority_followup.py', 'recover_phase_a.py', 'recover_phase_a.log'):
+        path = root / name
+        if path.is_file():
+            files.append(path)
+    phase_folder = root / 'phase_a_B'
+    if phase_folder.exists():
+        files.extend(path for path in sorted(phase_folder.rglob('*'))
+                     if path.is_file() and path.suffix != '.pt')
+        phase_analysis = root / 'analysis_policy/phase_a.json'
+        if phase_analysis.exists():
+            phase = json.loads(phase_analysis.read_text())
+            checkpoint = Path(phase['checkpoint'])
+            assert checkpoint.is_file() and checkpoint.is_relative_to(phase_folder)
+            files.append(checkpoint)
     for prefix in ('training', 'scale', 'diagnostics', 'early'):
         for role in 'AB':
             folder = root / f'{prefix}_{role}'

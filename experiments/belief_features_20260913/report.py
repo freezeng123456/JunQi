@@ -75,7 +75,41 @@ def make_report(root, result):
             'Ataraxos 的训练顺序也是先得到最终行棋与布阵策略，再训练供搜索使用的 belief。'
             '本项目因此优先稳定策略，同时完成以下离线特征对照；延后接入 BeliefNet 不等于取消公开规则推理。'
             '[论文 §2.5](https://arxiv.org/html/2511.07312v1#S2.SS5)；'
-            '本地阶段配置与候选初始化已验证，但准备工作本身不算新增训练结果。']
+            '本地阶段配置与候选初始化已验证，新增训练的实际完成状态单独列在下文。']
+
+    phase_path = root / 'analysis_policy/phase_a.json'
+    decision_path = root / 'phase_a_decision_B.json'
+    sections.append('## 原定预算内的无 Belief 策略后续')
+    if phase_path.exists():
+        phase = read(phase_path)
+        assert phase['status'] == 'phase_a_training_and_paired_acceptance_verified'
+        rows = []
+        for key, name in [('raw', '原始策略'), ('candidate', '固定轮数微调后的最终策略')]:
+            m = phase[key]['summary']['metrics']
+            rows.append([name, int(m['eval/wins']), int(m['eval/losses']), int(m['eval/draws']),
+                         int(m['eval/ongoing']), f"{m['eval/win_rate'] * 100:.4f}%"])
+        sections += [f"B 机在原 09:20 硬截止内完成 {phase['rollouts']} 轮策略微调，"
+                     f"共 {phase['environment_steps']:,} 个环境步。学习率固定为 1e-5，不启用学习型 BeliefNet、布阵训练或 EMA。"
+                     '使用预先确定轮数的最终检查点，不依据下面的新验收局选择中间检查点。',
+                     table(['策略', '胜', '负', '和', '未完成', '胜率'], rows),
+                     '两份策略均在新的 1,024 个布阵上换边，共各 2,048 局，逐局布阵和随机种子已校验一致。'
+                     '这次新验收不覆盖或抹去前一轮原始策略 2,045 胜、1 负、2 和的记录。',
+                     f"新策略减去原始策略的胜率差为 {phase['candidate_minus_raw_win_rate'] * 100:+.4f} 个百分点；"
+                     f"按整组换边布阵重采样的 95% 区间为 [{phase['paired_setup_bootstrap_ci95'][0] * 100:+.4f}, "
+                     f"{phase['paired_setup_bootstrap_ci95'][1] * 100:+.4f}] 个百分点。该区间固定了这两份策略。",
+                     'B 的可选早期选模重跑为本项让出优先级；两类特征的主实验、扩充复核和保存模型诊断保持原协议。']
+    elif decision_path.exists():
+        decision = read(decision_path)
+        if decision['status'] == 'no_policy_training':
+            reason = ('另一份原始策略已在本轮 GPU 新 2,048 局中全胜。'
+                      if decision['reason'] == 'guarded_policy_won_all_2048'
+                      else '原定硬截止内的剩余预算不足以完成至少 32 轮微调和两份策略的完整新验收。')
+            sections.append('本轮没有新增策略训练：' + reason + '已准备的配置和初始化文件仅作为准备产物保留。')
+        else:
+            sections.append('该条件式后续未形成完整、通过校验的训练与验收结果，不能计作策略提升或新的全胜结论。'
+                            '实际步骤、退出状态、剩余覆盖与保存文件见 phase_a_followup_status.json 和 phase_a_B（若存在）。')
+    else:
+        sections.append('尚无该条件式后续的已回收决策，不能将准备的配置或初始化文件计作新增训练。')
 
     opening = []
     for arm in ('temporal', 'relational'):
