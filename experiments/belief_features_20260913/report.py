@@ -254,7 +254,7 @@ def make_report(root, result):
                 value = report['feature_control_minus_full'][arm][key]
                 rows.append([label, ARM[arm], control, f"{value['nll']:+.6f}", f"{value['accuracy'] * 100:+.4f}"])
     sections += [table(['数据', '模型', '推理时干预', '相对正常输入的 NLL 变化', '准确率变化（百分点）'], rows),
-        '推理时干预会使输入偏离训练分布，可检验模型对新增特征的依赖；它不能单独证明特征带来泛化收益，也不能代替配对训练基线。']
+        '上表仅使用冻结策略主测试集。推理时干预会使输入偏离训练分布，可检验模型对新增特征的依赖；它不能单独证明特征带来泛化收益，也不能代替配对训练基线。']
 
     sections += ['## 早期选模分辨率的探索性检查']
     if early:
