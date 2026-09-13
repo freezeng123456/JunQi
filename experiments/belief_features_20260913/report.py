@@ -81,10 +81,18 @@ def make_report(root, result):
     for arm in ('temporal', 'relational'):
         a = primary['paired_comparisons'][arm]['test']['nll']
         b = expanded['paired_comparisons'][arm]['test']['nll']
+        random_a = primary['paired_comparisons'][arm]['ood_random']['nll']
+        random_b = expanded['paired_comparisons'][arm]['ood_random']['nll']
         opening.append(f"**{ARM[arm]}：**1,024 个训练对局时，主测试 NLL 差值为 {interval(a)}，{evidence(a)}；"
-                       f"5,120 个训练对局时为 {interval(b)}，{evidence(b)}。")
+                       f"5,120 个训练对局时为 {interval(b)}，{evidence(b)}。"
+                       f"在均匀随机行为测试上，两个数据规模的差值分别为 {interval(random_a)} 和 {interval(random_b)}；"
+                       f"扩充数据后的比较中，{evidence(random_b)}。")
     volume = result['data_volume_comparisons']['baseline']['test']['nll']
-    opening.append(f"**数据量复核：**基线从 1,024 个独立训练对局扩至 5,120 个后，主测试 NLL 改变量为 {interval(volume)}；{evidence(volume)}。这项复核是观察到过拟合后追加的探索性实验。")
+    random_volume = result['data_volume_comparisons']['baseline']['ood_random']['nll']
+    opening.append(f"**数据量复核：**基线从 1,024 个独立训练对局扩至 5,120 个后，主测试 NLL 改变量为 {interval(volume)}；{evidence(volume)}。"
+                   f"均匀随机行为测试的改变量为 {interval(random_volume)}；{evidence(random_volume)}。"
+                   '这项复核是观察到过拟合后追加的探索性实验。')
+    opening.append('NLL 衡量完整身份概率的质量，尤其会惩罚给真实类型极低概率的预测；猜中率只统计最高概率类型是否正确。二者可能向不同方向变化，下面同时保留准确率、Brier 和校准指标。')
     sections += ['## 当前证据支持什么', '\n\n'.join(opening),
         '以下差值均为候选减去参照，NLL/Brier 越低越好，准确率越高越好。方括号是同时按本轮训练种子与完整测试对局配对重采样得到的 95% 区间。训练集、验证集和数据生成策略均固定，区间不包含重新抽取这些条件的不确定性。只有三组主训练种子，区间用于描述本轮证据；分组和分布比较没有做多重检验校正。']
     if early:
