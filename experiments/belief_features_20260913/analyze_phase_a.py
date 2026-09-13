@@ -13,8 +13,9 @@ from experiments.belief_features_20260913.analyze import read, verify_manifest
 from experiments.belief_features_20260913.summarize_policy_eval import inspect
 
 
-def analyze(root):
-    folder = root / 'phase_a_B'
+def analyze(root, folder_name='phase_a_B'):
+    assert folder_name in ('phase_a_B', 'phase_a_buffer_B')
+    folder = root / folder_name
     inventory = verify_manifest(folder)
     launch = read(folder / 'launcher_exit.json')
     summary = read(folder / 'summary.json')
@@ -61,6 +62,9 @@ def analyze(root):
     rng = np.random.default_rng(620915)
     bootstrap = delta[rng.integers(len(seeds), size=(5000, len(seeds)))].mean(1)
     return {'status': 'phase_a_training_and_paired_acceptance_verified',
+            'stage_folder': folder_name,
+            'uses_recovery_buffer': folder_name == 'phase_a_buffer_B',
+            'hard_deadline_utc': read(folder / 'launcher_provenance.json')['deadline_utc'],
             'verified_files': inventory, 'rollouts': rollouts,
             'environment_steps': rollouts * 128 * 512,
             'policy_gradient_steps': state['num_train_step'], 'changed_policy_tensors': changed,
@@ -76,8 +80,9 @@ def analyze(root):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, required=True)
+    parser.add_argument('--folder', choices=('phase_a_B', 'phase_a_buffer_B'), default='phase_a_B')
     args = parser.parse_args()
-    result = analyze(args.root)
+    result = analyze(args.root, args.folder)
     output = args.root / 'analysis_policy/phase_a.json'
     output.write_text(json.dumps(result, indent=2, allow_nan=False) + '\n')
     print(json.dumps({'status': result['status'], 'rollouts': result['rollouts'],

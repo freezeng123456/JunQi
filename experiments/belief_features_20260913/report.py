@@ -79,7 +79,10 @@ def make_report(root, result):
 
     phase_path = root / 'analysis_policy/phase_a.json'
     decision_path = root / 'phase_a_decision_B.json'
-    sections.append('## 原定预算内的无 Belief 策略后续')
+    buffer_decision = root / 'phase_a_buffer_decision_B.json'
+    if buffer_decision.exists():
+        decision_path = buffer_decision
+    sections.append('## 已授权租期内的无 Belief 策略后续')
     if phase_path.exists():
         phase = read(phase_path)
         assert phase['status'] == 'phase_a_training_and_paired_acceptance_verified'
@@ -88,7 +91,8 @@ def make_report(root, result):
             m = phase[key]['summary']['metrics']
             rows.append([name, int(m['eval/wins']), int(m['eval/losses']), int(m['eval/draws']),
                          int(m['eval/ongoing']), f"{m['eval/win_rate'] * 100:.4f}%"])
-        sections += [f"B 机在原 09:20 硬截止内完成 {phase['rollouts']} 轮策略微调，"
+        phase_deadline = '09:40' if phase.get('uses_recovery_buffer') else '09:20'
+        sections += [f"B 机在 {phase_deadline} 硬截止内完成 {phase['rollouts']} 轮策略微调，"
                      f"共 {phase['environment_steps']:,} 个环境步。学习率固定为 1e-5，不启用学习型 BeliefNet、布阵训练或 EMA。"
                      '使用预先确定轮数的最终检查点，不依据下面的新验收局选择中间检查点。',
                      table(['策略', '胜', '负', '和', '未完成', '胜率'], rows),
@@ -97,17 +101,19 @@ def make_report(root, result):
                      f"新策略减去原始策略的胜率差为 {phase['candidate_minus_raw_win_rate'] * 100:+.4f} 个百分点；"
                      f"按整组换边布阵重采样的 95% 区间为 [{phase['paired_setup_bootstrap_ci95'][0] * 100:+.4f}, "
                      f"{phase['paired_setup_bootstrap_ci95'][1] * 100:+.4f}] 个百分点。该区间固定了这两份策略。",
-                     'B 的可选早期选模重跑为本项让出优先级；两类特征的主实验、扩充复核和保存模型诊断保持原协议。']
+                     ('原阶段未能在 09:20 预算内启动策略训练，因此在全部原始结果回收并校验后，另分配最多 20 分钟做这一次补强，最晚 09:40 停止，仍比用户规定的 10:00 释放提前 20 分钟。'
+                      if phase.get('uses_recovery_buffer') else 'B 的可选早期选模重跑为本项让出优先级；')
+                     + '两类特征的主实验、扩充复核和保存模型诊断保持原协议。']
     elif decision_path.exists():
         decision = read(decision_path)
         if decision['status'] == 'no_policy_training':
             reason = ('另一份原始策略已在本轮 GPU 新 2,048 局中全胜。'
                       if decision['reason'] == 'guarded_policy_won_all_2048'
-                      else '原定硬截止内的剩余预算不足以完成至少 32 轮微调和两份策略的完整新验收。')
+                      else '可用阶段预算不足以完成至少 32 轮微调和两份策略的完整新验收。')
             sections.append('本轮没有新增策略训练：' + reason + '已准备的配置和初始化文件仅作为准备产物保留。')
         else:
             sections.append('该条件式后续未形成完整、通过校验的训练与验收结果，不能计作策略提升或新的全胜结论。'
-                            '实际步骤、退出状态、剩余覆盖与保存文件见 phase_a_followup_status.json 和 phase_a_B（若存在）。')
+                            '实际步骤、退出状态、剩余覆盖与保存文件见 phase_a_followup_status.json、phase_a_buffer_status.json 及对应的 phase_a_B／phase_a_buffer_B（若存在）。')
     else:
         sections.append('尚无该条件式后续的已回收决策，不能将准备的配置或初始化文件计作新增训练。')
 
@@ -297,7 +303,7 @@ def make_report(root, result):
             ['扩充数据与复核训练', 'd958f70b9822a711354f1eb047fdb02f09a26f04'],
             ['保存模型诊断', '0c10407d1c58e3cd5888facb46b49e093c5c1a93'],
             ['汇总分析', result['analysis_commit']]]),
-        'A 的训练硬截止为北京时间 08:20，B 为 09:20，分别比释放时间提前 40 分钟。启动时一次性计算截止计时器；阶段衔接和本地回收只响应完成标记。本轮代码和结果保留在本地，没有推送 GitHub。',
+        '原阶段 A 的训练硬截止为北京时间 08:20，B 为 09:20，分别比释放时间提前 40 分钟。条件式额外补强若启用，只能在原结果完整回收后运行最多 20 分钟，并最晚于 B 机 09:40 停止，仍留 20 分钟回收。启动时一次性计算截止计时器；阶段衔接和本地回收只响应完成标记。本轮代码和结果保留在本地，没有推送 GitHub。',
         '尚未验证：将新特征接回在线 belief／策略联合训练后的稳定性、搜索价值或实际胜率；所有长局面和对手分布；全局联合隐藏布局的建模收益。本轮特征对照只支持固定策略生成数据上的离线条件身份预测结论，前文原始行棋策略复测不能归因于新特征。',
         '逐种子与逐对局统计见 [完整汇总](synthesis.json)、[主实验明细](../analysis_training/analysis.json)、'
         '[扩充实验明细](../analysis_scale/analysis.json)；协议见同目录 PROTOCOL.md。']
