@@ -10,6 +10,7 @@ import zipfile
 
 
 def package(root, output):
+    root = root.resolve()
     analysis = json.loads((root / 'analysis_final/synthesis.json').read_text())
     assert analysis['status'] == 'all_experiments_and_diagnostics_verified'
     assert (root / 'analysis_final/REPORT.md').is_file()
