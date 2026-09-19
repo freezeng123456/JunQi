@@ -1,0 +1,12 @@
+{
+  "source_commit": "2cae8a9efa555a1de618d95b71826fd1dc3ce5c9",
+  "start_checkpoint_sha256": "ba9f4536651e379a9c522fd48c39d7941bcf9341ad30b7ea237bd830c762da28",
+  "initial_rollouts": 20000,
+  "initial_updates": 1920034,
+  "A_gpus": 1,
+  "B_gpus": 2,
+  "training_gpu_each": 0,
+  "evaluator_B_gpu": 1,
+  "date": "2026-09-19",
+  "training_seed": 9192
+}

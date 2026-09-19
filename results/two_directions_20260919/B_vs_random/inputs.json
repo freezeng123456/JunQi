@@ -1,0 +1,9 @@
+{
+  "first": "/tmp/junqi_two_20260919/B/train/ckpt_024096.pt",
+  "first_sha256": "aebee3132cd5df1907674a300bfc2815ac18f69d16e5dd92fa92c01b29390b85",
+  "second": "None",
+  "second_sha256": null,
+  "games": 512,
+  "setup_seed": 11191900,
+  "game_seed": 12191900
+}

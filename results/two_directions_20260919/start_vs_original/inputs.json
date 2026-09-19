@@ -1,0 +1,9 @@
+{
+  "first": "/tmp/junqi_two_20260919/start.pt",
+  "first_sha256": "ba9f4536651e379a9c522fd48c39d7941bcf9341ad30b7ea237bd830c762da28",
+  "second": "/tmp/junqi_two_20260919/original.pt",
+  "second_sha256": "02de1ace419d05b4d7722c006ac37fdcafeccada78d115da3ef75650990b4c30",
+  "games": 2048,
+  "setup_seed": 9191900,
+  "game_seed": 10191900
+}

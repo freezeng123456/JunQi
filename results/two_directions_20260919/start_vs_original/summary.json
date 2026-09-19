@@ -1,0 +1,16 @@
+{
+  "status": "complete",
+  "games": 2048,
+  "counts": {
+    "win": 1818,
+    "draw": 46,
+    "loss": 184
+  },
+  "win_fraction": 0.8876953125,
+  "score": 0.89892578125,
+  "pair_bootstrap_ci95": [
+    0.885986328125,
+    0.9111328125
+  ],
+  "pairs": 1024
+}

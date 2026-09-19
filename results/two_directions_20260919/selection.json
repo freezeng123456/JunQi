@@ -1,0 +1,8 @@
+{
+  "rule": "fixed equal budget; no heldout selection",
+  "total_rollouts": 24096,
+  "new_rollouts": 4096,
+  "A_sha256": "814c10c84a9f003b74db9a49608eaf742d471675355538f43da330741a2e59e6",
+  "B_sha256": "aebee3132cd5df1907674a300bfc2815ac18f69d16e5dd92fa92c01b29390b85",
+  "hf_input_revision": "dbd0ca22e04e0c2645904379615323517f0eca22"
+}

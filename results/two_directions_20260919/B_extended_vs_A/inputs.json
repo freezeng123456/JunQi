@@ -1,0 +1,9 @@
+{
+  "first": "/tmp/junqi_two_20260919/B/extension/ckpt_026144.pt",
+  "first_sha256": "1d03332795e9961d70c5760bb1884df02a5932d7a63428c9873321f4c02ebdc7",
+  "second": "/tmp/junqi_two_20260919/download/two_directions_20260919/A/matched/ckpt_024096.pt",
+  "second_sha256": "814c10c84a9f003b74db9a49608eaf742d471675355538f43da330741a2e59e6",
+  "games": 2048,
+  "setup_seed": 13191900,
+  "game_seed": 14191900
+}
