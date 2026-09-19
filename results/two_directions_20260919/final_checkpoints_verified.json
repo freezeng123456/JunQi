@@ -1,0 +1,34 @@
+{
+  "A": {
+    "sha256": "814c10c84a9f003b74db9a49608eaf742d471675355538f43da330741a2e59e6",
+    "rollouts": 24096,
+    "optimizer_updates": 2313260,
+    "finite_tensors": 348,
+    "policy_tensors": 87,
+    "strict_cpu_reload": true
+  },
+  "B": {
+    "sha256": "aebee3132cd5df1907674a300bfc2815ac18f69d16e5dd92fa92c01b29390b85",
+    "rollouts": 24096,
+    "optimizer_updates": 2313257,
+    "finite_tensors": 348,
+    "policy_tensors": 87,
+    "strict_cpu_reload": true
+  },
+  "C": {
+    "sha256": "3800a85392b4b0cd2f987c7ae22ccbcc2ea1df81b91c285d3c99719843f08c78",
+    "rollouts": 24096,
+    "optimizer_updates": 2313257,
+    "finite_tensors": 348,
+    "policy_tensors": 87,
+    "strict_cpu_reload": true
+  },
+  "B_extended": {
+    "sha256": "1d03332795e9961d70c5760bb1884df02a5932d7a63428c9873321f4c02ebdc7",
+    "rollouts": 26144,
+    "optimizer_updates": 2509867,
+    "finite_tensors": 348,
+    "policy_tensors": 87,
+    "strict_cpu_reload": true
+  }
+}
