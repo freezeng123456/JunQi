@@ -1,0 +1,53 @@
+{
+  "status": "all_nine_matchups_and_manifests_verified",
+  "manifest_files": 32,
+  "total_games": 15360,
+  "matchups": {
+    "start_vs_original": {
+      "games": 2048,
+      "paired_seeds": 1024,
+      "counts_score_ci_verified": true
+    },
+    "A_vs_B": {
+      "games": 2048,
+      "paired_seeds": 1024,
+      "counts_score_ci_verified": true
+    },
+    "A_vs_start": {
+      "games": 2048,
+      "paired_seeds": 1024,
+      "counts_score_ci_verified": true
+    },
+    "A_vs_random": {
+      "games": 512,
+      "paired_seeds": 256,
+      "counts_score_ci_verified": true
+    },
+    "B_vs_start": {
+      "games": 2048,
+      "paired_seeds": 1024,
+      "counts_score_ci_verified": true
+    },
+    "B_vs_random": {
+      "games": 512,
+      "paired_seeds": 256,
+      "counts_score_ci_verified": true
+    },
+    "C_vs_start": {
+      "games": 2048,
+      "paired_seeds": 1024,
+      "counts_score_ci_verified": true
+    },
+    "C_vs_B": {
+      "games": 2048,
+      "paired_seeds": 1024,
+      "counts_score_ci_verified": true
+    },
+    "B_extended_vs_A": {
+      "games": 2048,
+      "paired_seeds": 1024,
+      "counts_score_ci_verified": true
+    }
+  },
+  "github_commit": "c7fb04757f7dd5bdd59606266e62369b4519dda5"
+}
