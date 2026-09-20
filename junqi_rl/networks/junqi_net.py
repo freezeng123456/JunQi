@@ -129,6 +129,9 @@ class JunqiNetConfig:
     combat_outcome_features: bool = False
     """Enable the 81-parameter observation-derived combat outcome residual."""
 
+    relational_features: bool = False
+    """Enable public-position threat, flag, camp and information relationships."""
+
     tactical_features: bool = False
     """Enable observation-only material/uncertainty attack residual."""
 
@@ -444,6 +447,8 @@ class JunqiNet(nn.Module):
         self.combat_head = CombatOutcomeHead() if cfg.combat_outcome_features else None
         from junqi_rl.networks.tactical_features import TacticalFeatureHead
         self.tactical_head = TacticalFeatureHead() if cfg.tactical_features else None
+        from junqi_rl.networks.relational_features import RelationalFeatureHead
+        self.relational_head = RelationalFeatureHead() if cfg.relational_features else None
 
     # -------------------------------------------------------------------------
     # Weight init
@@ -546,6 +551,10 @@ class JunqiNet(nn.Module):
             if obs_spatial is None:
                 raise ValueError("tactical features require the actor observation")
             logits = logits + self.tactical_head(obs_spatial)
+        if self.relational_head is not None:
+            if obs_spatial is None:
+                raise ValueError("relational features require actor observations")
+            logits = logits + self.relational_head(obs_spatial, legal_mask).to(logits.dtype)
         # Retain a finite sentinel here.  Under torch.compile, exact -inf in
         # the normal action distribution makes entropy/KL terms hit 0 * -inf
         # and can poison every PPO gradient.  A direct selected-action mask

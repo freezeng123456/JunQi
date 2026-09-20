@@ -13,7 +13,7 @@ from junqi_core.info_model import TRACKED_TYPES
 from junqi_core.observation import CHANNEL_LAYOUT
 from junqi_core.rules import Event, PieceType, resolve_combat
 
-TACTICAL_FEATURE_VERSION = 1
+TACTICAL_FEATURE_VERSION = 2
 FEATURE_NAMES = ('expected_capture_material', 'expected_own_material_loss',
                  'enemy_belief_entropy', 'flag_probability', 'mine_probability',
                  'bomb_probability', 'own_material', 'own_bomb', 'own_engineer')
@@ -22,7 +22,7 @@ class TacticalFeatureHead(nn.Module):
     def __init__(self):
         super().__init__()
         values = torch.tensor([1. if t == PieceType.JUNQI else .3 if t == PieceType.DILEI
-                               else .6 if t == PieceType.ZHADAN else (int(t)-int(PieceType.GONGB)+1)/9
+                               else .6 if t == PieceType.ZHADAN else (int(PieceType.GONGB)-int(t)+1)/9
                                for t in TRACKED_TYPES])
         captures, losses = torch.zeros(12,12), torch.zeros(12,12)
         for a,attacker in enumerate(TRACKED_TYPES):
