@@ -1,8 +1,14 @@
 import sys,json,torch
 from junqi_rl.training.checkpoint import load_evaluation_policy
-from tests.test_explore_20260921 import sample
+import random
+from junqi_core.state import GameState
+from junqi_core.setup import generate_random_setup
+from junqi_core.info_model import BeliefTensor
+from junqi_core.observation import build_observation
 old=load_evaluation_policy(sys.argv[1],device='cuda');new=load_evaluation_policy(sys.argv[2],device='cuda')
-obs,g,mask,_=sample();obs=obs.cuda();g=g.cuda();mask=torch.ones((1,16641),dtype=torch.bool,device='cuda')
+state=GameState.new_game(generate_random_setup(random.Random(921)))
+belief=BeliefTensor.initial(state,state.turn);observation=build_observation(state,belief,state.turn).snapshot()
+obs=torch.from_numpy(observation.spatial)[None].cuda();g=torch.from_numpy(observation.global_)[None].cuda();mask=torch.ones((1,16641),dtype=torch.bool,device='cuda')
 proof={}
 for bf in (False,True):
  with torch.no_grad(),torch.autocast('cuda',dtype=torch.bfloat16,enabled=bf):
