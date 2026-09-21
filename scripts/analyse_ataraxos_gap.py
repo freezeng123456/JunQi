@@ -103,7 +103,7 @@ def main():
         ("ppo.vf_coef",                     "1.0",   "1.0",   "✓ match"),
         ("ppo.kl_coef (main policy KL)",    "0.1",   "0.1",   "✓ match"),
         ("ppo.clip_range",                  "0.2",   "0.2",   "✓ match"),
-        ("ppo.ema_decay",                   "0.999", "0.999", "✓ match"),
+        ("parameter EMA",                   "removed", "used", "deliberate local design choice"),
         ("arr.ppo.kl_coef",                 "0.1",   "0.1",   "✓ was 0.01 in v16, fixed in v17+"),
         ("arr.ppo.ent_pred_coef",           "0.5",   "1.0",   "🟡 ours half — minor"),
         ("ppo.lr_ceil",                     "1e-4",  "1e-4",  "✓ match"),

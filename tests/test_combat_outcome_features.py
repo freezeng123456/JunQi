@@ -183,7 +183,7 @@ def test_factorized_residual_matches_selected_features_and_masks_moves():
                               torch.zeros_like(mask)), torch.zeros(1, 3))
 
 
-def test_collect_ppo_shared_ema_and_greedy_use_same_residual():
+def test_collect_ppo_shared_snapshot_and_greedy_use_same_residual():
     model = tiny(True)
     with torch.no_grad():
         model.combat_head.residual[-1].weight.fill_(0.4)
@@ -198,8 +198,8 @@ def test_collect_ppo_shared_ema_and_greedy_use_same_residual():
     shared = model.forward_policy_value_shared(sp.expand(2, -1, -1, -1),
         gl.expand(2, -1), torch.tensor([1]), mask, actions=actions[:1])
     torch.testing.assert_close(shared['log_probs'], output['log_probs'], atol=2e-6, rtol=1e-6)
-    ema = copy.deepcopy(model)
-    torch.testing.assert_close(ema(sp, gl, mask, actions=actions[:1])['log_probs'],
+    snapshot = copy.deepcopy(model)
+    torch.testing.assert_close(snapshot(sp, gl, mask, actions=actions[:1])['log_probs'],
                                output['log_probs'], rtol=0, atol=0)
     illegal = ~mask
     assert torch.all(output['log_probs'].exp()[illegal] == 0)

@@ -1002,7 +1002,10 @@ class RolloutBufferGPU:
             out["rollout/adv_thresh_used"] = float(self._last_thresh_used)
         if hasattr(self, "_collect_entropy"):
             out["collect/entropy"] = float(self._collect_entropy)
-            if hasattr(self, "_last_kept_mean"):
+            # Row-size diagnostics are defined only for timestep grouping.
+            # The global path uses internal NaN sentinels; exporting them
+            # makes healthy updates look numerically invalid to run guards.
+            if self.minibatch_group == "timestep" and hasattr(self, "_last_kept_mean"):
                 out["rollout/kept_mean"] = float(self._last_kept_mean)
                 out["rollout/kept_min"] = float(self._last_kept_min)
                 out["rollout/kept_max"] = float(self._last_kept_max)

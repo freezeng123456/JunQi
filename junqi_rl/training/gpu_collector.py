@@ -684,6 +684,7 @@ def collect_rollout_gpu_v2(
     use_compile: bool = True,
     autocast_dtype=None,  # torch.dtype; defaults to bfloat16 below
     act_chunk_size: int = 0,
+    on_observation=None,
 ):
     """Zero-CPU hot-path rollout collector.
 
@@ -708,6 +709,10 @@ def collect_rollout_gpu_v2(
         Optional callback invoked after ``reset_terminated_device`` with
         signature ``fn(*, fired_t, rollout_world)``. Used to refresh any
         host-side cache rows for envs that just received a new arrangement.
+    on_observation : callable or None
+        Read-only callback before each action, for optional belief supervision.
+        Receives ``rollout_world``, ``acting_t``, and ``step``. It must not
+        mutate the world or the single-seat observation buffers.
 
     Requirements:
       - buffer must be a RolloutBufferGPU (GPU-resident)
@@ -777,6 +782,9 @@ def collect_rollout_gpu_v2(
 
         # ---- Observations (single-seat GPU kernel, 4x faster) ----------------
         obs_sp_t, obs_gl_t = rollout_world.build_acting_seat_observation_torch(acting_t)
+
+        if on_observation is not None:
+            on_observation(rollout_world=rollout_world, acting_t=acting_t, step=t)
 
         # ---- Legal mask (GPU kernel, canonical frame, zero CPU) -------------
         lm_t = rollout_world.legal_mask_canonical_torch_device(acting_t)  # (N, 16641) bool

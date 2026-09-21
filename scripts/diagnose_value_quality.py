@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """diagnose_value_quality.py — Does V(s) predict the outcome at all?
 
-Load a ckpt, collect an EMA-policy rollout, then measure:
+Load a ckpt, collect a current-policy rollout, then measure:
   * Correlation between V(s_t) and actual (bootstrapped) return_t, on
     own-team rows only. If V is useless we'd see r ~ 0.
   * Explained variance: 1 - Var(ret - V) / Var(ret).

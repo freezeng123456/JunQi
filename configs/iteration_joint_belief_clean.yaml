@@ -1,0 +1,10 @@
+# Prepared, unrun candidate: direct current BeliefNet predictions with hard
+# deductive support only. Warmup collects supervision before first publication.
+# PPO and BeliefNet still have separate gradients and fixed rollout inputs.
+extends: iteration_joint_belief.yaml
+save_dir: exps/iteration_joint_belief_clean
+belief:
+  neural_weight: 1.0
+  neural_ramp_rollouts: 0
+  max_kl_to_rules: null
+  max_policy_kl_on_refresh: 0.0

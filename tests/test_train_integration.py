@@ -80,7 +80,7 @@ def test_belief_train_config_defaults():
     assert cfg.belief.refresh_every == 1
     assert cfg.belief.buffer_capacity == 12_000
     assert cfg.belief.warmup_rollouts == 20
-    assert cfg.belief.ema_decay == 0.999
+    assert not hasattr(cfg.belief, "ema_decay")
 
 
 def test_belief_train_config_yaml_roundtrip():

@@ -119,7 +119,6 @@ from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
 from junqi_rl.arrangement.buffer import ArrangementBuffer
 from junqi_rl.arrangement.sampling import generate_arrangements
 from junqi_rl.training import (
-    EMAPolicy,
     PPOConfig,
     PPOTrainer,
     RolloutBuffer,
@@ -317,7 +316,7 @@ def train(cfg: TrainConfig) -> None:
     if is_rank0:
         print(f"[train] JunqiNet parameters: {n_params:,}")
 
-    # ---- Trainer (handles EMA, optimiser, AMP) ----
+    # ---- Trainer (handles optimiser and AMP) ----
     trainer = PPOTrainer(policy, cfg.ppo, device=device)
 
     # F-3: print the lr schedule trajectory at start so any 'lr touches floor
@@ -534,7 +533,6 @@ def train(cfg: TrainConfig) -> None:
     arr_net: ArrangementNet | None = None
     arr_trainer: ArrangementPPOTrainer | None = None
     arr_buffer: ArrangementBuffer | None = None
-    arr_ema: EMAPolicy | None = None
     if arr_enabled:
         if cfg.arr.n_arr % 4 != 0:
             raise ValueError(
@@ -546,7 +544,6 @@ def train(cfg: TrainConfig) -> None:
         if is_rank0:
             print(f"[train] ArrangementNet parameters: {n_arr_params:,}")
         arr_trainer = ArrangementPPOTrainer(arr_net, cfg.arr.ppo)
-        arr_ema = EMAPolicy(arr_net, decay=cfg.arr.ema_decay)
         arr_buffer = ArrangementBuffer(
             storage_duration=cfg.arr.storage_duration,
             device=device,
@@ -567,6 +564,7 @@ def train(cfg: TrainConfig) -> None:
     belief_trainer = None
     belief_buffer = None
     reveal_tracker = None
+    belief_sampler = None
     if belief_enabled:
         from junqi_rl.belief.buffer import BeliefBuffer
         from junqi_rl.belief.reveal_tracker import RevealTracker
@@ -602,6 +600,12 @@ def train(cfg: TrainConfig) -> None:
             seed=cfg.seed,
         )
         reveal_tracker = RevealTracker(belief_buffer=belief_buffer)
+        if cfg.belief.sample_every_steps:
+            from junqi_rl.belief.sampling import MidgameBeliefSampler
+            belief_sampler = MidgameBeliefSampler(
+                belief_buffer, every_steps=cfg.belief.sample_every_steps,
+                envs_per_sample=cfg.belief.sample_envs, seed=cfg.seed,
+            )
         if is_rank0:
             print(f"[train] Belief training enabled: "
                   f"buffer_capacity={cfg.belief.buffer_capacity}, "
@@ -618,8 +622,6 @@ def train(cfg: TrainConfig) -> None:
         if arr_trainer is not None and "arrangement" in resume_sd:
             arr_sd = resume_sd["arrangement"]
             arr_trainer.load_state_dict(arr_sd["trainer"])
-            if arr_ema is not None and arr_sd.get("ema") is not None:
-                arr_ema.load_state_dict(arr_sd["ema"])
             if is_rank0:
                 print("[train] Resumed ArrangementNet state")
         elif arr_trainer is not None and is_rank0:
@@ -693,11 +695,10 @@ def train(cfg: TrainConfig) -> None:
             t_arr0 = time.time()
             # Ensure old rows are dropped so new ones can be tracked.
             arr_buffer.filter(current_step=rollout_idx)
-            # Use EMA weights for generation (matches Ataraxos convention).
-            arr_gen_net = arr_ema.model if arr_ema is not None else arr_net
+            # Generate from the current trained arrangement policy.
             arr_gen = generate_arrangements(
                 n_sample=cfg.arr.n_arr,
-                model=arr_gen_net,
+                model=arr_net,
                 rng_seed=cfg.env.seed + rollout_idx * 17,
             )
             # Random-lineup fallback rows have placeholder old-policy
@@ -863,7 +864,9 @@ def train(cfg: TrainConfig) -> None:
             if arr_enabled and _collect is collect_rollout_gpu_v2:
                 callbacks.append(_arr_on_termination)
                 needs_arr_snapshot_refresh = True
-            if belief_enabled and _collect is collect_rollout_gpu_v2:
+            if belief_sampler is not None and _collect is collect_rollout_gpu_v2:
+                kwargs["on_observation"] = belief_sampler
+            elif belief_enabled and _collect is collect_rollout_gpu_v2:
                 # Reveal tracker needs the same env_arr_snapshot the arr
                 # callback reads. `env_arr_snapshot` is built just above
                 # inside the ``if arr_enabled:`` branch; if arr is off we
@@ -944,9 +947,6 @@ def train(cfg: TrainConfig) -> None:
             else:
                 arr_metrics = arr_trainer.train_epoch(
                     arr_buffer,
-                    on_optimizer_step=(
-                        arr_ema.update if arr_ema is not None else None
-                    ),
                 )
             if arr_metrics:
                 mc.update(arr_metrics)
@@ -963,23 +963,40 @@ def train(cfg: TrainConfig) -> None:
                 mc.update(belief_metrics)
             # Expose the RevealTracker insertion counters too.
             mc.update(reveal_tracker.stats())
+            if belief_sampler is not None:
+                mc.update(belief_sampler.stats())
             mc.update(belief_buffer.stats())
             mc.inc("time/belief_train_s", time.time() - t_belief0)
 
-            # Refresh the device-resident belief tensor from the EMA net
+            # Refresh the device-resident belief tensor from the current trained net
             # once past warmup and on the configured cadence.
             if (
                 not cfg.disable_belief_train
                 and rollout_idx >= cfg.belief.warmup_rollouts
                 and (rollout_idx - start_rollout) % cfg.belief.refresh_every == 0
                 and len(belief_buffer) > 0
+                and belief_trainer.num_train_step >= cfg.belief.min_train_updates
             ):
                 t_refresh0 = time.time()
-                from junqi_rl.belief.inference import refresh_beliefs_neural
-                refresh_metrics = refresh_beliefs_neural(
+                from junqi_rl.belief.inference import refresh_beliefs_neural, guarded_refresh_beliefs_neural
+                ramp = (min(1.0, (rollout_idx - cfg.belief.warmup_rollouts + 1)
+                            / cfg.belief.neural_ramp_rollouts)
+                        if cfg.belief.neural_ramp_rollouts else 1.0)
+                refresh_fn = refresh_beliefs_neural
+                guard_kwargs = {}
+                if cfg.belief.max_policy_kl_on_refresh:
+                    refresh_fn = guarded_refresh_beliefs_neural
+                    guard_kwargs = dict(policy=trainer.policy,
+                        max_policy_kl=cfg.belief.max_policy_kl_on_refresh,
+                        min_entropy_ratio=cfg.belief.min_policy_entropy_ratio)
+                refresh_metrics = refresh_fn(
                     rollout=env,
-                    belief_net=belief_trainer.ema.model,
+                    belief_net=belief_trainer.net,
                     chunk_size=cfg.belief.infer_chunk_size,
+                    neural_weight=cfg.belief.neural_weight * ramp,
+                    max_kl=cfg.belief.max_kl_to_rules,
+                    rule_only_input=cfg.belief.rule_only_input,
+                    **guard_kwargs,
                 )
                 mc.update(refresh_metrics)
                 mc.inc("time/belief_refresh_s", time.time() - t_refresh0)
@@ -1070,7 +1087,6 @@ def train(cfg: TrainConfig) -> None:
                 ckpt_path = save_checkpoint(
                     trainer, cfg, rollout_idx + 1, cfg.save_dir,
                     arr_trainer=arr_trainer,
-                    arr_ema=arr_ema,
                     belief_trainer=belief_trainer,
                 )
                 print(f"[train] Checkpoint saved: {ckpt_path}")
@@ -1170,7 +1186,6 @@ def train(cfg: TrainConfig) -> None:
                             best_h2h_path = save_checkpoint(
                                 trainer, cfg, rollout_idx + 1, cfg.save_dir,
                                 arr_trainer=arr_trainer,
-                                arr_ema=arr_ema,
                                 belief_trainer=belief_trainer,
                             )
                             best_h2h_link = os.path.join(
@@ -1198,7 +1213,6 @@ def train(cfg: TrainConfig) -> None:
                         best_random_path = save_checkpoint(
                             trainer, cfg, rollout_idx + 1, cfg.save_dir,
                             arr_trainer=arr_trainer,
-                            arr_ema=arr_ema,
                             belief_trainer=belief_trainer,
                         )
                         best_random_link = os.path.join(
@@ -1241,7 +1255,6 @@ def train(cfg: TrainConfig) -> None:
                                 save_checkpoint(
                                     trainer, cfg, rollout_idx + 1, cfg.save_dir,
                                     arr_trainer=arr_trainer,
-                                    arr_ema=arr_ema,
                                     belief_trainer=belief_trainer,
                                 )
                                 eval_should_stop.fill_(1)
@@ -1265,7 +1278,6 @@ def train(cfg: TrainConfig) -> None:
                 save_checkpoint(
                     trainer, cfg, rollout_idx + 1, cfg.save_dir,
                     arr_trainer=arr_trainer,
-                    arr_ema=arr_ema,
                     belief_trainer=belief_trainer,
                 )
             if is_distributed:
@@ -1278,7 +1290,6 @@ def train(cfg: TrainConfig) -> None:
             final_path = save_checkpoint(
                 trainer, cfg, cfg.total_rollouts, cfg.save_dir,
                 arr_trainer=arr_trainer,
-                arr_ema=arr_ema,
                 belief_trainer=belief_trainer,
             )
             print(f"[train] Training complete. Final checkpoint: {final_path}")

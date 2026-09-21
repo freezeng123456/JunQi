@@ -14,12 +14,11 @@ giving us exactly the final-state observation. Mid-game reveals (piece
 X died on turn 42) would need a separate CUDA hook over combat events
 and are deferred to P2.
 
-Per Ataraxos (Appendix D.5), this is sufficient: belief loss is trained
-against the "ground-truth opponent hidden pieces" at the final game state,
-i.e. on a stream of *positions* each labelled with the final types of
-the opponent's surviving pieces. Pieces that died earlier in the game
-are not labelled in P1 — those positions would contribute via the
-mid-game hook once that lands.
+This legacy terminal-only prototype is narrower than Ataraxos Appendix D.5:
+the paper's "final setup and move networks" refers to frozen policies, not
+terminal board positions. A winning terminal observer can have no surviving
+enemies and thus no labels. New co-training configurations use
+``MidgameBeliefSampler`` for current positions throughout the game instead.
 
 Geometry cheatsheet
 -------------------

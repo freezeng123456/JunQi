@@ -210,3 +210,25 @@ def test_training_visibility_is_explicit_and_serialized():
     cfg.env.show_mode = 'HALF_DARK'
     with pytest.raises(ValueError, match='show_mode=DARK'):
         validate_config(cfg)
+
+
+@pytest.mark.parametrize("section", ["ppo", "arr", "belief", "belief.ppo"])
+def test_legacy_ema_config_is_ignored_and_not_serialized(section):
+    values = {}
+    target = values
+    for key in section.split("."):
+        target = target.setdefault(key, {})
+    target["ema_decay"] = 0.1
+    with pytest.warns(UserWarning, match="parameter EMA has been removed"):
+        cfg = _dict_to_dataclass(TrainConfig, values)
+    clean = _dataclass_to_dict(cfg)
+    for key in section.split("."):
+        clean = clean[key]
+    assert "ema_decay" not in clean
+    assert target["ema_decay"] == 0.1  # caller's historical record is unchanged
+
+
+def test_legacy_ema_migration_does_not_hide_unknown_config_keys():
+    with pytest.warns(UserWarning, match="parameter EMA has been removed"):
+        with pytest.raises(ValueError, match="ema_deacy"):
+            _dict_to_dataclass(TrainConfig, {"belief": {"ema_decay": .99, "ema_deacy": .9}})

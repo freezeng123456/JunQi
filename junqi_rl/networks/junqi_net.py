@@ -658,7 +658,7 @@ class JunqiNet(nn.Module):
         R51 crash), we replace that row's logits with a uniform-over-
         legal fallback so ``Categorical.sample()`` doesn't blow up.
         The PPO trainer's outer NaN guard will still catch and skip the
-        bad minibatch via the returned log_probs, so the EMA/optimiser
+        bad minibatch via the returned log_probs, so the optimiser
         stay consistent. Counter ``_nan_fwd_count`` is incremented so
         callers can surface the frequency.
         """

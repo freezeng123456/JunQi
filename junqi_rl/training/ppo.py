@@ -121,68 +121,6 @@ def power_schedule(
 
 
 # ---------------------------------------------------------------------------
-# EMA (Exponential Moving Average) policy
-# ---------------------------------------------------------------------------
-
-
-class EMAPolicy:
-    """Maintains an exponential moving average of model weights.
-
-    After each gradient update call :meth:`update`. The shadow is useful for
-    smoothing diagnostics and checkpoint metadata, but it is deliberately
-    *not* the PPO behaviour policy: rollout actions and old log-probabilities
-    must come from the same policy that is subsequently optimised.
-
-    Parameters
-    ----------
-    model
-        The learner (training) model whose weights are tracked.
-    decay
-        EMA decay coefficient (typically 0.999).
-    """
-
-    def __init__(self, model: JunqiNet, decay: float = 0.999) -> None:
-        self.decay = decay
-        # Shadow copy — kept on same device as model
-        self.shadow = copy.deepcopy(model)
-        self.shadow.eval()
-        for p in self.shadow.parameters():
-            p.requires_grad_(False)
-
-    @torch.no_grad()
-    def update(self, model: JunqiNet) -> None:
-        """Update shadow weights: ``θ_ema ← decay·θ_ema + (1−decay)·θ``."""
-        d = self.decay
-        for s_param, m_param in zip(
-            self.shadow.parameters(), model.parameters()
-        ):
-            s_param.data.mul_(d).add_(m_param.data, alpha=1.0 - d)
-        # BatchNorm running statistics and counters are buffers, not
-        # parameters. Leaving them at their initial values turns the EMA
-        # shadow into a different function from the learner. Copy buffers
-        # exactly rather than averaging them: they describe the learner's
-        # current normalization state and must stay functionally aligned.
-        shadow_buffers = dict(self.shadow.named_buffers())
-        for name, model_buffer in model.named_buffers():
-            shadow_buffers[name].copy_(model_buffer)
-        self.shadow.eval()
-
-    @property
-    def model(self) -> JunqiNet:
-        return self.shadow
-
-    def state_dict(self) -> dict[str, Any]:
-        return {
-            "decay": self.decay,
-            "shadow": self.shadow.state_dict(),
-        }
-
-    def load_state_dict(self, sd: dict[str, Any]) -> None:
-        self.decay = sd["decay"]
-        self.shadow.load_state_dict(sd["shadow"])
-
-
-# ---------------------------------------------------------------------------
 # PPO configuration
 # ---------------------------------------------------------------------------
 
@@ -363,14 +301,6 @@ class PPOConfig:
     max_grad_norm: float = 0.5
     """Gradient clipping norm."""
 
-    # --- EMA ---
-    ema_decay: float = 0.999
-    """Ignored. Move-policy EMA was removed after raw-vs-EMA H2H showed no gain.
-
-    The field remains so historical YAML still loads. ArrangementNet and
-    BeliefNet keep their own EMA objects.
-    """
-
     # --- Training schedule ---
     num_epochs_per_rollout: int = 4
     """Number of optimisation epochs per collected rollout."""
@@ -464,7 +394,7 @@ class PPOTrainer:
         """Cumulative count of minibatches whose ``optimizer.step()`` was skipped
         because the gradient norm was non-finite (NaN or Inf). Without this guard
         the next ``optimizer.step()`` would write NaN into the parameters and
-        permanently poison the EMA shadow — exactly what crashed v33a at R107
+        poison subsequent inference — the failure seen in v33a at R107
         (`exps/_crash_diagnosis_v33a/train.log`). Under DDP we ``all_reduce(MAX)``
         the per-rank "is bad" flag so every rank takes the same skip decision,
         otherwise some ranks would step while others wouldn't and the parameter
@@ -1315,7 +1245,7 @@ class PPOTrainer:
             # ``probability tensor contains either `inf`, `nan` or element < 0``).
             # We detect it here, skip this minibatch, and increment a counter
             # so train_epoch can surface it. Zero-loss short-circuit keeps
-            # the graph / EMA update consistent without stepping the
+            # the graph consistent without stepping the
             # optimiser on poisoned gradients.
             # NaN check: -inf entries in log_probs are LEGAL (they encode the
             # legal_mask: illegal actions get logit=-inf so softmax gives 0
@@ -1466,7 +1396,7 @@ class PPOTrainer:
         # ---- Gradient NaN/Inf guard (DDP-safe) ----
         # Without this check, a single bad backward (e.g. value-loss spike on
         # an outlier batch) writes NaN into the params, after which every
-        # forward returns NaN, the EMA shadow goes NaN, and eval permanently
+        # forward returns NaN, and evaluation permanently
         # collapses to 0.5 — exactly the v33a R107 failure mode. Symptoms
         # match: see ``exps/_crash_diagnosis_v33a/train.log`` lines 59-90.
         #
@@ -1483,7 +1413,6 @@ class PPOTrainer:
             # Some rank produced NaN/Inf gradients. Drop the gradients on
             # every rank and DO NOT step the optimiser. Params remain at
             # their pre-backward values, so the next forward will succeed
-            # and EMA stays clean.
             self.optimizer.zero_grad(set_to_none=True)
             # Critical: even on skip the GradScaler needs an `update()`
             # call to maintain its scale-factor state machine. Without

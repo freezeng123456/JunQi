@@ -1,23 +1,12 @@
-"""junqi_rl.training.belief_ppo — BeliefNet trainer (CE + uniform-KL diagnostic).
+"""Supervised BeliefNet trainer using current parameters for inference.
 
-Trains :class:`~junqi_rl.networks.belief_net.BeliefNet` on
-``(obs, enemy_mask, true_type_idx)`` tuples emitted by
-:class:`~junqi_rl.belief.buffer.BeliefBuffer`. The training signal is
-purely supervised: per-cell cross-entropy against the ground-truth piece
-type (revealed only when the piece dies or the game ends).
+Cross-entropy is computed only where enemy labels are supplied. Labels may
+come from public reveal tracking or simulator truth used solely as a training
+target; hidden truth is never added to the observation. The diagnostic baseline
+is uniform over all 12 types, not a remaining-inventory prior.
 
-Design (docs/P1_BELIEF_NET_PLAN.md §4)
--------------------------------------
-* **CE loss**: only from revealed cells, i.e. mask = ``(label >= 0) & enemy_mask``.
-* **Uniform baseline diagnostic**: report CE under the uniform-over-
-  remaining-inventory belief. If our CE is not below this, the net has
-  learned nothing beyond "average".
-* **EMA** with decay 0.999 for inference (matches Ataraxos).
-* **Optimizer**: Adam (not AdamW) lr=5e-5, max_grad_norm=0.5 (paper D.6).
-
-No RL terms (no advantage, no KL, no clip). Belief learning is offline
-supervised on a replay buffer — this is simpler than the main PPO loop
-and is isolated in its own trainer class deliberately.
+The optimizer defaults are local engineering choices. This is supervised
+learning on a replay buffer, with no policy-gradient loss or parameter EMA.
 """
 
 from __future__ import annotations
@@ -55,21 +44,13 @@ __all__ = [
 
 @dataclass
 class BeliefPPOConfig:
-    """Hyper-parameters for :class:`BeliefPPOTrainer`.
-
-    Defaults match Ataraxos Appendix D.6 (belief learning):
-    - Adam lr=5e-5
-    - max_grad_norm=0.5
-    - batch=64 (we use 64 on T4; paper used larger on H100)
-    - epochs_per_rollout=2
-    - EMA decay=0.999
-    """
+    """Local hyper-parameters for supervised belief learning."""
 
     lr: float = 5e-5
     """Adam learning rate."""
 
     weight_decay: float = 0.0
-    """Adam weight decay (0 = pure Adam, matches paper)."""
+    """Adam weight decay (0 = pure Adam)."""
 
     max_grad_norm: float = 0.5
     """Gradient clipping L2 norm."""
@@ -82,45 +63,10 @@ class BeliefPPOConfig:
     batch_size=64 and epochs_per_rollout=2, each main-PPO rollout
     contributes 128 samples worth of belief gradient steps."""
 
-    ema_decay: float = 0.999
-    """EMA decay for the eval/inference copy of the belief net."""
-
     autocast_dtype: str = "float32"
     """Autocast precision for the forward pass. Use "float16" on T4 for
     throughput, "bfloat16" on A100/H100. Set to "float32" to disable
     autocast entirely (safest default for supervised learning)."""
-
-
-# ---------------------------------------------------------------------------
-# EMA helper (mirror of training/ppo.py::EMAPolicy)
-# ---------------------------------------------------------------------------
-
-
-class _EMABelief:
-    """Exponential moving average of a BeliefNet's parameters.
-
-    Simple wrapper that keeps a detached shadow copy; inference should
-    use ``ema.model`` rather than the trainable network.
-    """
-
-    def __init__(self, model: BeliefNet, decay: float = 0.999) -> None:
-        self.decay = decay
-        # Clone on CPU first to isolate from the trainable graph, then move.
-        self.model = BeliefNet(model.cfg).to(next(model.parameters()).device)
-        self.model.load_state_dict(model.state_dict())
-        self.model.eval()
-        for p in self.model.parameters():
-            p.requires_grad_(False)
-
-    @torch.no_grad()
-    def update(self, model: BeliefNet) -> None:
-        d = self.decay
-        for ema_p, p in zip(self.model.parameters(), model.parameters()):
-            ema_p.mul_(d).add_(p.detach(), alpha=1.0 - d)
-        # Copy buffers (batchnorm running stats, etc.) verbatim; the
-        # trainable side has already updated them.
-        for ema_b, b in zip(self.model.buffers(), model.buffers()):
-            ema_b.copy_(b)
 
 
 # ---------------------------------------------------------------------------
@@ -183,22 +129,22 @@ def compute_belief_loss(
     ce_per_cell = -log_prob.gather(-1, safe_label).squeeze(-1)  # (B, 289)
 
     revealed = (true_type_idx >= 0) & enemy_mask                # (B, 289) bool
-    n_revealed = revealed.sum().float().clamp(min=1.0)
+    n_revealed = revealed.sum().float()
 
-    ce_loss = (ce_per_cell * revealed.float()).sum() / n_revealed
+    ce_loss = (ce_per_cell * revealed.float()).sum() / n_revealed.clamp(min=1.0)
 
     # --- Diagnostics ---
     # Uniform baseline: CE under p = 1/12 for each of 12 types.
     uniform_ce = torch.full_like(ce_loss, math.log(N_BELIEF_TYPES))
 
     # uniform_kl > 0 means the net is WORSE than uniform; < 0 means BETTER.
-    uniform_kl = ce_loss - uniform_ce
+    uniform_kl = torch.where(n_revealed > 0, ce_loss - uniform_ce, 0.0)
 
     # Accuracy: argmax of logits vs true type, masked.
     with torch.no_grad():
         pred = logits.argmax(dim=-1)                       # (B, 289)
         correct = ((pred == true_type_idx) & revealed).float().sum()
-        accuracy = correct / n_revealed
+        accuracy = correct / n_revealed.clamp(min=1.0)
 
     return {
         "ce_loss": ce_loss,
@@ -245,7 +191,7 @@ class BeliefPPOTrainer:
         self.device = torch.device(device)
 
         net = net.to(self.device)
-        # ``self.net`` is the unwrapped BeliefNet (used by EMA, save/load,
+        # ``self.net`` is the unwrapped BeliefNet (used by save/load,
         # and inference paths like ``refresh_beliefs_neural``). DDP wraps a
         # parallel copy whose only purpose is the supervised CE forward/
         # backward inside ``_update_step``.
@@ -260,7 +206,6 @@ class BeliefPPOTrainer:
             )
         else:
             self._net_for_train = net
-        self.ema = _EMABelief(net, decay=self.cfg.ema_decay)
 
         self.optimizer = torch.optim.Adam(
             net.parameters(),
@@ -271,6 +216,8 @@ class BeliefPPOTrainer:
         self.num_train_step: int = 0
         self.num_rollout: int = 0
         self._nan_skip_count: int = 0
+        self._empty_skip_count: int = 0
+        self._grad_skip_count: int = 0
 
         dtype_map = {
             "float32": torch.float32,
@@ -294,6 +241,25 @@ class BeliefPPOTrainer:
 
     def _update_step(self, batch: BeliefSample) -> dict[str, Tensor]:
         cfg = self.cfg
+        # A zero-gradient Adam step can still move parameters through stored
+        # momentum. Empty supervision must skip the forward pass and optimizer.
+        # Decide before DDP forward, on every rank, to keep collectives aligned.
+        n_labels = ((batch.true_type_idx >= 0) & batch.enemy_mask).sum().to(self.device)
+        has_labels = (n_labels > 0).to(torch.long)
+        if _is_distributed():
+            dist.all_reduce(has_labels, op=dist.ReduceOp.MIN)
+        if not bool(has_labels.item()):
+            self._empty_skip_count += 1
+            self.optimizer.zero_grad(set_to_none=True)
+            zero = torch.zeros((), device=self.device)
+            return {
+                "belief_train/ce_loss": zero,
+                "belief_train/uniform_kl": zero,
+                "belief_train/accuracy": zero,
+                "belief_train/n_revealed": n_labels.float(),
+                "belief_train/empty_skip": zero + 1,
+                "belief_train/updated": zero,
+            }
         self._net_for_train.train()
 
         ctx_device = self.device.type if hasattr(self.device, "type") else str(self.device).split(":")[0]
@@ -334,7 +300,6 @@ class BeliefPPOTrainer:
                 (p.sum() * 0.0) for p in self._net_for_train.parameters()
             )
             zero_loss.backward()
-            self.num_train_step += 1
             zero = torch.zeros((), device=self.device)
             return {
                 "belief_train/ce_loss": zero.detach(),
@@ -342,11 +307,27 @@ class BeliefPPOTrainer:
                 "belief_train/accuracy": zero.detach(),
                 "belief_train/n_revealed": losses["n_revealed"].detach(),
                 "belief_train/nan_skip": torch.ones((), device=self.device),
+                "belief_train/updated": zero,
             }
 
         self.optimizer.zero_grad()
         ce_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.net.parameters(), cfg.max_grad_norm)
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.net.parameters(), cfg.max_grad_norm)
+        grad_finite = torch.isfinite(grad_norm).to(device=self.device, dtype=torch.long)
+        if _is_distributed():
+            dist.all_reduce(grad_finite, op=dist.ReduceOp.MIN)
+        if not bool(grad_finite.item()):
+            self._grad_skip_count += 1
+            self.optimizer.zero_grad(set_to_none=True)
+            zero = torch.zeros((), device=self.device)
+            return {
+                "belief_train/ce_loss": ce_loss.detach(),
+                "belief_train/uniform_kl": losses["uniform_kl"].detach(),
+                "belief_train/accuracy": losses["accuracy"].detach(),
+                "belief_train/n_revealed": losses["n_revealed"].detach(),
+                "belief_train/grad_skip": zero + 1,
+                "belief_train/updated": zero,
+            }
         self.optimizer.step()
 
         self.num_train_step += 1
@@ -356,6 +337,8 @@ class BeliefPPOTrainer:
             "belief_train/uniform_kl": losses["uniform_kl"].detach(),
             "belief_train/accuracy": losses["accuracy"].detach(),
             "belief_train/n_revealed": losses["n_revealed"].detach(),
+            "belief_train/grad_norm": grad_norm.detach(),
+            "belief_train/updated": torch.ones((), device=self.device),
         }
 
     # ------------------------------------------------------------------
@@ -398,22 +381,25 @@ class BeliefPPOTrainer:
             n_batches=cfg.epochs_per_rollout,
         ):
             metrics = self._update_step(batch)
+            for key in ("empty_skip", "nan_skip", "grad_skip"):
+                metrics.setdefault("belief_train/" + key, torch.zeros((), device=self.device))
             all_metrics.append(metrics)
-            self.ema.update(self.net)
 
         self.num_rollout += 1
 
         # Aggregate: mean over updates, single D2H sync at end.
         agg: dict[str, float] = {}
         if all_metrics:
-            m0 = all_metrics[0]
-            for k, v0 in m0.items():
+            keys = set().union(*(m.keys() for m in all_metrics))
+            for k in keys:
+                v0 = next(m[k] for m in all_metrics if k in m)
                 if isinstance(v0, torch.Tensor):
                     stacked = torch.stack([m[k] for m in all_metrics if k in m])
                     agg[k] = float(stacked.float().mean().item())
                 else:
                     agg[k] = float(v0)
-        agg["belief_train/num_updates"] = float(len(all_metrics))
+        agg["belief_train/num_updates"] = sum(float(m["belief_train/updated"].item()) for m in all_metrics)
+        agg["belief_train/num_attempts"] = float(len(all_metrics))
         agg["belief_train/buffer_size"] = float(len(buffer))
         return agg
 
@@ -424,15 +410,20 @@ class BeliefPPOTrainer:
     def state_dict(self) -> dict[str, Any]:
         return {
             "net": self.net.state_dict(),
-            "ema": self.ema.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "num_train_step": self.num_train_step,
             "num_rollout": self.num_rollout,
+            "empty_skip_count": self._empty_skip_count,
+            "nan_skip_count": self._nan_skip_count,
+            "grad_skip_count": self._grad_skip_count,
         }
 
     def load_state_dict(self, sd: dict[str, Any]) -> None:
         self.net.load_state_dict(sd["net"])
-        self.ema.model.load_state_dict(sd["ema"])
+        # Legacy EMA entries are ignored; only the trained net is restored.
         self.optimizer.load_state_dict(sd["optimizer"])
         self.num_train_step = int(sd["num_train_step"])
         self.num_rollout = int(sd["num_rollout"])
+        self._empty_skip_count = int(sd.get("empty_skip_count", 0))
+        self._nan_skip_count = int(sd.get("nan_skip_count", 0))
+        self._grad_skip_count = int(sd.get("grad_skip_count", 0))

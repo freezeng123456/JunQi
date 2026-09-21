@@ -10,7 +10,6 @@ torch = pytest.importorskip("torch")
 from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
 from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
 from junqi_rl.training.ppo import (
-    EMAPolicy,
     PPOConfig,
     PPOTrainer,
     magnet_alpha,
@@ -101,29 +100,18 @@ def test_policy_ratio_does_not_overflow_on_stale_action():
     assert torch.isfinite(new.grad).all()
 
 
-def test_ema_copies_batchnorm_buffers_exactly():
-    """EMA must remain functionally aligned with the learner network."""
-    cfg = JunqiNetConfig(
-        cnn_channels=8,
-        cnn_layers=1,
-        depth=1,
-        embed_dim=32,
-        n_head=2,
-        ff_factor=2,
-        action_key_dim=8,
-    )
-    model = JunqiNet(cfg)
-    ema = EMAPolicy(model, decay=0.999)
+def test_collect_snapshot_copies_current_parameters_and_buffers_exactly():
+    """PPO uses one exact collection snapshot, with no averaging or aliasing."""
+    trainer = _trainer()
     with torch.no_grad():
-        for index, (_, buf) in enumerate(model.named_buffers()):
-            if torch.is_floating_point(buf):
-                buf.fill_(float(index + 1))
-            else:
-                buf.fill_(index + 1)
-    ema.update(model)
-    shadow_buffers = dict(ema.model.named_buffers())
-    for name, model_buffer in model.named_buffers():
-        assert torch.equal(shadow_buffers[name], model_buffer), name
+        for index, value in enumerate(trainer.policy.state_dict().values()):
+            value.fill_(index + 1)
+    trainer._sync_collect_policy()
+    snapshot = trainer._collect_policy.state_dict()
+    for name, value in trainer.policy.state_dict().items():
+        torch.testing.assert_close(snapshot[name], value, atol=0, rtol=0)
+        if value.numel():
+            assert snapshot[name].data_ptr() != value.data_ptr()
 
 
 def test_ppo_checkpoint_omits_move_policy_ema() -> None:

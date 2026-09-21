@@ -94,10 +94,8 @@ class ArrangementPPOTrainer:
         stats = trainer.train_epoch(buffer)
         # stats: {'arr_train/policy_loss': float, ..., 'arr_train/g_norm': float}
 
-    The trainer owns an AdamW optimizer over the net's parameters. It does
-    NOT own an EMA — that's expected to be an external object that tracks
-    the net's parameters and is updated by the caller after each training
-    step (to match Ataraxos's ``self.arr_ema_policy.update()`` pattern).
+    The trainer owns an AdamW optimizer over the net's parameters.
+    Arrangement generation and checkpointing use these current parameters.
     """
 
     def __init__(
@@ -106,7 +104,7 @@ class ArrangementPPOTrainer:
         cfg: ArrangementPPOConfig | None = None,
     ) -> None:
         # ``self.net`` always holds the **unwrapped** ArrangementNet so that
-        # external callers (EMAPolicy, save/load, generate_arrangements which
+        # external callers (save/load, generate_arrangements which
         # calls model.forward directly) don't need to know whether DDP is on.
         self.net = net
         self.cfg = cfg or ArrangementPPOConfig()
@@ -306,7 +304,7 @@ class ArrangementPPOTrainer:
         # ---- Gradient NaN/Inf guard (DDP-safe) ----
         # See PPOTrainer._update_step for the full rationale. Briefly: a
         # single bad backward writes NaN into the params, after which every
-        # subsequent forward returns NaN, the EMA shadow goes NaN, and the
+        # subsequent forward returns NaN, and the
         # arrangement pool quality decays to random. This guard short-
         # circuits the optimiser.step() so params stay clean.
         bad_grad_local = torch.tensor(
