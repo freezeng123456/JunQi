@@ -1,0 +1,10 @@
+{
+  "feature_knockout": "resources",
+  "first": "/tmp/junqi_feature_focus_20260921/R/train/ckpt_036384.pt",
+  "first_sha256": "6895534e6c2315047d3c89a25db2be95fdc005ce925cec13918b78c184084d0f",
+  "second": "/tmp/junqi_feature_focus_20260921/download/feature_focus_20260921/N/primary/ckpt_036384.pt",
+  "second_sha256": "a86939d757022f9a3627841973cd47d0e816ca50087adb004b4b0f64ea8bcec4",
+  "games": 512,
+  "setup_seed": 57921000,
+  "game_seed": 58921000
+}

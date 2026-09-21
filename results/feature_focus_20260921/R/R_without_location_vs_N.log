@@ -1,0 +1,1 @@
+R_without_location_vs_N {"status": "complete", "games": 512, "counts": {"loss": 256, "win": 250, "draw": 6}, "win_fraction": 0.48828125, "score": 0.494140625, "pair_bootstrap_ci95": [0.455078125, 0.533203125], "pairs": 256}
