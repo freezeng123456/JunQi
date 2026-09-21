@@ -1,7 +1,7 @@
 
 # Four-Player Junqi (四国军棋) — Canonical Rules
 
-> **Status**: FROZEN v1.1.0 (2026-04-20)
+> **Status**: FROZEN v1.2.0 (2026-09-22)
 > **Scope**: This document defines the exact rules that `junqi_core` (new Python library) MUST implement. The legacy C engine in `legacy_engine/` is the behavioral oracle for everything described here unless explicitly stated otherwise.
 > **Audience**: Engine implementers, RL training authors, test authors, UI authors.
 > **Versioning**: Any change to this file MUST bump `RULES_VERSION` in `junqi_core/rules.py` and be accompanied by updated golden test cases.
@@ -20,7 +20,7 @@
 - **Teammates**: `seat % 2 == 0` → Team A = {SOUTH, NORTH}; `seat % 2 == 1` → Team B = {WEST, EAST}.
 - **Piece index**: Each seat owns 30 slots `i ∈ [0,29]`, laid out in a 5-wide × 6-tall rectangle. See §1.2.
 - **Piece strength**: **Smaller enum value = stronger**. `SILING (5) > JUNZH (6) > ... > GONGB (13)`. See §1.1.
-- **Rule version**: `RULES_VERSION = "1.1.0"` (increment on any semantic change below).
+- **Rule version**: `RULES_VERSION = "1.2.0"` (increment on any semantic change below).
 
 ---
 
@@ -541,6 +541,7 @@ The `junqi_core.replay` module MUST verify: given `setups` + `moves`, replaying 
 |---------|-----------|---------|
 | 1.0.0   | 2026-04-19 | Initial canonical specification. Frozen. |
 | 1.1.0   | 2026-04-20 | Added §5.2a (Q14): mutual-destruction resolution awards victory to the attacker's team (non-breaking addition). |
+| 1.2.0   | 2026-09-22 | Version the public-mine/engineer inference and revealed flag-location contract in §§3.4/7.1. Movement and combat outcomes remain compatible with 1.x replays; observation checkpoint compatibility is separately checked by `observation_semantics_version=4`. Existing experiment archives retain their original version labels. |
 
 ---
 

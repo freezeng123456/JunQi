@@ -14,7 +14,11 @@ from junqi_core.rules import Seat, ShowMode, PieceType
 from junqi_core.setup import generate_random_setup
 from junqi_core.state import GameState
 from junqi_rl.belief.buffer import BeliefBuffer
-from junqi_rl.belief.inference import constrain_neural_beliefs, rule_only_belief_observations
+from junqi_rl.belief.inference import (
+    constrain_neural_beliefs,
+    refresh_beliefs_neural,
+    rule_only_belief_observations,
+)
 from junqi_rl.belief.sampling import MidgameBeliefSampler
 from junqi_rl.networks.belief_net import BeliefNet, BeliefNetConfig
 from junqi_rl.training.belief_ppo import BeliefPPOConfig, BeliefPPOTrainer
@@ -111,7 +115,8 @@ def test_hidden_truth_changes_targets_without_changing_player_input():
     assert np.any(buffers[0]._label[0] != buffers[1]._label[0])
 
 
-def test_empty_supervision_skips_adam_momentum():
+@pytest.mark.parametrize('invalid_logit', [None, float('nan'), float('inf')])
+def test_empty_supervision_skips_adam_momentum(monkeypatch, invalid_logit):
     world = CPUWorld(generate_random_setup(random.Random(3)))
     buf = BeliefBuffer(capacity=8, seed=3)
     MidgameBeliefSampler(buf, every_steps=1)(rollout_world=world)
@@ -120,12 +125,34 @@ def test_empty_supervision_skips_adam_momentum():
     trainer = BeliefPPOTrainer(net, BeliefPPOConfig(batch_size=2, epochs_per_rollout=1))
     assert trainer.train_epoch(buf)['belief_train/num_updates'] == 1
     before = copy.deepcopy(trainer.state_dict())
+    original_inputs = world.observations.clone()
+    if invalid_logit is not None:
+        def invalid_forward(obs, seat_idx):
+            return {'logits': torch.full((len(obs), 289, 12), invalid_logit)}
+
+        monkeypatch.setattr(net, 'forward', invalid_forward)
     buf._label[:len(buf)] = -1
     metrics = trainer.train_epoch(buf)
     assert metrics['belief_train/num_updates'] == 0
     assert metrics['belief_train/n_revealed'] == 0
     assert metrics['belief_train/empty_skip'] == 1
     assert trainer.num_train_step == 1
+    if invalid_logit is not None:
+        uploads = []
+
+        def upload_beliefs(values):
+            uploaded = torch.as_tensor(values).clone()
+            uploads.append(uploaded)
+            # Rebuild the identity planes consumed by the policy after upload.
+            world.observations = rule_only_belief_observations(world.observations, uploaded)
+
+        monkeypatch.setattr(world, 'upload_beliefs', upload_beliefs, raising=False)
+        assert (world.rules.sum(2) == 0).any()  # Include empty support.
+        refresh_beliefs_neural(world, net, empty_cache=False, rule_only_input=True,
+                              neural_weight=.25, max_kl=.05)
+        assert len(uploads) == 1
+        torch.testing.assert_close(uploads[0], world.rules, atol=1e-7, rtol=0)
+        torch.testing.assert_close(world.observations, original_inputs, atol=1e-7, rtol=0)
     after = trainer.state_dict()
     for key in before['net']:
         torch.testing.assert_close(before['net'][key], after['net'][key], atol=0, rtol=0)
