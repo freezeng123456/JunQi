@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0",
-  "rules_version": "1.1.0",
+  "rules_version": "1.2.0",
   "category": "inference",
   "id": "infer_gongb_eats_dilei",
-  "description": "GONGB is the only piece that can EAT a DILEI. If observers see EAT where dst was immobile in back rank → src=GONGB dst=DILEI.",
+  "description": "Eating an unrevealed mine does not publicly identify the attacker as an engineer; back-row location and immobility are insufficient.",
   "tags": [
     "Q2",
     "inference",
@@ -131,11 +131,25 @@
         "event": "EAT",
         "flag_reveal_src": false,
         "flag_reveal_dst": false,
-        "flag_captured": false
+        "flag_captured": false,
+        "not_public_identities": [
+          {
+            "pos": [
+              5,
+              10
+            ],
+            "type": "GONGB",
+            "observers": [
+              2,
+              3
+            ]
+          }
+        ]
       }
     ],
     "terminated": false,
     "winner_team": null,
     "draw": false
-  }
+  },
+  "show_mode": "DARK"
 }

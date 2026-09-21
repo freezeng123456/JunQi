@@ -31,7 +31,7 @@ from typing import Final
 # Rule version (see ADR-015)
 # ===========================================================================
 
-RULES_VERSION: Final[str] = "1.1.0"
+RULES_VERSION: Final[str] = "1.2.0"
 RULES_MAJOR: Final[int] = 1
 
 # ===========================================================================

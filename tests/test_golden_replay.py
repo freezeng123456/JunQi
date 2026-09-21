@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from junqi_core.info_model import TRACKED_TYPES, BeliefTensor
 from junqi_core.move_gen import PieceRef
 from junqi_core.rules import PieceType, Seat, ShowMode
 from junqi_core.state import Action, GameState, SeatInfo
@@ -56,7 +57,7 @@ def _build_info(info_json: list[dict]) -> dict[Seat, SeatInfo]:
     }
 
 
-def _build_state(pre: dict) -> GameState:
+def _build_state(pre: dict, show_mode: ShowMode = ShowMode.HALF_DARK) -> GameState:
     return GameState(
         pieces=_build_piece_map(pre["pieces"]),
         turn=Seat(pre["turn"]),
@@ -66,7 +67,7 @@ def _build_state(pre: dict) -> GameState:
         terminated=False,
         winner_team=None,
         draw=False,
-        show_mode=ShowMode.HALF_DARK,
+        show_mode=show_mode,
     )
 
 
@@ -95,7 +96,8 @@ def test_golden_replays_through_step(
 ) -> None:
     """Load and replay a golden scenario; assert every expected field."""
     doc = json.loads(path.read_text())
-    state = _build_state(doc["pre_state"])
+    state = _build_state(doc["pre_state"], ShowMode[doc.get("show_mode", "HALF_DARK")])
+    beliefs = {seat: BeliefTensor.initial(state, seat) for seat in Seat}
 
     actions = doc["actions"]
     expected_results = doc["expected"]["results"]
@@ -110,7 +112,26 @@ def test_golden_replays_through_step(
             src=(a_json["src"][0], a_json["src"][1]),
             dst=(a_json["dst"][0], a_json["dst"][1]),
         )
+        before = state
         state, result = state.step(action)
+        for belief in beliefs.values():
+            belief.update(before, state, result)
+
+        # Public facts must survive both incremental inference and JSON restore.
+        for fact in exp.get("public_identities", []):
+            cell = tuple(fact["pos"])
+            index = TRACKED_TYPES.index(PieceType[fact["type"]])
+            restored = GameState.from_dict(json.loads(json.dumps(state.to_dict())))
+            assert restored.rules_version == doc["rules_version"]
+            for observer in Seat:
+                assert beliefs[observer].probs[cell][index] == 1.0
+                assert BeliefTensor.initial(restored, observer).probs[cell][index] == 1.0
+
+        for fact in exp.get("not_public_identities", []):
+            cell = tuple(fact["pos"])
+            index = TRACKED_TYPES.index(PieceType[fact["type"]])
+            for observer in fact["observers"]:
+                assert beliefs[Seat(observer)].probs[cell][index] < 1.0
 
         assert result.event.name == exp["event"], (
             f"{category}/{name} step {i}: "
