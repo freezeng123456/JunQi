@@ -92,6 +92,31 @@ DeviceGameStateBatch::DeviceGameStateBatch(int n, int move_limit)
     CUDA_CHECK(cudaMalloc(&d_cm_not_gongb,                 CM_N * sizeof(bool)));
     CUDA_CHECK(cudaMalloc(&d_cm_attacked_by_known_gongb,   CM_N * sizeof(bool)));
 
+    clear_auxiliary_state();
+}
+
+void DeviceGameStateBatch::ensure_beliefs() {
+    if (!d_belief) {
+        CUDA_CHECK(cudaMalloc(&d_belief, (size_t)num_envs * BELIEF_STRIDE * sizeof(float)));
+        CUDA_CHECK(cudaMemset(d_belief, 0, (size_t)num_envs * BELIEF_STRIDE * sizeof(float)));
+    }
+}
+
+void DeviceGameStateBatch::ensure_rule_beliefs() {
+    ensure_beliefs();
+    if (!d_rule_belief) {
+        const size_t bytes = (size_t)num_envs * BELIEF_STRIDE * sizeof(float);
+        CUDA_CHECK(cudaMalloc(&d_rule_belief, bytes));
+        CUDA_CHECK(cudaMemcpy(d_rule_belief, d_belief, bytes, cudaMemcpyDeviceToDevice));
+    }
+}
+
+void DeviceGameStateBatch::clear_auxiliary_state() {
+    CUDA_CHECK(cudaMemset(d_move_history, 0,
+        (size_t)num_envs * MOVE_HISTORY_LEN * 2 * sizeof(int16_t)));
+    CUDA_CHECK(cudaMemset(d_history_write_idx, 0, (size_t)num_envs * sizeof(int32_t)));
+    CUDA_CHECK(cudaMemset(d_history_count, 0, (size_t)num_envs * sizeof(int32_t)));
+    const size_t CM_N = (size_t)num_envs * 4 * 120;
     CUDA_CHECK(cudaMemset(d_cm_direct_lo,                 0, CM_N * sizeof(uint64_t)));
     CUDA_CHECK(cudaMemset(d_cm_direct_hi,                 0, CM_N * sizeof(uint64_t)));
     CUDA_CHECK(cudaMemset(d_cm_direct_type,               0, CM_N * sizeof(uint16_t)));
@@ -136,6 +161,9 @@ DeviceGameStateBatch::~DeviceGameStateBatch() {
     f(d_zobrist);
     f(d_move_counter);
     f(d_moves_since_last_combat);
+    f(d_belief);
+    f(d_rule_belief);
+    f(d_observer_seats);
     f(d_terminated);
     f(d_winner_team);
     f(d_draw);

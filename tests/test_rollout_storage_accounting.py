@@ -35,10 +35,12 @@ def test_compact_history_accounts_for_all_combat_memory_observers() -> None:
         storage_mode="compact_history",
     )
 
-    assert COMPACT_HISTORY_BYTES_PER_TRANSITION == 47_243
-    assert estimate.observation_bytes == 47_243
+    assert COMPACT_HISTORY_BYTES_PER_TRANSITION == 33_803
+    assert estimate.observation_bytes == 33_803
+    # Removed reverse pairs (4 observers) and three duplicate chain views.
+    assert 47_243 - COMPACT_HISTORY_BYTES_PER_TRANSITION == (2*4*120*8 + 2*3*120*8)
     assert estimate.legal_bytes == 0
-    assert estimate.bytes_per_transition == 47_269
+    assert estimate.bytes_per_transition == 33_829
 
 
 def test_compact_history_is_much_smaller_than_full_observations() -> None:
@@ -53,7 +55,7 @@ def test_compact_history_is_much_smaller_than_full_observations() -> None:
     transitions = n_envs * steps
     assert full.total_bytes == full.bytes_per_transition * transitions
     assert compact.total_bytes == compact.bytes_per_transition * transitions
-    assert compact.total_gib == pytest.approx(2.89, abs=0.02)
+    assert compact.total_gib == pytest.approx(2.0647583, abs=1e-6)
     # 317 channels make full_obs smaller than the former 412-channel layout.
     assert compact.total_bytes / full.total_bytes < 0.26
 

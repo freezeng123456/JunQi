@@ -1,7 +1,7 @@
 
 # Four-Player Junqi (四国军棋) — Canonical Rules
 
-> **Status**: FROZEN v1.1.0 (2026-04-20)
+> **Status**: FROZEN v1.2.0 (2026-09-22)
 > **Scope**: This document defines the exact rules that `junqi_core` (new Python library) MUST implement. The legacy C engine in `legacy_engine/` is the behavioral oracle for everything described here unless explicitly stated otherwise.
 > **Audience**: Engine implementers, RL training authors, test authors, UI authors.
 > **Versioning**: Any change to this file MUST bump `RULES_VERSION` in `junqi_core/rules.py` and be accompanied by updated golden test cases.
@@ -20,7 +20,7 @@
 - **Teammates**: `seat % 2 == 0` → Team A = {SOUTH, NORTH}; `seat % 2 == 1` → Team B = {WEST, EAST}.
 - **Piece index**: Each seat owns 30 slots `i ∈ [0,29]`, laid out in a 5-wide × 6-tall rectangle. See §1.2.
 - **Piece strength**: **Smaller enum value = stronger**. `SILING (5) > JUNZH (6) > ... > GONGB (13)`. See §1.1.
-- **Rule version**: `RULES_VERSION = "1.1.0"` (increment on any semantic change below).
+- **Rule version**: `RULES_VERSION = "1.2.0"` (increment on any semantic change below).
 
 ---
 
@@ -282,9 +282,9 @@ Given `(event, A_visible, B_visible, flag_reveals)`, observers can sometimes nar
 
 **Special deduction cases** (RULES.md does not enumerate the belief algorithm; see `docs/INFERENCE.md` to be written in Phase 0.2). A few canonical examples:
 
-1. **Engineer-reveals-mine**: If A eats B where B was on `index ≥ 20` (back 2 rows) and B was immobile up to this point, and A survived, then A is likely `GONGB` and B was `DILEI`. Observers can mark A as engineer.
+1. **Public-mine capture reveals engineer**: A surviving hidden mine is publicly identified only by case 3 below. If a later attacker EATs that same, already-public mine, mark the attacker as `GONGB` for every observer. A mine's owner privately knowing its type is insufficient for this public inference. Engineer-only legal movement independently reveals `GONGB`; ordinary straight rail moves and arcs do not.
 2. **Lieutenant-beats-engineer**: If A kills B and A was known to be weak (e.g. `PAIZH`), observers learn B's rank was `≥ PAIZH`, typically `GONGB`.
-3. **SILING-on-mine**: KILLED + src-flag-revealed → src was `SILING`, dst was `DILEI`.
+3. **SILING-on-mine**: KILLED + src-flag-revealed → src was `SILING`, dst was `DILEI`. This is the only automatic public confirmation of a surviving hidden enemy mine. Other deaths, a back-row location, immobility, or private own-piece knowledge do not publicly confirm a mine. All observers retain this fact for subsequent moves.
 4. **Bomb-into-SILING** (Q7): BOMB + exactly-one-side-revealed → revealed side was `SILING`, other side was `ZHADAN`.
 5. **Double SILING**: BOMB + both-sides-revealed → both were `SILING`.
 
@@ -414,6 +414,11 @@ All 4 setups pass `validate_setup()` which enforces §1.3 constraints C1-C5. Fai
 
 - Every cell's `(x, y, is_occupied, owner_seat_if_occupied, is_camp, is_stronghold, is_railway)`.
 - Every seat's `(alive, flag_revealed)`.
+- Once a seat's flag is revealed by its commander's death, the exact surviving
+  flag cell is public. Every observer must receive one-hot JUNQI at that cell,
+  with JUNQI excluded from all other pieces of that seat. Preserve this on
+  state restoration and neural belief refresh; the seat-level boolean alone
+  does not convey the visible flag location.
 - Move history (sequence of MoveResult broadcasts).
 
 ### 7.2 Belief Channels (observation tensor)
@@ -536,6 +541,7 @@ The `junqi_core.replay` module MUST verify: given `setups` + `moves`, replaying 
 |---------|-----------|---------|
 | 1.0.0   | 2026-04-19 | Initial canonical specification. Frozen. |
 | 1.1.0   | 2026-04-20 | Added §5.2a (Q14): mutual-destruction resolution awards victory to the attacker's team (non-breaking addition). |
+| 1.2.0   | 2026-09-22 | Version the public-mine/engineer inference and revealed flag-location contract in §§3.4/7.1. Movement and combat outcomes remain compatible with 1.x replays; observation checkpoint compatibility is separately checked by `observation_semantics_version=4`. Existing experiment archives retain their original version labels. |
 
 ---
 

@@ -7,19 +7,16 @@ resulting per-cell distributions into ``rollout.d_belief`` via
 
 Integration contract
 --------------------
-The deductive rule engine in ``junqi_rl/env/cuda/src/belief.cu`` (R1, R4,
-R5/R7, R6, R9, I5) runs first on every step via
-:meth:`GpuRollout.update_beliefs_device`. After a main-PPO rollout
-completes, the training script calls :func:`refresh_beliefs_neural` to
-replace the device-resident belief tensor with the neural net's output.
-The deductive rules then resume on subsequent steps, now starting from
-the neural prior instead of the hand-coded prior table.
+The CUDA rule engine maintains a separate deductive prior after the first
+neural refresh. Neural probabilities may reweight its allowed types only.
+Public one-hot facts, ruled-out types, own/teammate knowledge, and empty cells
+are preserved. If the net assigns no finite positive mass to allowed types,
+refresh falls back to the deductive prior. Later rule updates project soft
+beliefs back onto this independent support.
 
-This interleaving (net → deductive → next step → net refresh) mirrors
-Ataraxos's design choice (§D.5): the deductive updates are bit-exact for
-deterministic events (flag captured → 1.0 prob JUNQI at that cell),
-while the neural net interpolates for everything else. Keeping both
-layers means the net doesn't have to learn what the rules already know.
+BeliefNet's training labels (RevealTracker) and output use WORLD cells even
+though its input observation is canonical and includes the observer seat.
+Only the live-enemy occupancy mask must be rotated back to world coordinates.
 
 Throttling
 ----------
@@ -46,6 +43,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from junqi_core.observation import CHANNEL_LAYOUT
 from junqi_rl.belief.reveal_tracker import _SEAT_CELLS, _build_enemy_mask
 from junqi_rl.networks.belief_net import BeliefNet, N_BELIEF_TYPES
 
@@ -133,6 +131,34 @@ def belief_logits_to_upload_shape(
     return out.to(torch.float32)
 
 
+def _live_enemy_world_mask(obs: torch.Tensor) -> torch.Tensor:
+    """Canonical observation occupancy -> world (N, 4, 289) bool."""
+    left = CHANNEL_LAYOUT["piece_left_side_enemy"]
+    right = CHANNEL_LAYOUT["piece_right_side_enemy"]
+    canonical = (obs[:, :, left].sum(dim=2) + obs[:, :, right].sum(dim=2)) > 0
+    # inverse of rotation.rotate_planes, separately for each observer
+    return torch.stack([
+        torch.rot90(canonical[:, seat], k, dims=(-2, -1)).flatten(-2)
+        for seat, k in enumerate((0, -1, 2, 1))
+    ], dim=1)
+
+
+def constrain_neural_beliefs(
+    probabilities: torch.Tensor,
+    rules: torch.Tensor,
+    live_enemy: torch.Tensor,
+) -> torch.Tensor:
+    """Return world (N,4,12,289) beliefs without changing deductive support."""
+    soft = belief_logits_to_upload_shape(probabilities)
+    permitted = (rules > 0) & torch.isfinite(soft) & (soft > 0)
+    soft = torch.where(permitted, soft, 0.0)
+    mass = soft.sum(dim=2, keepdim=True)
+    rule_mass = rules.sum(dim=2, keepdim=True)
+    fallback = rules / rule_mass.clamp_min(1e-30)
+    projected = torch.where(mass > 0, soft / mass.clamp_min(1e-30), fallback)
+    return torch.where(live_enemy.unsqueeze(2), projected, rules).contiguous()
+
+
 def refresh_beliefs_neural(
     rollout: "GpuRollout",
     belief_net: BeliefNet,
@@ -206,6 +232,8 @@ def refresh_beliefs_neural(
     # before the next build_*_observations_torch call.
     # (If a caller ever interleaves rollout stepping with inference, we'd
     # need .clone(); that isn't the current integration pattern.)
+    rules = rollout.rule_beliefs_torch()
+    live_enemy = _live_enemy_world_mask(obs_sp_all)
     C_in, H, W = obs_sp_all.shape[2:]
     obs_flat = obs_sp_all.reshape(N * N_SEATS, C_in, H, W)
     seat_flat = (
@@ -251,19 +279,12 @@ def refresh_beliefs_neural(
         probs = logits
     probs_5d = probs.reshape(N, N_SEATS, NUM_CELLS, N_BELIEF_TYPES)
 
-    # Enemy-mask + transpose + upload.
-    upload = belief_logits_to_upload_shape(probs_5d)    # (N, 4, 12, 289) fp32
+    upload = constrain_neural_beliefs(probs_5d, rules, live_enemy)
     upload_cpu = upload.detach().cpu().numpy()
     rollout.upload_beliefs(upload_cpu)
-    del upload
 
-    # --- Diagnostics: compute over ENEMY cells only (others would be zero
-    # if we gathered the masked upload, but we compute on raw probs_5d so
-    # the entropy reflects the net's actual output). ---
-    enemy_mask = _get_enemy_mask(probs_5d.device)       # (4, 289) bool
-    em_expand = enemy_mask.unsqueeze(0).expand(N, -1, -1).reshape(-1)
-    flat_probs = probs_5d.reshape(-1, N_BELIEF_TYPES)
-    enemy_probs = flat_probs[em_expand]
+    # Diagnostics describe the actual constrained beliefs at live enemy cells.
+    enemy_probs = upload.transpose(-1, -2)[live_enemy]
     if enemy_probs.numel() == 0:
         metrics = {"belief_infer/num_envs": float(N)}
     else:
@@ -278,7 +299,7 @@ def refresh_beliefs_neural(
 
     # Release remaining CUDA tensors + fragments so the main PPO forward
     # gets a clean allocator pool.
-    del probs, probs_5d, enemy_probs, flat_probs, em_expand, upload_cpu
+    del probs, probs_5d, enemy_probs, upload_cpu, upload, rules, live_enemy
     if empty_cache and torch.cuda.is_available():
         torch.cuda.empty_cache()
 

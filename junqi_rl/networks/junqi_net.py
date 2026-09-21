@@ -58,6 +58,7 @@ from torch import Tensor
 from torch.distributions import Categorical
 
 from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
+from junqi_rl.networks.combat_features import CombatOutcomeHead
 from junqi_core.board import (
     COMPACT_ACTION_DIM,
     COMPACT_RAIL_DEGREE,
@@ -124,6 +125,9 @@ class JunqiNetConfig:
     use_cat_vf: bool = False
     """If True, value head predicts N_VF_CAT bins (categorical RL).
     If False, predicts a single scalar (standard actor-critic)."""
+
+    combat_outcome_features: bool = False
+    """Enable the 81-parameter observation-derived combat outcome residual."""
 
     # Action head
     action_key_dim: int = 64
@@ -432,6 +436,9 @@ class JunqiNet(nn.Module):
             self.value_head = nn.Linear(D, 1)
 
         self._init_weights()
+        # Construct AFTER baseline initialization: disabled state dict and RNG
+        # consumption are unchanged; enabled base weights are identical too.
+        self.combat_head = CombatOutcomeHead() if cfg.combat_outcome_features else None
 
     # -------------------------------------------------------------------------
     # Weight init
@@ -504,6 +511,7 @@ class JunqiNet(nn.Module):
         self,
         cells: Tensor,          # (B, 129, D)
         legal_mask: Tensor,     # (B, 16641) bool
+        obs_spatial: Tensor | None = None,
     ) -> Tensor:
         """Compute action logits from on-board cell embeddings.
 
@@ -525,6 +533,10 @@ class JunqiNet(nn.Module):
         attn = torch.bmm(q_f, k_f.transpose(1, 2)) / math.sqrt(Kd)
         # Flatten to (B, 16641)
         logits = attn.reshape(-1, FLAT_ACTION_DIM)
+        if self.combat_head is not None:
+            if obs_spatial is None:
+                raise ValueError("combat outcome features require the actor observation")
+            logits = logits + self.combat_head(obs_spatial)
         # Retain a finite sentinel here.  Under torch.compile, exact -inf in
         # the normal action distribution makes entropy/KL terms hit 0 * -inf
         # and can poison every PPO gradient.  A direct selected-action mask
@@ -558,9 +570,10 @@ class JunqiNet(nn.Module):
         legal_mask: Tensor,
         *,
         actions: Tensor | None = None,
+        obs_spatial: Tensor | None = None,
     ) -> dict[str, Tensor]:
         """Evaluate or sample the policy from already encoded cell tokens."""
-        logits = self._policy_logits(cells, legal_mask)
+        logits = self._policy_logits(cells, legal_mask, obs_spatial)
         # Cast to fp32 for numerically stable log_softmax / sampling
         # (fp16 logits with large masked regions can overflow).
         logits_f = logits.float()
@@ -650,7 +663,9 @@ class JunqiNet(nn.Module):
         callers can surface the frequency.
         """
         cls, cells = self._encode(obs_spatial, obs_global)
-        out = self._policy_from_encoded(cells, legal_mask, actions=actions)
+        out = self._policy_from_encoded(
+            cells, legal_mask, actions=actions, obs_spatial=obs_spatial,
+        )
         out["value"] = self._value(cls)
         return out
 
@@ -685,6 +700,8 @@ class JunqiNet(nn.Module):
         policy_cells = cells.index_select(0, policy_indices)
         out = self._policy_from_encoded(
             policy_cells, legal_mask, actions=actions,
+            obs_spatial=(obs_spatial.index_select(0, policy_indices)
+                         if self.combat_head is not None else None),
         )
         out["value"] = self._value(cls)
         return out
@@ -723,7 +740,7 @@ class JunqiNet(nn.Module):
         values      : float  (B,) or (B, N_VF_CAT)
         """
         cls, cells = self._encode(obs_spatial, obs_global)
-        logits = self._policy_logits(cells, legal_mask)  # (B, 16641), illegal=-inf
+        logits = self._policy_logits(cells, legal_mask, obs_spatial)  # (B, 16641), illegal=-inf
 
         logits_f = logits.float()
         u = torch.rand_like(logits_f).clamp_(1e-10, 1.0)
@@ -754,7 +771,7 @@ class JunqiNet(nn.Module):
     ) -> Tensor:
         """Greedy (argmax) action selection — useful for evaluation."""
         _, cells = self._encode(obs_spatial, obs_global)
-        logits = self._policy_logits(cells, legal_mask)
+        logits = self._policy_logits(cells, legal_mask, obs_spatial)
         return logits.argmax(dim=-1).int()
 
     def num_parameters(self) -> int:

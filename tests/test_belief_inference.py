@@ -211,6 +211,11 @@ class _FakeRollout:
         # (obs_spatial, obs_global); inference.py discards the global one.
         return self._obs, None
 
+    def rule_beliefs_torch(self):
+        # Fully permissive rules isolate chunking numerics from game semantics.
+        # Legal-board hard constraints are covered by real-state fixtures.
+        return torch.full((self.num_envs, 4, 12, 289), 1 / 12, device=self._device)
+
     def upload_beliefs(self, arr: np.ndarray) -> None:
         self.last_upload = arr.copy()
 

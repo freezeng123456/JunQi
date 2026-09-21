@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+import warnings
 
 from torch.nn import Module
 
@@ -18,6 +19,9 @@ from junqi_core.observation import OBS_CHANNELS
 
 
 CHECKPOINT_FORMAT_VERSION = 2
+# v4: public commander-death flags identify the exact flag cell and exclude
+# JUNQI from every other piece of that army, on CPU and native CUDA paths.
+OBSERVATION_SEMANTICS_VERSION = 4
 
 
 def current_checkpoint_metadata(policy: Module | None = None) -> dict[str, Any]:
@@ -25,11 +29,15 @@ def current_checkpoint_metadata(policy: Module | None = None) -> dict[str, Any]:
 
     metadata: dict[str, Any] = {
         "format_version": CHECKPOINT_FORMAT_VERSION,
+        "observation_semantics_version": OBSERVATION_SEMANTICS_VERSION,
         "observation_channels": OBS_CHANNELS,
         "action_dim": COMPACT_ACTION_DIM,
         "num_on_board_cells": NUM_ON_BOARD_CELLS,
     }
     if policy is not None:
+        from junqi_rl.networks.combat_features import COMBAT_FEATURE_VERSION
+        enabled = getattr(getattr(policy, "cfg", None), "combat_outcome_features", False)
+        metadata["combat_feature_version"] = COMBAT_FEATURE_VERSION if enabled else 0
         metadata["policy_class"] = type(policy).__name__
         stem = getattr(policy, "stem", None)
         metadata["stem_class"] = type(stem).__name__ if stem is not None else None
@@ -73,9 +81,17 @@ def validate_policy_checkpoint(
 
     metadata_mismatches: list[str] = []
     saved_meta = checkpoint.get("checkpoint_meta")
+    if not isinstance(saved_meta, Mapping) or "observation_semantics_version" not in saved_meta:
+        warnings.warn(
+            f"{source}: legacy observation semantics are unspecified. Hidden-information "
+            "and live-inventory fixes changed inputs without changing tensor shapes; "
+            "loading these weights does not reproduce the original training run.",
+            UserWarning, stacklevel=2,
+        )
     if isinstance(saved_meta, Mapping):
         current_meta = current_checkpoint_metadata(policy)
-        for key in ("observation_channels", "action_dim", "num_on_board_cells"):
+        for key in ("observation_channels", "action_dim", "num_on_board_cells",
+                    "observation_semantics_version", "combat_feature_version"):
             if key in saved_meta and saved_meta[key] != current_meta[key]:
                 metadata_mismatches.append(
                     f"{key}: checkpoint={saved_meta[key]!r} runtime={current_meta[key]!r}"

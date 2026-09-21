@@ -102,7 +102,7 @@ _CH_MOVE_HISTORY_SIZE: Final[int] = 32  # src_dst_planes: 32-step history
 # Two layers, total 50 + 46 = 96 channels:
 #   Layer 1 (45 ch) projects state[observer][enemy_pid] to enemy alive cells.
 #   Layer 2 ( 5 ch) projects {state[opp_left] AND state[opp_right]} to my own
-#     alive cells (theory-of-mind; AND yields path-revealed-only knowledge).
+#     alive cells (theory-of-mind; AND yields public identity knowledge).
 #   Layer 3 (46 ch, ADR-129 v5 PR 2026-Q2) — finer per-pid identity tracking
 #     to let the network distinguish "killer K ate observer's slot-i piece"
 #     from "killer K ate slot-j piece" (the same multi-hot type alone hides
@@ -172,7 +172,7 @@ def _layout_slices() -> dict[str, slice]:
         ("dead_at_zero", _CH_DEAD_AT_ZERO_SIZE),
         ("piece_slot", _CH_PIECE_SLOT_SIZE),
         ("move_history", _CH_MOVE_HISTORY_SIZE),
-        # ---- CombatMemory v4 tail (50 ch); pre-CM indices [0, 256) preserved ----
+        # ---- CombatMemory v4 tail (50 ch); pre-CM indices [0, 161) preserved ----
         # Layer 1 (45 ch) — projected to enemy alive pieces.
         ("cm_kill_mine_type", _CH_CM_KILL_MINE_TYPE_SIZE),
         ("cm_kill_mine_ge", _CH_CM_KILL_MINE_GE_SIZE),
@@ -1115,7 +1115,8 @@ def _write_death_reason(
     Planes  6- 8: left-side enemy
     Planes  9-11: right-side enemy
 
-    Each group has 3 planes for DeathReason: KILLED_BY_ENEMY / HIT_MINE_OR_BOMB / MUTUAL.
+    BRIGHT: KILLED_BY_ENEMY / HIT_MINE_OR_BOMB / MUTUAL.
+    Hidden modes: non-mutual / reserved zero / mutual; private causes stay in state.
     Anchored at the world-frame death location.
     """
     if not state.deaths:
@@ -1127,6 +1128,10 @@ def _write_death_reason(
     if pids.size == 0:
         return
     reason_vals = state.death_reason_arr[pids]
+    # Hidden defender identities cannot be recovered from a public KILLED event.
+    # Keep the private cause in GameState; expose only non-mutual versus mutual.
+    if state.show_mode is not ShowMode.BRIGHT:
+        reason_vals = np.where(reason_vals == 1, 0, reason_vals)
     step_vals = state.death_step_arr[pids]
     seat_vals = state.piece_seat_arr[pids]
     flat = state.death_loc_flat_arr[pids]
@@ -1266,7 +1271,7 @@ def _write_combat_memory(
     alive pieces.  Computed by AND-aggregating the two opponent
     observers' state — this filters to public-only information (DARK
     rule: any single-opponent fact may be from their own-seat
-    visibility, but AND of two opponents is path-revealed and chain
+    visibility, but AND of two opponents contains public identity and chain
     knowledge that crossed both, which is necessarily public).
 
     All channels are binary (0/1).
@@ -1417,7 +1422,7 @@ def _write_combat_memory(
                 ix = np.where(sel)[0]
                 out_my_kill_count_ge[k, my[ix], mx[ix]] = 1.0
 
-        # is_gongb (path-revealed iff BOTH opponents see it).
+        # is_gongb (public identity, shared by BOTH opponents).
         l_isg = cm.is_gongb[left_opp,  mpids]
         r_isg = cm.is_gongb[right_opp, mpids]
         public_isg = l_isg & r_isg
@@ -1425,13 +1430,11 @@ def _write_combat_memory(
             ix = np.where(public_isg)[0]
             out_my_is_gongb[0, my[ix], mx[ix]] = 1.0
 
-        # dilei_candidate from opponents' AND.  Uses ``attacked_by_known_gongb``
-        # — if either opponent has seen a known-GONGB attack on me, the AND
-        # includes that fact (i.e. NOT both → not_attacked = OR).  But for
-        # candidate we want "neither opponent knows of a GONGB attack".
+        # Only knowledge shared by both opponents can be treated as public.
+        # The attacker's owner knowing its private type is not a public reveal.
         l_atk = cm.attacked_by_known_gongb[left_opp,  mpids]
         r_atk = cm.attacked_by_known_gongb[right_opp, mpids]
-        public_attacked_by_gongb = l_atk | r_atk  # if any opponent saw it, info is public
+        public_attacked_by_gongb = l_atk & r_atk
         zero_x = state.zero_x[mpids]
         zero_y = state.zero_y[mpids]
         mc = state.move_count_arr[mpids]
@@ -1631,17 +1634,20 @@ def _write_global_features(
     ``order_vals`` = ``(me, teammate, left_side_enemy, right_side_enemy)``
     pre-computed by :meth:`ObservationBuilder.build`.
 
-    Phase 0.4 M3 (ADR-120): vectorized.  Reads
-    ``belief.remaining_arr[(4, 12)]`` directly (one slice per side) and
-    ``state.seat_flag_revealed_arr`` for the 4 flag-reveal scalars.
+    Sum the observer's belief mass over surviving pieces, matching CUDA.
+    Internal unrevealed-inventory counters are not live-piece counts.
+    Read ``state.seat_flag_revealed_arr`` for the 4 flag-reveal scalars.
     """
     left_val = order_vals[2]
     right_val = order_vals[3]
 
     left_base = GLOBAL_LAYOUT["remaining_left_side"].start
     right_base = GLOBAL_LAYOUT["remaining_right_side"].start
-    out[left_base:left_base + NUM_TRACKED_TYPES] = belief.remaining_arr[left_val]
-    out[right_base:right_base + NUM_TRACKED_TYPES] = belief.remaining_arr[right_val]
+    # The builder already synchronized this state; only refresh if dirty.
+    belief.ensure_synced()
+    for base, seat in ((left_base, left_val), (right_base, right_val)):
+        live = state.alive & (state.piece_seat_arr == seat)
+        out[base:base + NUM_TRACKED_TYPES] = belief.probs_arr[live].sum(axis=0)
 
     flag_base = GLOBAL_LAYOUT["flag_revealed"].start
     fr = state.seat_flag_revealed_arr
@@ -1714,7 +1720,7 @@ def numpy_view_of_torch_cpu(tensor: Any) -> np.ndarray:
     bridge have torch installed; callers that only use numpy paths never
     pay the import cost.
     """
-    import torch  # type: ignore[import-not-found]  # optional runtime dependency
+    import torch  # type: ignore[import-not-found, unused-ignore]  # optional dependency
     if not isinstance(tensor, torch.Tensor):
         raise TypeError(f"expected torch.Tensor, got {type(tensor).__name__}")
     if tensor.device.type != "cpu":

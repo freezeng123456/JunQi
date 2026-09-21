@@ -173,6 +173,8 @@ def collect_rollout(
     # Pre-allocate per-step index vector (reused each step)
     _env_range = np.arange(N, dtype=np.intp)
 
+    from junqi_rl.networks.combat_features import CombatFeatureMetrics
+    combat_metrics = CombatFeatureMetrics(policy)
     step = 0
 
     while step < T:
@@ -194,6 +196,7 @@ def collect_rollout(
         lm_t = torch.from_numpy(legal_mask_np).to(_device)
 
         actions_can, log_probs, values = policy.act(sp_t, gl_t, lm_t)
+        combat_metrics.add(sp_t, actions_can, lm_t)
 
         # ---- Convert values to numpy ----
         values_np = values.cpu().numpy()
@@ -251,6 +254,8 @@ def collect_rollout(
                 "episode ended before the fixed-length rollout was full; "
                 "enable auto_reset_done to continue safely"
             )
+
+    rollout._collect_combat_metrics = combat_metrics.finish()
 
     # ---- Compute bootstrap values for the last step ----
     current_seats = env.current_seats()

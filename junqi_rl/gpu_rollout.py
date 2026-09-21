@@ -506,6 +506,8 @@ class GpuRollout:
         mixed_own_team_styles: tuple[str, ...] = ("T",),
         max_num_moves: int | None = None,
     ) -> None:
+        if show_mode is not ShowMode.DARK:
+            raise ValueError("GpuRollout native beliefs currently support DARK only")
         if not _CUDA_AVAILABLE:
             raise ImportError(
                 "junqi_cuda extension is not available. "
@@ -535,7 +537,7 @@ class GpuRollout:
         if move_limit <= 0:
             raise ValueError("max_num_moves must be positive")
         self.state = _cuda.DeviceGameStateBatch(num_envs, max_num_moves=move_limit)
-        self.obs   = _cuda.DeviceObservationBatch(num_envs)
+        self._obs_all = None  # allocated only when an all-seat consumer requests it
         # Single-seat obs buffer for acting-seat-only builds (4x less memory)
         self.obs_single = _cuda.DeviceObservationSingleBatch(num_envs)
 
@@ -545,7 +547,7 @@ class GpuRollout:
         self._observer_seats = np.tile(
             np.arange(4, dtype=np.int8), (num_envs, 1)
         )
-        _cuda.upload_observer_seats(num_envs, self._observer_seats)
+        _cuda.upload_state_observer_seats(self.state, self._observer_seats)
 
         # Default beliefs are all zero — the belief network drops in later.
         # Phase 1: beliefs will be initialised to proper priors after the first
@@ -554,7 +556,7 @@ class GpuRollout:
             (num_envs, 4, NUM_TRACKED_TYPES, BOARD_SIZE * BOARD_SIZE),
             dtype=np.float32,
         )
-        _cuda.upload_beliefs(num_envs, self._beliefs)
+        _cuda.upload_state_beliefs(self.state, self._beliefs)
         self._beliefs_enabled = hasattr(_cuda, "init_beliefs_for_reset_envs")
         self._last_step_ptrs: dict = {}  # raw device pointers from last step_device
 
@@ -575,6 +577,13 @@ class GpuRollout:
             mixed_setup=self._mixed_setup,
             mixed_own_team_styles=self._mixed_own_team_styles,
         )
+
+    @property
+    def obs(self):
+        """Lazy all-seat output buffer; actor-only collection does not need it."""
+        if self._obs_all is None:
+            self._obs_all = _cuda.DeviceObservationBatch(self.num_envs)
+        return self._obs_all
 
     def create_rollout_history(self, num_steps: int) -> GpuRolloutHistory:
         """Allocate compact pre-action state history for one PPO rollout."""
@@ -733,6 +742,7 @@ class GpuRollout:
             ]
         b = BatchedGameState.from_game_states(states)
         self.state.copy_from_host(_pack_from_batched(b))
+        _cuda.clear_auxiliary_state(self.state)
         self.state.copy_termination_from_host(
             b.terminated.astype(bool),
             b.winner_team.astype(np.int8),
@@ -787,7 +797,7 @@ class GpuRollout:
         Parameters
         ----------
         canonical_actions : torch.cuda.IntTensor (N,)
-            Actions in canonical frame (src_can * 289 + dst_can).
+            Compact actions in canonical frame (src_compact * 129 + dst_compact).
         acting_seats : torch.cuda.ByteTensor or int8 (N,)
             Per-env acting seat value (0-3).
 
@@ -963,11 +973,24 @@ class GpuRollout:
             torch.as_tensor(gl_view, device="cuda"),
         )
 
+    def rule_beliefs_torch(self) -> "torch.Tensor":
+        """World-frame deductive beliefs, independent of neural confidence.
+
+        Lazily captures the rule state before the first neural refresh; later
+        events and episode resets update both buffers. The view is owned by
+        this rollout and must not be retained across stepping/reset.
+        """
+        import torch
+        ptr = _cuda.state_beliefs_ptr(self.state, True)
+        return torch.as_tensor(_CudaArrayInterfaceView(
+            ptr, (self.num_envs, 4, NUM_TRACKED_TYPES, BOARD_SIZE * BOARD_SIZE), "<f4"
+        ), device="cuda")
+
     def upload_beliefs(self, beliefs: np.ndarray) -> None:
         """Replace the device-resident belief buffer.
 
         beliefs shape: ``(N, 4, 12, 289)`` float32.  One-shot H2D into
-        persistent GpuScratch; subsequent ``build_all_seat_observations``
+        this rollout's persistent buffer; subsequent ``build_all_seat_observations``
         calls will read the new values.
         """
         if beliefs.shape != (self.num_envs, 4, NUM_TRACKED_TYPES, BOARD_SIZE * BOARD_SIZE):
@@ -978,13 +1001,14 @@ class GpuRollout:
         if beliefs.dtype != np.float32:
             beliefs = beliefs.astype(np.float32, copy=False)
         self._beliefs = beliefs
-        _cuda.upload_beliefs(self.num_envs, beliefs)
+        _cuda.upload_state_beliefs(self.state, beliefs)
+        _cuda.upload_state_observer_seats(self.state, self._observer_seats)
 
     def set_observer_seats(self, observer_seats: np.ndarray) -> None:
         """Reassign the per-env observer mapping ``(N, 4)`` int8.
 
         Useful for league-play where each slot corresponds to a different
-        trained agent.  Uploads to persistent GpuScratch (one-shot H2D).
+        trained agent. Uploads to this rollout's own buffer (one-shot H2D).
         """
         if observer_seats.shape != (self.num_envs, 4):
             raise ValueError(
@@ -994,7 +1018,7 @@ class GpuRollout:
         if observer_seats.dtype != np.int8:
             observer_seats = observer_seats.astype(np.int8, copy=False)
         self._observer_seats = observer_seats
-        _cuda.upload_observer_seats(self.num_envs, observer_seats)
+        _cuda.upload_state_observer_seats(self.state, observer_seats)
 
     # ------------------------------------------------------------------
     # Termination / bookkeeping

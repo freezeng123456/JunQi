@@ -3,7 +3,7 @@
  * GPU-side belief tensor init + update kernels for imperfect-information JunQi.
  *
  * Phase 1 scope:
- *   - belief_init_kernel: HALF_DARK prior seeding on env reset
+ *   - belief_init_kernel: DARK prior seeding on env reset
  *   - belief_update_kernel: deductive rules R1, R4, R5/R7, R6, R9, I5
  *   - Pre-step flag snapshot for detecting new seat_flag_revealed / seat_dead
  *
@@ -30,7 +30,7 @@ __constant__ int16_t SEAT_STRONGHOLDS[4 * 2];
 static constexpr int8_t  PT_JUNQI  = 2;
 static constexpr int8_t  PT_DILEI  = 3;
 // static constexpr int8_t  PT_ZHADAN = 4;  // Phase 2: used for ZHADAN-related rules
-// static constexpr int8_t  PT_SILING = 5;  // Phase 2: used for SILING reveal rules
+static constexpr int8_t PT_SILING = 5;
 static constexpr int8_t  PT_GONGB  = 13;
 
 // Event constants (must match rules.py)
@@ -75,18 +75,7 @@ __device__ __forceinline__ bool is_one_hot_12(const float* vec) {
     return mx > (1.0f - 1e-6f);
 }
 
-// Return the argmax of a 12-element belief vector.
-__device__ __forceinline__ int argmax_12(const float* vec) {
-    int best = 0;
-    float best_val = vec[0];
-    for (int i = 1; i < NUM_TRACKED_TYPES; ++i) {
-        if (vec[i] > best_val) {
-            best_val = vec[i];
-            best = i;
-        }
-    }
-    return best;
-}
+
 
 // Write a one-hot vector at belief[type_idx] = 1.0, rest = 0.
 __device__ __forceinline__ void write_one_hot(float* vec, int type_idx) {
@@ -176,6 +165,7 @@ __global__ void belief_init_kernel(
     const bool*    d_alive,
     const int8_t*  d_pos_x,
     const int8_t*  d_pos_y,
+    const bool*    d_seat_flag_revealed,
     const bool*    d_just_reset,      // (N,) true for envs that need init
     float*         d_belief)
 {
@@ -227,7 +217,8 @@ __global__ void belief_init_kernel(
         for (int obs = 0; obs < 4; ++obs) {
             // DARK mode: only observer's OWN pieces get one-hot.
             // Teammate + enemy pieces all get per-slot prior.
-            if (obs == piece_seat) {
+            bool flag_public = d_seat_flag_revealed[env * 4 + piece_seat];
+            if (obs == piece_seat || (flag_public && piece_type == PT_JUNQI)) {
                 // Own piece: one-hot (known type)
                 float* base = d_belief
                     + (size_t)env * (4 * NUM_TRACKED_TYPES * NUM_CELLS)
@@ -241,8 +232,10 @@ __global__ void belief_init_kernel(
                     + (size_t)env * (4 * NUM_TRACKED_TYPES * NUM_CELLS)
                     + (size_t)obs * (NUM_TRACKED_TYPES * NUM_CELLS)
                     + cell_flat;
+                float mass = flag_public ? 1.0f - prior[PT_JUNQI - 2] : 1.0f;
                 for (int t = 0; t < NUM_TRACKED_TYPES; ++t)
-                    base[t * NUM_CELLS] = prior[t];
+                    base[t * NUM_CELLS] = (flag_public && t == PT_JUNQI - 2)
+                        ? 0.0f : prior[t] / mass;
             }
         }
     }
@@ -268,6 +261,8 @@ __global__ void belief_update_kernel(
     const int32_t* d_world_actions,
     const bool*    d_prev_seat_flag_revealed,
     const bool*    d_prev_seat_dead,
+    const uint16_t* d_cm_direct_type,   // (N, 4, 120), direct victims only
+    const bool*     d_cm_is_gongb,      // (N, 4, 120), public identity markers
     float*         d_belief)
 {
     int env = blockIdx.x;
@@ -355,7 +350,7 @@ __global__ void belief_update_kernel(
         // For Phase 1, the cases that need it use alternative approaches:
         //   R4: flag_cap → use s_new_dead to find which seat died
         //   R6: stronghold → use precomputed SEAT_STRONGHOLDS
-        //   R5/R7: read belief at dst before clearing, type check
+        //   R5/R7: persistent public CombatMemory identity records
     }
     __syncthreads();
 
@@ -400,6 +395,25 @@ __global__ void belief_update_kernel(
             }
         }
     }
+    // Compute each public identity once per environment, not independently
+    // in all four observer sweeps. The existing barrier publishes 120 bytes.
+    __shared__ int8_t s_public_identity[120];
+    if (tid < 120) {
+        s_public_identity[tid] = -1;
+        if (alive_e[tid]) {
+            bool mine = false;
+            bool engineer = true;
+            for (int witness = 0; witness < 4; ++witness) {
+                size_t ci = ((size_t)env * 4 + witness) * 120 + tid;
+                mine |= (d_cm_direct_type[ci] & ((uint16_t)1 << (PT_SILING - 2))) != 0;
+                engineer &= d_cm_is_gongb[ci];
+            }
+            if (seat_flagr[seat_arr[tid]] && type_arr[tid] == PT_JUNQI)
+                s_public_identity[tid] = PT_JUNQI - 2;
+            else if (mine || engineer)
+                s_public_identity[tid] = (mine ? PT_DILEI : PT_GONGB) - 2;
+        }
+    }
     __syncthreads();
 
     // =====================================================================
@@ -413,33 +427,12 @@ __global__ void belief_update_kernel(
     // =====================================================================
     if (tid < 4) {
         int obs = tid;  // observer seat
-        int obs_team = obs & 1;
 
-        // Temporary buffers for belief at src and dst before modification
-        float bel_src[12], bel_dst[12];
+        // Temporary buffer for source belief before modification
+        float bel_src[12];
 
-        // Read pre-update beliefs at src and dst cells
+        // Read pre-update belief at the source cell
         read_belief(d_belief, env, obs, s_src_flat, bel_src);
-        read_belief(d_belief, env, obs, s_dst_flat, bel_dst);
-
-        // =================================================================
-        // R5/R7: Engineer signature — EAT + defender belief is one-hot DILEI
-        // → attacker belief becomes one-hot GONGB.
-        //
-        // Must run BEFORE R1 migration (which overwrites beliefs at src/dst).
-        // In HALF_DARK: observer may know defender is DILEI if it's own/teammate.
-        // =================================================================
-        if (s_event == EV_EAT) {
-            if (is_one_hot_12(bel_dst)) {
-                int def_type = argmax_12(bel_dst);
-                if (def_type == (PT_DILEI - 2)) {  // DILEI is type_idx 1
-                    // Attacker must be GONGB (only engineer eats mines)
-                    if (!is_one_hot_12(bel_src)) {
-                        write_one_hot(bel_src, PT_GONGB - 2);  // GONGB is type_idx 11
-                    }
-                }
-            }
-        }
 
         // =================================================================
         // R1: Piece migration — move belief vectors based on event.
@@ -534,30 +527,47 @@ __global__ void belief_update_kernel(
                     zero_belief(d_belief, env, obs, c);
                 }
             } else {
+                // The public identity cache is shared by all observers.
+                int known_type = s_public_identity[pid_c];
+                if (known_type >= 0) {
+                    float known[12];
+                    write_one_hot(known, known_type);
+                    write_belief(d_belief, env, obs, c, known);
+                    continue;
+                }
                 // Cell has a live piece — check if belief is missing.
                 float buf[12];
                 read_belief(d_belief, env, obs, c, buf);
+                bool changed = false;
                 if (is_zero_12(buf)) {
                     // Missing belief entry — provide a fallback.
                     int8_t ps = seat_arr[pid_c];
                     int8_t pt = type_arr[pid_c];
-                    int p_team = ps & 1;
                     int type_idx = (pt >= 2 && pt <= 13) ? (pt - 2) : -1;
 
-                    if (obs_team == p_team && type_idx >= 0) {
-                        // Own/teammate: one-hot
-                        float oh[12];
-                        write_one_hot(oh, type_idx);
-                        write_belief(d_belief, env, obs, c, oh);
+                    if (obs == ps && type_idx >= 0) {
+                        // DARK mode: only the observer's own pieces are known
+                        write_one_hot(buf, type_idx);
                     } else {
                         // Enemy: uniform fallback (conservative)
-                        float uf[12];
                         float val = 1.0f / (float)NUM_TRACKED_TYPES;
                         for (int t = 0; t < NUM_TRACKED_TYPES; ++t)
-                            uf[t] = val;
-                        write_belief(d_belief, env, obs, c, uf);
+                            buf[t] = val;
                     }
+                    changed = true;
                 }
+                // The exact flag location is public once its commander dies.
+                // Every other piece of that army is consequently not the flag.
+                if (seat_flagr[seat_arr[pid_c]] && buf[PT_JUNQI - 2] > 0.0f) {
+                    buf[PT_JUNQI - 2] = 0.0f;
+                    float mass = 0.0f;
+                    for (int t = 0; t < NUM_TRACKED_TYPES; ++t) mass += buf[t];
+                    for (int t = 0; t < NUM_TRACKED_TYPES; ++t)
+                        buf[t] = mass > 0.0f ? buf[t] / mass
+                            : (t == PT_JUNQI - 2 ? 0.0f : 1.0f / 11.0f);
+                    changed = true;
+                }
+                if (changed) write_belief(d_belief, env, obs, c, buf);
             }
         }
     }
@@ -614,7 +624,7 @@ void init_beliefs_for_reset_envs(
     belief_init_kernel<<<grid, block>>>(
         N, d_state.d_piece_seat_arr, d_state.d_piece_type_arr,
         d_state.d_alive, d_state.d_pos_x, d_state.d_pos_y,
-        mask, d_belief);
+        d_state.d_seat_flag_revealed_arr, mask, d_belief);
     KERNEL_CHECK();
 }
 
@@ -636,7 +646,7 @@ void init_all_beliefs(
     belief_init_kernel<<<grid, block>>>(
         N, d_state.d_piece_seat_arr, d_state.d_piece_type_arr,
         d_state.d_alive, d_state.d_pos_x, d_state.d_pos_y,
-        d_mask, d_belief);
+        d_state.d_seat_flag_revealed_arr, d_mask, d_belief);
     KERNEL_CHECK();
 
     cudaFree(d_mask);
@@ -701,7 +711,41 @@ void update_beliefs_after_step(
         d_world_actions,
         g_pre_step.d_prev_seat_flag_revealed,
         g_pre_step.d_prev_seat_dead,
+        d_state.d_cm_direct_type,
+        d_state.d_cm_is_gongb,
         d_belief);
+    KERNEL_CHECK();
+}
+
+// One thread per world-frame (env, observer, cell). The rule support is
+// independent of neural weights, so floating-point underflow cannot create
+// a new permanent exclusion. Zero soft mass falls back to the rule prior.
+__global__ void constrain_beliefs_kernel(int total, float* soft, const float* rules) {
+    int item = blockIdx.x * blockDim.x + threadIdx.x;
+    if (item >= total) return;
+    int cell = item % NUM_CELLS;
+    int base = (item / NUM_CELLS) * NUM_TRACKED_TYPES * NUM_CELLS + cell;
+    float mass = 0.f, rule_mass = 0.f;
+    for (int t = 0; t < NUM_TRACKED_TYPES; ++t) {
+        int i = base + t * NUM_CELLS;
+        float r = rules[i], p = soft[i];
+        p = (r > 0.f && isfinite(p) && p > 0.f) ? p : 0.f;
+        soft[i] = p;
+        mass += p;
+        rule_mass += r;
+    }
+    for (int t = 0; t < NUM_TRACKED_TYPES; ++t) {
+        int i = base + t * NUM_CELLS;
+        soft[i] = mass > 0.f ? soft[i] / mass :
+            (rule_mass > 0.f ? rules[i] / rule_mass : 0.f);
+    }
+}
+
+void constrain_beliefs_to_rules(DeviceGameStateBatch& state) {
+    const int total = state.num_envs * NUM_SEATS * NUM_CELLS;
+    if (!total || !state.d_rule_belief) return;
+    constrain_beliefs_kernel<<<(total + 255) / 256, 256>>>(
+        total, state.d_belief, state.d_rule_belief);
     KERNEL_CHECK();
 }
 

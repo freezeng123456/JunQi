@@ -41,12 +41,12 @@ def _bit(t: PieceType) -> int:
 
 
 # ===========================================================================
-# 1. EAT + DILEI victim ⇒ killer is GONGB (A1)
+# 1. EAT of a privately known mine does not reveal GONGB
 # ===========================================================================
 
 
 class TestRule_A1_EatDilei:
-    def test_eat_my_dilei_marks_killer_as_gongb(self):
+    def test_eat_my_dilei_does_not_mark_killer_as_gongb(self):
         cm = CombatMemoryState.zeros()
         # WEST 's piece (pid=37) ate SOUTH's DILEI (pid=12).
         apply_combat_event(
@@ -60,8 +60,8 @@ class TestRule_A1_EatDilei:
             death_step=10,
         )
         south = Seat.SOUTH.value
-        # SOUTH knows: killer 37 is GONGB.
-        assert cm.is_gongb[south, 37]
+        # SOUTH knows its own mine, but this does not trigger public GONGB confirmation.
+        assert not cm.is_gongb[south, 37]
         assert not cm.not_gongb[south, 37]
         # DILEI is a special; no floor lift.
         assert cm.rank_floor[south, 37] == 0
@@ -100,12 +100,12 @@ class TestRule_B1_NotGongbOnEat:
 
 
 # ===========================================================================
-# 3. KILLED + ordinary attacker visible ⇒ floor lift on defender
+# 3. KILLED does not give an unconditional ordinary-rank bound
 # ===========================================================================
 
 
-class TestRule_KILLED_FloorLift:
-    def test_my_paizh_dies_attacking_lifts_floor_to_lianzh(self):
+class TestRule_KILLED_NoRankDeduction:
+    def test_my_paizh_dies_attacking_leaves_defender_rank_unknown(self):
         cm = CombatMemoryState.zeros()
         # SOUTH's PAIZH (pid=12) attacks WEST's piece (pid=37) and dies.
         # Attacker died → KILLED event. Defender 37 is in WEST's back-two-rows.
@@ -120,8 +120,8 @@ class TestRule_KILLED_FloorLift:
             death_step=20,
         )
         south = Seat.SOUTH.value
-        # SOUTH knows attacker (its own PAIZH) → floor lift on defender 37.
-        assert cm.rank_floor[south, 37] == 3   # LIANZH+
+        # SOUTH knows PAIZH died, but the hidden defender may be a mine.
+        assert cm.rank_floor[south, 37] == 0
         # Direct memory recorded for SOUTH (its piece died): PAIZH bit set.
         assert (cm.direct_ate_my_type_mask[south, 37] & _bit(PieceType.PAIZH)) != 0
         # WEST (defender's own seat) only sees direct_other_count.
@@ -210,8 +210,8 @@ class TestChainPropagation:
         # SOUTH's chain memory: 87 inherits PAIZH lineage (pid=12 + type bit).
         assert cm.chain_pid_lo[south, 87] & (np.uint64(1) << np.uint64(12))
         assert (cm.chain_ate_my_type_mask[south, 87] & _bit(PieceType.PAIZH)) != 0
-        # 87's rank_floor should be at least YINGZH+ (37 was LIANZH+, +1 = YINGZH+).
-        assert cm.rank_floor[south, 87] >= 4
+        # The causal chain is retained without assuming transitive strength.
+        assert cm.rank_floor[south, 87] == 0
         # Chain propagation works for all observers (chain_pid bitmap).
         for obs in (Seat.WEST.value, Seat.NORTH.value, Seat.EAST.value):
             # 87's chain bitmap includes 37 (the public victim_pid).

@@ -373,12 +373,7 @@ def test_enemy_one_hot_only_via_rule_deductions():
 
 
 def test_global_remaining_only_for_left_right_enemies():
-    """The 24-dim ``remaining_left_side`` + ``remaining_right_side`` block
-    in obs_global must reflect only the two enemy seats (not own / not
-    teammate). It is a counts vector, not a type leak — but we verify
-    the counts exactly match the truth for the enemy seats and that no
-    own/teammate count appears in those slots.
-    """
+    """Global expected inventory includes only live opposing-seat beliefs."""
     state = _new_game(seed=41, show_mode=ShowMode.DARK)
     observer = Seat.SOUTH
     obs, bel = _build_obs(state, observer)
@@ -390,31 +385,13 @@ def test_global_remaining_only_for_left_right_enemies():
     assert rem_left.shape  == (NUM_TRACKED_TYPES,)
     assert rem_right.shape == (NUM_TRACKED_TYPES,)
 
-    # Compute truth counts for left/right enemies.
-    left_seat = observer.left_side_enemy
-    right_seat = observer.right_side_enemy
-    truth_left = np.zeros(NUM_TRACKED_TYPES, dtype=np.float32)
-    truth_right = np.zeros(NUM_TRACKED_TYPES, dtype=np.float32)
-    for piece in state.pieces.values():
-        if not piece.alive:
-            continue
-        idx = PIECETYPE_TO_TRACKED_IDX.get(piece.piece_type, -1)
-        if idx < 0:
-            continue
-        if piece.seat is left_seat:
-            truth_left[idx] += 1
-        elif piece.seat is right_seat:
-            truth_right[idx] += 1
-
-    # The observation channel stores the *believed* remaining inventory
-    # which at game-start equals the truth (each enemy has 25 pieces with
-    # the canonical type-count distribution). We assert equality.
-    assert np.allclose(rem_left,  truth_left), (
-        f"remaining_left_side {rem_left} != truth {truth_left}"
-    )
-    assert np.allclose(rem_right, truth_right), (
-        f"remaining_right_side {rem_right} != truth {truth_right}"
-    )
+    for actual, seat in ((rem_left, observer.left_side_enemy),
+                         (rem_right, observer.right_side_enemy)):
+        expected = sum((bel.probs[pos] for pos, piece in state.pieces.items()
+                        if piece.alive and piece.seat is seat),
+                       np.zeros(NUM_TRACKED_TYPES))
+        np.testing.assert_allclose(actual, expected, rtol=1e-6)
+        assert actual.sum() == pytest.approx(25.0)
 
     # Sanity: observer's own & teammate count are NOT placed anywhere
     # in obs_global (we don't have channels for them; the rule is

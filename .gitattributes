@@ -1,0 +1,2 @@
+# Preserve the recorded CSV bytes while accepting its original CRLF line endings.
+docs/assets/channel-layout-20260911.csv whitespace=cr-at-eol

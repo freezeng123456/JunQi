@@ -34,6 +34,7 @@ from typing import Final
 import numpy as np
 
 from .board import BOARD_SIZE, index_to_pos
+from .combat_memory import is_publicly_revealed_mine, publicly_revealed_mines
 from .rules import (
     ALL_PLACEABLE_PIECES,
     ALL_SEATS,
@@ -260,6 +261,7 @@ class BeliefTensor:
         # ADR-120: seed the tensor mirrors so downstream observation
         # consumers (ObservationBuilder.build) can read them immediately
         # even before the first step().
+        b._apply_public_identities(state)
         b._sync_tensors(state)
 
         return b
@@ -311,28 +313,6 @@ class BeliefTensor:
             self._reveal_dst_siling(defender_seat)
 
         # -----------------------------------------------------------------
-        # R5/R7: GONGB signature (attacker eats DILEI)
-        # -----------------------------------------------------------------
-        if (
-            event is Event.EAT
-            and prev_dst_piece is not None
-            and prev_dst_piece.piece_type is PieceType.DILEI
-            and attacker_belief is not None
-            and not _is_one_hot(attacker_belief)
-        ):
-            # Only GONGB can eat DILEI → attacker is provably GONGB (unless
-            # observer already knew, e.g., because attacker is own/teammate).
-            # Update attacker's belief to GONGB one-hot.
-            attacker_belief = one_hot(PieceType.GONGB)
-            self.probs[src] = attacker_belief
-            self._decrement_remaining(attacker_seat, PieceType.GONGB)
-
-        # Also: if we just observed a KILLED event where the defender
-        # (stationary, on back-row cell) survives → defender is at least
-        # DILEI-strong. We leave this as a soft hint; the per-slot prior
-        # already biased back-row cells toward DILEI/higher. (TODO R5 soft)
-
-        # -----------------------------------------------------------------
         # R4 + R6: Flag capture / stronghold EAT deductions
         # -----------------------------------------------------------------
         if result.flag_captured:
@@ -358,7 +338,7 @@ class BeliefTensor:
         # R1: piece migration (must run AFTER reveals, so the revealed
         # identities get copied to the destination)
         # -----------------------------------------------------------------
-        # Refresh attacker_belief in case R5/R7 modified self.probs[src]
+        # Refresh the source entry before migration.
         attacker_belief = self.probs.get(src, attacker_belief)
 
         if event is Event.MOVE:
@@ -426,7 +406,54 @@ class BeliefTensor:
         # actual refresh is deferred until an observation build asks for
         # the data (ensure_synced), which saves ~100 µs per seat per
         # step when there is no concurrent obs build.
+        # A step can only newly reveal its surviving destination piece. All
+        # other identity beliefs already persist; avoid four full-board scans.
+        survivor = new_state.pieces.get(dst)
+        if survivor is not None:
+            pid = survivor.piece_id
+            if event is Event.KILLED and is_publicly_revealed_mine(new_state.combat_memory, pid):
+                self.probs[dst] = one_hot(PieceType.DILEI)
+            else:
+                known = new_state.combat_memory.is_gongb
+                if known[0, pid] and known[1, pid] and known[2, pid] and known[3, pid]:
+                    self.probs[dst] = one_hot(PieceType.GONGB)
+        if result.flag_reveal_src or result.flag_reveal_dst:
+            self._apply_revealed_flags(new_state)
         self._dirty_state = new_state
+
+    def _apply_public_identities(self, state: GameState) -> None:
+        """Use public combat/path records, never private mine knowledge."""
+        mines = publicly_revealed_mines(state.combat_memory)
+        engineers = np.all(state.combat_memory.is_gongb, axis=0)
+        for pid in np.flatnonzero(state.alive & (mines | engineers)):
+            pos = (int(state.pos_x[pid]), int(state.pos_y[pid]))
+            self.probs[pos] = one_hot(PieceType.DILEI if mines[pid] else PieceType.GONGB)
+        self._apply_revealed_flags(state)
+
+    def _apply_revealed_flags(self, state: GameState) -> None:
+        """A commander death publicly reveals the flag's exact location.
+
+        The truth read is gated by the public reveal, including restoration of
+        a mid-game state. Other pieces of that army can no longer be the flag.
+        """
+        flag_idx = _TYPE_TO_IDX[PieceType.JUNQI]
+        for pos, piece in state.pieces.items():
+            if not state.info[piece.seat].flag_revealed:
+                continue
+            if piece.piece_type is PieceType.JUNQI:
+                self.probs[pos] = one_hot(PieceType.JUNQI)
+            else:
+                prior = self.probs[pos]
+                if prior[flag_idx] == 0:
+                    continue
+                updated = prior.copy()
+                updated[flag_idx] = 0.0
+                mass = updated.sum()
+                if mass <= 0:
+                    updated.fill(1.0)
+                    updated[flag_idx] = 0.0
+                    mass = updated.sum()
+                self.probs[pos] = updated / mass
 
     def ensure_synced(self, state: GameState | None = None) -> None:
         """Refresh ``probs_arr`` / ``remaining_arr`` if they are stale.
@@ -569,12 +596,9 @@ def _observer_sees_truth(
     observer: Seat, owner: Seat, show_mode: ShowMode
 ) -> bool:
     """True iff the observer can see the true type of `owner`'s pieces."""
-    if show_mode is ShowMode.BRIGHT:
-        return True
-    if observer is owner:
-        return True
-    # HALF_DARK / DARK: teammate pieces are visible iff HALF_DARK (Q11)
-    return show_mode is ShowMode.HALF_DARK and same_team(observer, owner)
+    from .player_view import sees_army_types
+
+    return sees_army_types(observer, owner, show_mode)
 
 
 def _is_one_hot(vec: np.ndarray, eps: float = 1e-6) -> bool:

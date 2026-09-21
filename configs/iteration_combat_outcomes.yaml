@@ -1,0 +1,66 @@
+# Candidate: corrected evaluation/belief constraints + combat outcome residual.
+# Engineering candidate only; no strength or speedup result is implied.
+# Keep historical experiment YAML files immutable; create candidates with
+# `--set` overrides or copy this sparse config into a new run file.
+
+env:
+  num_envs: 128
+  steps_per_env: 512
+  max_num_moves: 4000
+  seed: 241
+  use_gpu_rollout: true
+
+net:
+  combat_outcome_features: true
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  embed_dim: 128
+  n_head: 4
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 32
+  pos_emb_std: 0.02
+
+ppo:
+  num_epochs_per_rollout: 1
+  minibatch_size: 512
+  dtype: bfloat16
+  torch_compile: false
+  lr_schedule_unit: rollout
+  max_grad_norm: 0.267
+  adv_filt_rate: 0.75
+
+# BeliefNet on by default. Arrangement stays off until the joint
+# move/belief baseline is stable.
+arr:
+  enabled: false
+
+belief:
+  enabled: true
+
+# Ataraxos-style zero-retrieval path: save compact device state and rebuild
+# selected observations/legal masks on the GPU during PPO updates.
+rollout:
+  storage_mode: compact_history
+  csr_legal_mask: true
+  csr_k_max: 256
+
+save_dir: exps/iteration_combat_outcomes
+total_rollouts: 100
+save_every: 25
+eval_every: 10
+eval_num_games: 256
+log_every: 5
+
+device: cuda
+seed: 241
+random_opponent: true
+train_value_on_random_seats: false
+reward_shaping: true
+
+# Independent uniform-random setups for all four seats. A fixed own-team
+# lineup leaks the teammate's piece types (hidden under DARK) and does not
+# match evaluation, which samples every seat uniformly.
+mixed_setup: false

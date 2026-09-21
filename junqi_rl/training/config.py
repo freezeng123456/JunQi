@@ -28,6 +28,7 @@ class EnvConfig:
     max_num_moves: int = 4000
     seed: int = 42
     use_gpu_rollout: bool = False
+    show_mode: str = "DARK"
 
 
 @dataclass
@@ -95,6 +96,8 @@ class TrainConfig:
     # GPU setup pools are process-global. Re-upload this fixed pool before
     # every primary evaluation so ArrangementNet refreshes cannot silently
     # change the test distribution from checkpoint to checkpoint.
+    # Legacy flag name retained: now one uniform seeded lineup per game ID
+    # across every batch, without uploading a process-global setup pool.
     eval_fixed_setup_pool: bool = True
     eval_setup_seed: int = 20_260_817
     # Keep game/reset seeds fixed across checkpoints so monitoring differences
@@ -280,6 +283,8 @@ _NON_CONFIG_ARGS = {"config", "extra", "resume_cli", "validate_only"}
 
 def validate_config(cfg: TrainConfig) -> None:
     """Fail before allocating models when a configuration is inconsistent."""
+    if cfg.env.show_mode != "DARK":
+        raise ValueError("training and evaluation currently support env.show_mode=DARK only")
 
     positive = {
         "env.num_envs": cfg.env.num_envs,

@@ -12,6 +12,17 @@
         <p class="eyebrow">JUNQI REPLAY</p>
         <h1>四国军棋复盘</h1>
       </div>
+      <div class="view-controls">
+        <label for="perspective">查看视角</label>
+        <select id="perspective" aria-label="查看视角">
+          <option value="SOUTH">南方玩家</option>
+          <option value="WEST">西方玩家</option>
+          <option value="NORTH">北方玩家</option>
+          <option value="EAST">东方玩家</option>
+          <option value="OMNISCIENT">全知复盘</option>
+        </select>
+        <span id="visibility-note">仅显示所选玩家可见的身份和公开事件</span>
+      </div>
       <div class="file-meta">
         <strong id="filename">读取中…</strong>
         <span id="replay-kind">—</span>
@@ -125,6 +136,6 @@
       </select>
     </footer>
 
-    <script src="/assets/app.js?v=20260816-right-panel-2" defer></script>
+    <script src="/assets/app.js?v=20260912-player-view" defer></script>
   </body>
 </html>

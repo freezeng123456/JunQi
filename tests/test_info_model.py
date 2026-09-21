@@ -11,7 +11,7 @@ Covers:
   - R3 (Q7): SILING-flag-reveal causes remaining-inventory decrement
   - R4 (Q1): flag capture clears the defender's inventory
   - R6: eating a non-flag piece at a stronghold reveals the JUNQI at the other
-  - R5/R7: GONGB eats DILEI → attacker revealed as GONGB
+  - R5/R7: only public-mine capture reveals GONGB
   - R9: Q12 seat death purges stale belief
   - to_world_tensor() output shape + content
 """
@@ -409,17 +409,12 @@ def test_r6_stronghold_eat_reveals_other_stronghold_as_flag() -> None:
 
 
 # ===========================================================================
-# 6. R5 / R7  GONGB eats DILEI → attacker is provably GONGB
+# 6. R5 / R7  Private mine knowledge does not publicly reveal GONGB
 # ===========================================================================
 
 
-def test_r5_r7_gongb_eats_dilei_reveals_attacker() -> None:
-    """HOME's attacker (unknown to OPPOSING observer) eats RIGHT's DILEI.
-    Observer deduces attacker must be GONGB.
-
-    We set up observer = LEFT (so HOME pieces are unknown to LEFT), and HOME
-    attacks a known DILEI placed where LEFT can watch.
-    """
+def test_eating_known_mine_does_not_reveal_engineer() -> None:
+    """Even known-mine capture is not an identity reveal under path-only rules."""
     pieces = {
         # HOME's GONGB attacks RIGHT's DILEI
         (6, 11): PieceRef(Seat.SOUTH, PieceType.GONGB),
@@ -434,9 +429,8 @@ def test_r5_r7_gongb_eats_dilei_reveals_attacker() -> None:
     # Observer is LEFT — HOME pieces are enemies (different team).
     b = BeliefTensor.initial(st, Seat.EAST)
 
-    # But LEFT does NOT know DILEI is DILEI (RIGHT is LEFT's teammate so the
-    # mine IS visible). Wait — LEFT + RIGHT are teammates, so LEFT SEES
-    # RIGHT's DILEI as one-hot. Good. LEFT does NOT see HOME's GONGB (enemy).
+    # HALF_DARK exposes the teammate's mine privately, but it was not
+    # publicly revealed by a commander death.
 
     # HOME's GONGB at (6,11) should NOT be one-hot in LEFT's belief
     before = b.probs[(6, 11)]
@@ -449,12 +443,10 @@ def test_r5_r7_gongb_eats_dilei_reveals_attacker() -> None:
     assert result.event is Event.EAT
     b.update(st, st2, result)
 
-    # After: the attacker (now at (6,10)) is provably GONGB
     after = b.probs[(6, 10)]
-    assert _is_one_hot(after), "GONGB should be revealed as one-hot"
-    assert after[gongb_idx] == pytest.approx(1.0)
-    # HOME's GONGB inventory decremented (LEFT tracks HOME since they're enemies)
-    assert b.remaining[Seat.SOUTH][PieceType.GONGB] == PIECE_COUNTS[PieceType.GONGB] - 1
+    np.testing.assert_array_equal(after, before)
+    assert not _is_one_hot(after)
+    assert b.remaining[Seat.SOUTH][PieceType.GONGB] == PIECE_COUNTS[PieceType.GONGB]
 
 
 # ===========================================================================

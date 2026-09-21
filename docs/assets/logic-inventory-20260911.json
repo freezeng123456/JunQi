@@ -1,0 +1,170 @@
+[
+  {
+    "id": "movement",
+    "logic": "合法走法、战斗与结束条件",
+    "decision": "保留",
+    "evidence_or_limit": "规则必要；本计时不包含合法走法生成",
+    "source": "junqi_core/state.py"
+  },
+  {
+    "id": "visibility",
+    "logic": "本人真值、队友/敌人信念、公开旗位",
+    "decision": "保留",
+    "evidence_or_limit": "信息边界必要；317通道维持",
+    "source": "junqi_core/observation.py"
+  },
+  {
+    "id": "belief_lifecycle",
+    "logic": "位置先验、移动迁移、死亡清除、空分布回填",
+    "decision": "保留",
+    "evidence_or_limit": "基本信念维护；逐事件更新",
+    "source": "junqi_core/info_model.py"
+  },
+  {
+    "id": "battle_belief",
+    "logic": "直接战斗结果限制可能棋种",
+    "decision": "保留",
+    "evidence_or_limit": "需要正确处理雷、炸弹、旗和司令公开事件",
+    "source": "junqi_core/info_model.py"
+  },
+  {
+    "id": "stronghold",
+    "logic": "大本营另一位置推断军旗",
+    "decision": "保留",
+    "evidence_or_limit": "规则推断；已有回放覆盖",
+    "source": "junqi_core/info_model.py"
+  },
+  {
+    "id": "public_mine",
+    "logic": "司令撞雷公开地雷，再吃该雷公开工兵",
+    "decision": "保留并优化",
+    "evidence_or_limit": "CPU按受影响棋子更新；CUDA每棋子共享一次四方证据",
+    "source": "junqi_core/combat_memory.py"
+  },
+  {
+    "id": "path_engineer",
+    "logic": "工兵专属路径公开身份",
+    "decision": "保留",
+    "evidence_or_limit": "必要几何证据；路径搜索成本未单独测量",
+    "source": "junqi_core/combat_memory.py"
+  },
+  {
+    "id": "direct_memory",
+    "logic": "直接受害棋子的ID、已知类型、未知受害数量",
+    "decision": "保留",
+    "evidence_or_limit": "公开事件与本人知识；不使用敌方隐藏类型",
+    "source": "junqi_core/combat_memory.py"
+  },
+  {
+    "id": "direct_eat_floor",
+    "logic": "直接吃掉已知普通棋后的军阶下界",
+    "decision": "保留",
+    "evidence_or_limit": "普通棋直接战斗关系成立",
+    "source": "junqi_core/combat_memory.py"
+  },
+  {
+    "id": "killed_floor",
+    "logic": "攻击失败便提高隐藏防守者普通军阶下界",
+    "decision": "已删除",
+    "evidence_or_limit": "防守者可能是地雷；合法棋局反例通过",
+    "source": "tests/test_inference_pruning.py"
+  },
+  {
+    "id": "chain_floor",
+    "logic": "沿战斗链传递军阶下界并排除工兵",
+    "decision": "已删除",
+    "evidence_or_limit": "雷与工兵打断普通军阶传递；合法四步反例通过",
+    "source": "tests/test_inference_pruning.py"
+  },
+  {
+    "id": "flag_not_engineer",
+    "logic": "吃任何非地雷棋便排除工兵",
+    "decision": "已收窄",
+    "evidence_or_limit": "军旗可以被工兵吃；仅直接吃已知普通棋才排除",
+    "source": "tests/test_inference_pruning.py"
+  },
+  {
+    "id": "chain_history",
+    "logic": "战斗因果链ID与本人受害类型",
+    "decision": "保留待消融",
+    "evidence_or_limit": "历史事件不等于传递战力；学习收益未证明",
+    "source": "junqi_core/combat_memory.py"
+  },
+  {
+    "id": "mine_candidate",
+    "logic": "初始位置、未移动、已知工兵攻击记录形成候选",
+    "decision": "保留",
+    "evidence_or_limit": "候选不是确定身份；对手私有信息受边界约束",
+    "source": "junqi_core/observation.py"
+  },
+  {
+    "id": "tom",
+    "logic": "双方对手对我方棋子的公共知识投影",
+    "decision": "保留待消融",
+    "evidence_or_limit": "5通道；需保留四观察者历史，不能仅存行动方",
+    "source": "junqi_core/observation.py"
+  },
+  {
+    "id": "reverse_memory",
+    "logic": "受害棋子位置反向展开敌方棋子ID",
+    "decision": "优先消融",
+    "evidence_or_limit": "60通道，战斗记忆最大单组；单组耗时和策略收益未测",
+    "source": "junqi_core/observation.py"
+  },
+  {
+    "id": "redundant_views",
+    "logic": "类型存在、类型计数、受害槽位并列表示",
+    "decision": "优先消融",
+    "evidence_or_limit": "部分可相互推导，但模型学习难度可能不同",
+    "source": "junqi_core/observation.py"
+  },
+  {
+    "id": "recency",
+    "logic": "4通道战斗新近度",
+    "decision": "保留待消融",
+    "evidence_or_limit": "相对低维；无证据表明需要删除",
+    "source": "junqi_core/observation.py"
+  },
+  {
+    "id": "basic_history",
+    "logic": "移动次数、吃子次数、生还、死亡、原位、槽位、32步历史",
+    "decision": "保留待消融",
+    "evidence_or_limit": "基础行为信息；未逐组证明增益",
+    "source": "junqi_core/observation.py"
+  },
+  {
+    "id": "global_live",
+    "logic": "敌方存活棋子的belief质量总和与亮旗状态",
+    "decision": "保留",
+    "evidence_or_limit": "28全局维；是期望数量而非精确库存后验",
+    "source": "junqi_core/observation.py"
+  },
+  {
+    "id": "duplicate_sync",
+    "logic": "同次构建再次强制同步belief张量",
+    "decision": "已精简",
+    "evidence_or_limit": "计数从3072降至1536，输出语义不变",
+    "source": "junqi_core/observation.py"
+  },
+  {
+    "id": "legacy_inventory",
+    "logic": "旧remaining字典与数组",
+    "decision": "后续兼容性清理候选",
+    "evidence_or_limit": "不再直接供模型全局特征；仍有内部维护和测试依赖",
+    "source": "junqi_core/info_model.py"
+  },
+  {
+    "id": "neural_refresh",
+    "logic": "可选BeliefNet推断与上传",
+    "decision": "待专项验证",
+    "evidence_or_limit": "静态看到网络结果上传；硬知识保留与坐标契约须端到端验证，未认定已复现缺陷",
+    "source": "junqi_rl/belief/inference.py"
+  },
+  {
+    "id": "compact_history",
+    "logic": "按时间存储四方CM并重建观察",
+    "decision": "保留；内存优化候选",
+    "evidence_or_limit": "CM每帧30KiB；没有GPU实测或改动历史布局",
+    "source": "src/env/cuda/src/rollout_history.cu"
+  }
+]

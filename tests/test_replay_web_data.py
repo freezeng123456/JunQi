@@ -5,6 +5,49 @@ import json
 from junqi_core.replay import record_trajectory
 from junqi_core.replay_with_policy import TrajectoryWithPolicy
 from junqi_viz.replay_data import ReplayData
+from junqi_core.rules import Seat, ShowMode
+
+
+def test_player_frame_masks_hidden_identities_on_board_and_move_detail(tmp_path):
+    path = tmp_path / "dark.npz"
+    record_trajectory(rng_seed=44, max_steps=8, show_mode=ShowMode.DARK).save(path)
+    data = ReplayData(path)
+    for observer in Seat:
+        opening = data.frame(0, observer=observer)
+        for piece in opening["pieces"]:
+            assert (piece["type"] != "DARK") == (piece["seat"] == observer.name)
+        for step in (1, 6, 2, 0):
+            frame = data.frame(step, observer=observer)
+            assert frame["observer"] == observer.name
+            assert frame["policy"] is None
+            if frame["move_detail"]:
+                for key in ("src_piece", "dst_piece"):
+                    piece = frame["move_detail"][key]
+                    if piece and piece["seat"] != observer.name:
+                        assert piece["type"] == "DARK"
+
+
+def test_player_metadata_does_not_include_private_or_future_diagnostics(tmp_path):
+    path = tmp_path / "metadata.npz"
+    trajectory = record_trajectory(rng_seed=9, max_steps=60, show_mode=ShowMode.DARK)
+    trajectory.meta = {"private_setup": ["SILING"], "secret_analysis": "hidden"}
+    trajectory.save(path)
+    data = ReplayData(path)
+    meta = data.metadata(observer=Seat.SOUTH)
+    assert meta["meta"] == {}
+    assert meta["key_events"] == []
+    assert not meta["has_beliefs"]
+    assert data.frame(1, observer=Seat.SOUTH)["policy"] is None
+    assert all(e["step"] <= 1 for e in data.frame(1, observer=Seat.SOUTH)["key_events"])
+    # Full diagnostic replay remains an explicit, separate view.
+    assert data.metadata()["meta"]["private_setup"] == ["SILING"]
+
+
+def test_mutual_removal_label_does_not_claim_a_bomb_was_seen():
+    from junqi_viz.replay_data import EVENT_LABELS
+    # Equal ordinary ranks also produce Event.BOMB; the public event does not
+    # establish that either combatant was a bomb.
+    assert EVENT_LABELS["BOMB"] == "同归于尽"
 
 
 def test_manual_replay_payload_is_json_safe(tmp_path) -> None:

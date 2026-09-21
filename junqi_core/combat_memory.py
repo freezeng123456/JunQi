@@ -39,12 +39,11 @@ Ordinary rank floor:
 
 GONGB flags:
     is_gongb                                    : bool — set on
-        (A1) ate observer's DILEI (Event.EAT, victim_seat == observer), or
+        (A1) ate a mine publicly identified by a prior commander death, or
         (A2) walked a GONGB-only path (any observer)
     not_gongb                                   : bool — set on
-        (B1) ate observer's non-DILEI piece (Event.EAT, victim_seat == observer), or
-        (B2) chain-killed an ordinary-rank piece (rank_floor lift implies
-             non-GONGB)
+        ate an observer-owned ordinary ranked piece in a direct Event.EAT.
+        Flag capture and transitive combat chains do not establish this.
 
 Defender history (for runtime dilei_candidate):
     attacked_by_known_gongb                     : bool — set on Event.KILLED
@@ -59,7 +58,7 @@ DILEI candidate (runtime, NOT stored):
         NOT attacked_by_known_gongb[obs][pid]
     )
 
-Channel layout (now 110 ch in observation.py, projecting state to canvas)
+Channel layout (156 ch in observation.py, projecting state to canvas)
 -------------------------------------------------------------------------
 Layer 1 (45 ch, projected to enemy alive pieces in observer view):
     cm_kill_mine_type      [12]  multi-hot of victim types I lost to this enemy
@@ -74,13 +73,13 @@ Layer 1 (45 ch, projected to enemy alive pieces in observer view):
 
 Layer 2 (5 ch, theory-of-mind, projected to my own alive pieces):
     cm_my_kill_count_ge    [3]   any single opponent's view of my kill count
-    cm_my_is_gongb         [1]   AND of two opponents' is_gongb (= path-revealed only)
+    cm_my_is_gongb         [1]   AND of two opponents' is_gongb (= public path or public-mine capture)
     cm_my_dilei_candidate  [1]   based on AND of two opponents' attacked_by_known_gongb
 
 Layer 3 (46 ch, ADR-129 v5; projected to enemy alive pieces):
     cm_kill_mine_count     [12]  per-type COUNT (popcount of direct ∩ type mask)/3
     cm_kill_mine_slot      [30]  observer slot-i bit at killer cell
-    cm_recency             [4]   sigmoid(elapsed/τ) signals
+    cm_recency             [4]   exponential recency signals
 
 Layer 4 (60 ch, v6; projected to observer's own pieces — alive cell or zero_pos):
     cm_eaten_by_pid        [60]  for observer's mpid at (x,y), set bit k iff
@@ -91,7 +90,7 @@ Layer 4 (60 ch, v6; projected to observer's own pieces — alive cell or zero_po
                                  DARK-safe: only writes for observer's own
                                  mpid (V_seat == observer chain-restricted).
 
-OBS_CHANNELS: 256 + 50 + 46 + 60 = 412.
+OBS_CHANNELS: 161 + 50 + 46 + 60 = 317.
 
 This module is the CPU reference; ``BatchedGameState`` and CUDA kernels
 must replicate the same updates byte-identically.
@@ -349,6 +348,36 @@ def apply_path_revealed_gongb(cm: CombatMemoryState, pid: int) -> None:
     经过弧形线，不能转直角弯), so an engineer that uses one must stay hidden.
     """
     cm.is_gongb[:, pid] = True
+    cm.not_gongb[:, pid] = False
+    cm.rank_floor[:, pid] = RANK_FLOOR_UNKNOWN
+    cm.rank_floor_step[:, pid] = -1
+
+
+_COMMANDER_TYPE_BIT: Final[np.uint16] = np.uint16(
+    1 << int(_PIECETYPE_TO_TRACKED_IDX[PieceType.SILING.value])
+)
+
+
+def is_publicly_revealed_mine(cm: CombatMemoryState, pid: int) -> bool:
+    """Check just the affected identity; do not scan all 120 pieces."""
+    direct = cm.direct_ate_my_type_mask
+    victims = direct[0, pid] | direct[1, pid] | direct[2, pid] | direct[3, pid]
+    return bool(victims & _COMMANDER_TYPE_BIT)
+
+
+def publicly_revealed_mines(cm: CombatMemoryState) -> np.ndarray:
+    """Public mine identities, derived from direct non-mutual commander deaths.
+
+    A commander dying alone reveals its identity through the flag event; its
+    surviving direct killer must be a mine. BOMB never enters direct memory.
+    Only the DIRECT victim mask qualifies: an engineer later capturing that
+    mine inherits the chain mask, which must not identify it as another mine.
+    Own-piece knowledge and slot priors are deliberately not consulted.
+    """
+    mines: np.ndarray = np.any(
+        (cm.direct_ate_my_type_mask & _COMMANDER_TYPE_BIT) != 0, axis=0
+    )
+    return mines
 
 
 def apply_combat_event(
@@ -409,6 +438,11 @@ def apply_combat_event(
         # Set defender (K)'s flag for any observer who saw a known-GONGB attack.
         cm.attacked_by_known_gongb[v_known_gongb, K] = True
 
+    # EAT of a mine previously revealed by a public commander death reveals
+    # the attacker to EVERY observer. A privately known own mine is insufficient.
+    if event_is_eat and is_publicly_revealed_mine(cm, V):
+        cm.is_gongb[:, K] = True
+
     # --- Chain propagation (all observers) ---
     # chain[K] |= direct_my[V] | chain[V] | {V}
     cm.chain_pid_lo[:, K] |= cm.direct_ate_my_pid_lo[:, V]
@@ -426,15 +460,9 @@ def apply_combat_event(
     cm.chain_ate_my_type_mask[:, K] |= cm.chain_ate_my_type_mask[:, V]
     cm.last_chain_step[:, K] = death_step
 
-    # Chain rank-floor propagation: K's floor ≥ max(K, V.floor + 1).
-    v_floor_per_obs = cm.rank_floor[:, V]
-    proposed = np.minimum(v_floor_per_obs + 1, NUM_ORDINARY_RANKS)
-    has_floor = v_floor_per_obs > RANK_FLOOR_UNKNOWN
-    update_mask = has_floor & (proposed > cm.rank_floor[:, K])
-    cm.rank_floor[update_mask, K] = proposed[update_mask]
-    cm.rank_floor_step[update_mask, K] = death_step
-    # Chain killer of an ordinary-rank piece can't be GONGB.
-    cm.not_gongb[has_floor, K] = True
+    # Causal kill chains are not rank inequalities: a mine can kill an
+    # ordinary piece, and an engineer can then capture that mine. Retain
+    # the history above, but do not transfer rank floors or not-GONGB.
 
     # --- v6 reverse projection: eaten_by_pid (DARK-safe) ---
     # For each observer, identify which of observer's own mpids have
@@ -518,48 +546,11 @@ def apply_combat_event(
             cm.chain_ate_my_type_mask[obs, K] |= np.uint16(1 << v_idx)
         cm.last_direct_step[obs, K] = death_step
 
-        # 2) GONGB / non-GONGB rules — V's type drives this.
-        # Critical DARK rules:
-        #   - EAT, V == DILEI (my mine eaten alive) → K is GONGB
-        #   - EAT, V != DILEI → K is NOT GONGB (engineers only beat mines)
-        #   - KILLED, V's type known → K could be anything that beats V's
-        #     type; ordinary-rank floor lifts handle this. K cannot be
-        #     GONGB iff V is ordinary-rank (handled by chain block above
-        #     when V's floor matters; but for direct, we set explicitly).
-        if event_is_eat:
-            if V_type is PieceType.DILEI:
-                cm.is_gongb[obs, K] = True
-            else:
-                # GONGB cannot win EAT vs non-DILEI.
-                cm.not_gongb[obs, K] = True
-        else:
-            # KILLED: K is defender; V is attacker (now dead).
-            # V_type is attacker's type, visible to obs since V_seat == obs.
-            # The defender K (still alive) beat V.  Floor lift on K:
-            if V_type.is_ranked_combatant:
-                # K beat V → K's rank > V's rank → floor = next_floor(V)
-                promoted = next_floor_after_eat(V_type)
-                if promoted > int(cm.rank_floor[obs, K]):
-                    cm.rank_floor[obs, K] = promoted
-                    cm.rank_floor_step[obs, K] = death_step
-                # K beat an ordinary attacker non-trivially → K is not GONGB
-                # UNLESS attacker was GONGB (then defender could be DILEI ...
-                # but DILEI is immobile, can't be defender attacking).
-                # In KILLED, defender survives — defender could be DILEI
-                # if attacker was a non-GONGB ordinary.  For non-GONGB
-                # attacker → defender survives because either DILEI or
-                # higher rank.  We can't pin K to "not GONGB" here because
-                # K could be DILEI in this case.  Skip not_gongb assertion.
-                pass
-            elif V_type is PieceType.ZHADAN:
-                # ZHADAN attacker → KILLED would require defender to be...
-                # actually ZHADAN-vs-anything is BOMB, not KILLED.  This
-                # branch shouldn't fire.
-                pass
-            elif V_type is PieceType.JUNQI:
-                # JUNQI attacking is impossible (immobile).  Defensive.
-                pass
-            # else (NONE / DARK): unreachable
+        # Only a direct EAT of a known ORDINARY piece rules out GONGB.
+        # Capturing a flag is possible for an engineer. Surviving an attack
+        # is not an unconditional rank fact: the defender may be a mine.
+        if event_is_eat and V_type.is_ranked_combatant:
+            cm.not_gongb[obs, K] = True
 
         # 3) EAT-direct floor lift on K.
         if event_is_eat and V_type.is_ranked_combatant:
@@ -567,6 +558,18 @@ def apply_combat_event(
             if promoted > int(cm.rank_floor[obs, K]):
                 cm.rank_floor[obs, K] = promoted
                 cm.rank_floor_step[obs, K] = death_step
+
+    # Public special identities override ordinary-rank chain bounds. Otherwise
+    # a mine that killed SILING acquires rank 9, and its engineer captor inherits
+    # both that impossible floor and a contradictory not-GONGB flag.
+    if is_publicly_revealed_mine(cm, K):
+        cm.rank_floor[:, K] = RANK_FLOOR_UNKNOWN
+        cm.rank_floor_step[:, K] = -1
+        cm.not_gongb[:, K] = True
+    elif cm.is_gongb[:, K].all():
+        cm.rank_floor[:, K] = RANK_FLOOR_UNKNOWN
+        cm.rank_floor_step[:, K] = -1
+        cm.not_gongb[:, K] = False
 
 
 # ===========================================================================

@@ -14,11 +14,7 @@ Scope
 * Global dims 24–27 (``flag_revealed``): exact equality — these are boolean
   state flags passed directly without arithmetic.
 * Global dims 0–11 (``remaining_left_side``) and 12–23 (``remaining_right_side``):
-  NOT compared. The Python reference reads ``BeliefTensor.remaining_arr`` which
-  holds **integer** remaining-piece counts; the CUDA kernel sums **float**
-  belief probabilities over live cells (equivalent expected count, but not
-  bit-identical when beliefs are not one-hot). The difference is intentional
-  and documented.
+  Compared with float32 tolerance: both sum live belief mass.
 
 Show-mode coverage
 ------------------
@@ -343,30 +339,14 @@ class TestGpuObsParity:
             ),
         )
 
-    def test_global_remaining_documented_discrepancy(self) -> None:
-        """Document the known remaining_arr discrepancy (not asserted equal).
+    def test_global_remaining_matches_live_belief_mass(self) -> None:
+        """CPU and CUDA use the same expected live-inventory definition."""
+        for sl in (_GLOB_REMAINING_L, _GLOB_REMAINING_R):
+            np.testing.assert_allclose(
+                self.global_cpu[:, :, sl], self.global_gpu[:, :, sl],
+                atol=1e-5, rtol=1e-5,
+            )
 
-        Python: ``BeliefTensor.remaining_arr`` stores *integer* counts of
-        remaining pieces (e.g. 5 PAIZHs left).  CUDA: sums float belief
-        probabilities over live cells (expected-count approximation).
-        These are identical only when beliefs are one-hot.
-
-        This test simply records the shapes and asserts both outputs are
-        non-negative (sanity check), without asserting equality.
-        """
-        sl_l = _GLOB_REMAINING_L
-        sl_r = _GLOB_REMAINING_R
-        # CPU values are integer-valued floats.
-        cpu_l = self.global_cpu[:, :, sl_l]
-        cpu_r = self.global_cpu[:, :, sl_r]
-        gpu_l = self.global_gpu[:, :, sl_l]
-        gpu_r = self.global_gpu[:, :, sl_r]
-        assert cpu_l.shape == gpu_l.shape
-        assert cpu_r.shape == gpu_r.shape
-        assert np.all(cpu_l >= 0), "CPU remaining_left has negative values"
-        assert np.all(cpu_r >= 0), "CPU remaining_right has negative values"
-        assert np.all(gpu_l >= -1e-5), "GPU remaining_left has negative values"
-        assert np.all(gpu_r >= -1e-5), "GPU remaining_right has negative values"
 
 
 # ---------------------------------------------------------------------------

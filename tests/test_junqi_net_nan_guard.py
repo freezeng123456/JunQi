@@ -89,8 +89,8 @@ def test_forward_guards_nan_logits_by_monkeypatching_policy_head(monkeypatch):
 
     # Wrap _policy_logits so row 1 gets a NaN and row 2 gets an Inf.
     orig = net._policy_logits
-    def _poisoned(cells, legal_mask):
-        out = orig(cells, legal_mask)
+    def _poisoned(cells, legal_mask, obs_spatial=None):
+        out = orig(cells, legal_mask, obs_spatial)
         # Column 1 is legal for all rows; use it as the poisoning target.
         out[1, 1] = float("nan")
         out[2, 1] = float("inf")
@@ -127,8 +127,8 @@ def test_forward_uniform_fallback_for_poisoned_row(monkeypatch):
     legal[1, :100] = True   # control row, not poisoned
 
     orig = net._policy_logits
-    def _poisoned(cells, legal_mask):
-        out = orig(cells, legal_mask)
+    def _poisoned(cells, legal_mask, obs_spatial=None):
+        out = orig(cells, legal_mask, obs_spatial)
         # Poison row 0 only.
         out[0, 0] = float("nan")
         return out
@@ -160,8 +160,8 @@ def test_all_rows_poisoned_still_does_not_crash(monkeypatch):
     legal = torch.ones(B, 16641, dtype=torch.bool)
 
     orig = net._policy_logits
-    def _poisoned(cells, legal_mask):
-        out = orig(cells, legal_mask)
+    def _poisoned(cells, legal_mask, obs_spatial=None):
+        out = orig(cells, legal_mask, obs_spatial)
         out[:, 0] = float("nan")
         return out
     monkeypatch.setattr(net, "_policy_logits", _poisoned)

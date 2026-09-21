@@ -744,8 +744,8 @@ global_ : np.ndarray  shape (N, 4, 28)          float32
                uintptr_t d_acting_seats_ptr,
                int step) {
                 GpuScratch& scratch = GpuScratch::instance();
-                if (scratch.d_belief == nullptr ||
-                    scratch.belief_cap < state.num_envs) {
+                if (!state.d_belief && (scratch.d_belief == nullptr ||
+                    scratch.belief_cap < state.num_envs)) {
                     throw std::runtime_error(
                         "DeviceRolloutHistory.snapshot requires resident beliefs");
                 }
@@ -753,7 +753,7 @@ global_ : np.ndarray  shape (N, 4, 28)          float32
                     reinterpret_cast<const int8_t*>(d_acting_seats_ptr);
                 history.snapshot(
                     state,
-                    scratch.d_belief,
+                    state.d_belief ? state.d_belief : scratch.d_belief,
                     d_acting,
                     step);
             },
@@ -806,13 +806,13 @@ masks on device, and return raw device pointers to reusable output buffers.
            uintptr_t d_acting_seats_ptr,
            int8_t show_mode) {
             GpuScratch& scratch = GpuScratch::instance();
-            if (scratch.d_belief == nullptr) {
+            if (!state.d_belief && scratch.d_belief == nullptr) {
                 throw std::runtime_error(
                     "build_observation_single_seat: call upload_beliefs first.");
             }
             const int8_t* d_acting = reinterpret_cast<const int8_t*>(d_acting_seats_ptr);
             build_observation_single_seat(
-                state, scratch.d_belief, d_acting, obs_out, show_mode);
+                state, state.d_belief ? state.d_belief : scratch.d_belief, d_acting, obs_out, show_mode);
         },
         py::arg("state"), py::arg("obs_out"),
         py::arg("d_acting_seats_ptr"), py::arg("show_mode") = (int8_t)2,
@@ -1128,6 +1128,35 @@ No host transfers occur.
         "observer_seats: int8 array of shape (N, 4) — host memory, copied to device.\n"
         "show_mode: int8, 0=BRIGHT, 1=DARK, 2=HALF_DARK (default). Controls dark_teammate channel.");
 
+    m.def("upload_state_beliefs",
+        [](DeviceGameStateBatch& state,
+           py::array_t<float, py::array::c_style | py::array::forcecast> beliefs) {
+            const size_t count = (size_t)state.num_envs * BELIEF_STRIDE;
+            const float* src = require_array<float>(beliefs, count, "beliefs");
+            state.ensure_beliefs();
+            CUDA_CHECK_PY(cudaMemcpy(state.d_belief, src, count * sizeof(float), cudaMemcpyHostToDevice));
+        }, py::arg("state"), py::arg("beliefs"));
+
+    m.def("state_beliefs_ptr", [](DeviceGameStateBatch& state, bool rule_only) {
+        if (rule_only) state.ensure_rule_beliefs();
+        else state.ensure_beliefs();
+        return reinterpret_cast<uintptr_t>(rule_only ? state.d_rule_belief : state.d_belief);
+    }, py::arg("state"), py::arg("rule_only") = false);
+
+    m.def("clear_auxiliary_state", [](DeviceGameStateBatch& state) {
+        state.clear_auxiliary_state();
+    }, py::arg("state"));
+
+    m.def("upload_state_observer_seats",
+        [](DeviceGameStateBatch& state,
+           py::array_t<int8_t, py::array::c_style | py::array::forcecast> seats) {
+            const size_t count = (size_t)state.num_envs * NUM_SEATS;
+            const int8_t* src = require_array<int8_t>(seats, count, "observer_seats");
+            if (!state.d_observer_seats)
+                CUDA_CHECK_PY(cudaMalloc(&state.d_observer_seats, count * sizeof(int8_t)));
+            CUDA_CHECK_PY(cudaMemcpy(state.d_observer_seats, src, count * sizeof(int8_t), cudaMemcpyHostToDevice));
+        }, py::arg("state"), py::arg("observer_seats"));
+
     // Upload beliefs into the persistent GpuScratch buffer.
     // Call once at episode start (or whenever beliefs change) to avoid the
     // ~227 MB H2D per-step cost at N=4096.  Subsequent
@@ -1166,12 +1195,14 @@ No host transfers occur.
            DeviceObservationBatch& obs_out,
            int8_t show_mode) {
             GpuScratch& scratch = GpuScratch::instance();
-            if (scratch.d_belief == nullptr || scratch.d_observer_seats == nullptr) {
+            if ((!state.d_belief && !scratch.d_belief) ||
+                (!state.d_observer_seats && !scratch.d_observer_seats)) {
                 throw std::runtime_error(
                     "build_observation_batch_resident: call upload_beliefs and "
                     "upload_observer_seats first to populate the scratch buffers.");
             }
-            build_observation_batch(state, scratch.d_belief, scratch.d_observer_seats,
+            build_observation_batch(state, state.d_belief ? state.d_belief : scratch.d_belief,
+                                    state.d_observer_seats ? state.d_observer_seats : scratch.d_observer_seats,
                                     obs_out, show_mode);
         },
         py::arg("state"), py::arg("obs_out"), py::arg("show_mode") = (int8_t)2,
@@ -1251,9 +1282,9 @@ No host transfers occur.
 
     m.def("init_beliefs_for_reset_envs",
         [](DeviceGameStateBatch& state) {
-            GpuScratch& scratch = GpuScratch::instance();
-            scratch.ensure_belief(state.num_envs);
-            init_beliefs_for_reset_envs(state, scratch.d_belief);
+            state.ensure_beliefs();
+            init_beliefs_for_reset_envs(state, state.d_belief);
+            if (state.d_rule_belief) init_beliefs_for_reset_envs(state, state.d_rule_belief);
         },
         py::arg("state"),
         "Initialise beliefs for envs marked by the pre-reset terminated snapshot.\n"
@@ -1261,9 +1292,9 @@ No host transfers occur.
 
     m.def("init_all_beliefs",
         [](DeviceGameStateBatch& state) {
-            GpuScratch& scratch = GpuScratch::instance();
-            scratch.ensure_belief(state.num_envs);
-            init_all_beliefs(state, scratch.d_belief);
+            state.ensure_beliefs();
+            init_all_beliefs(state, state.d_belief);
+            if (state.d_rule_belief) init_all_beliefs(state, state.d_rule_belief);
         },
         py::arg("state"),
         "Initialise beliefs for ALL envs unconditionally.\n"
@@ -1282,15 +1313,17 @@ No host transfers occur.
            uintptr_t d_event_ptr,
            uintptr_t d_flag_captured_ptr,
            uintptr_t d_world_actions_ptr) {
-            GpuScratch& scratch = GpuScratch::instance();
-            if (!scratch.d_belief) {
+            if (!state.d_belief) {
                 throw std::runtime_error(
                     "update_beliefs_after_step: call init_beliefs_for_reset_envs first.");
             }
             const int8_t*  d_ev   = reinterpret_cast<const int8_t*>(d_event_ptr);
             const bool*    d_fc   = reinterpret_cast<const bool*>(d_flag_captured_ptr);
             const int32_t* d_acts = reinterpret_cast<const int32_t*>(d_world_actions_ptr);
-            update_beliefs_after_step(state, d_ev, d_fc, d_acts, scratch.d_belief);
+            if (state.d_rule_belief)
+                update_beliefs_after_step(state, d_ev, d_fc, d_acts, state.d_rule_belief);
+            update_beliefs_after_step(state, d_ev, d_fc, d_acts, state.d_belief);
+            if (state.d_rule_belief) constrain_beliefs_to_rules(state);
         },
         py::arg("state"),
         py::arg("d_event_ptr"),

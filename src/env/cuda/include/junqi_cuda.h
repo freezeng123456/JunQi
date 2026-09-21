@@ -70,6 +70,14 @@ struct DeviceGameStateBatch {
   int32_t* d_move_counter = nullptr;
   int32_t* d_moves_since_last_combat = nullptr;
 
+  // Persistent inference state belongs to this world, never global scratch.
+  float* d_belief = nullptr;
+  float* d_rule_belief = nullptr;  // lazy: allocated before first neural refresh
+  int8_t* d_observer_seats = nullptr;
+  void ensure_beliefs();
+  void ensure_rule_beliefs();
+  void clear_auxiliary_state();
+
   // Phase 1b: per-env termination state (needed for step_batch).
   // Kept GPU-resident so step_batch can skip already-terminated envs and
   // produce a complete MoveResultBatch without a pre-pass H2D copy.
@@ -186,10 +194,10 @@ struct DeviceObservationSingleBatch {
 // DeviceRolloutHistory — compact GPU-resident training history.
 //
 // Stores only state required to reconstruct the acting seat's observation and
-// legal-action mask. Belief and CombatMemory are saved for the acting observer
-// only (rather than all four observers), reducing history storage by 4x for
-// those dominant fields. A gathered minibatch is restored into temporary
-// DeviceGameStateBatch/DeviceObservationSingleBatch buffers on device.
+// legal mask. Belief stores the acting observer. Observer-specific combat
+// deductions keep four views; the public chain PID bitmap keeps one view and
+// the reverse capture bitmap is reconstructed from its transpose on gather.
+// A minibatch is restored into the existing full observation-kernel layout.
 // ---------------------------------------------------------------------------
 struct RolloutHistoryReconstruction {
   const float* d_spatial = nullptr;  // (B, NUM_OBS_CHANNELS, 17, 17)
@@ -231,7 +239,8 @@ struct DeviceRolloutHistory {
   // Acting-observer slice only: (T, N, 12, 289).
   float* d_observer_belief = nullptr;
 
-  // Acting-observer CombatMemory slice only: (T, N, 120).
+  // Observer-specific CombatMemory: (T, N, 4, 120).
+  // Public d_cm_chain_{lo,hi} only: (T, N, 120).
   uint64_t* d_cm_direct_lo = nullptr;
   uint64_t* d_cm_direct_hi = nullptr;
   uint16_t* d_cm_direct_type = nullptr;
@@ -241,8 +250,6 @@ struct DeviceRolloutHistory {
   uint64_t* d_cm_chain_hi = nullptr;
   uint16_t* d_cm_chain_type = nullptr;
   int16_t* d_cm_last_chain_step = nullptr;
-  uint64_t* d_cm_eaten_by_pid_lo = nullptr;
-  uint64_t* d_cm_eaten_by_pid_hi = nullptr;
   int8_t* d_cm_rank_floor = nullptr;
   int16_t* d_cm_rank_floor_step = nullptr;
   bool* d_cm_is_gongb = nullptr;
@@ -503,12 +510,15 @@ void upload_zobrist_tables_from_host(
 // Phase 1 Belief Update — GPU-side deductive belief inference.
 //
 // Belief tensor layout: [N, 4, 12, 289] float32 (C-contiguous).
-// Stored in GpuScratch::d_belief.
+// Stored in DeviceGameStateBatch::d_belief.
 // ---------------------------------------------------------------------------
 
 // Upload the per-slot prior table (30 slots × 12 types, float32).
 // Call once at process start, before any belief init.
 void upload_belief_prior_table(const float* h_table);
+
+// Project soft beliefs onto the independent deductive support after a step.
+void constrain_beliefs_to_rules(DeviceGameStateBatch& state);
 
 // Upload the precomputed stronghold positions (4 seats × 2 strongholds, int16).
 // Call once at process start.

@@ -83,6 +83,52 @@ __global__ void gather_observer_slice_kernel(
       source[static_cast<size_t>(source_row) * observer_stride + offset];
 }
 
+// The chain PID relation is public and identical for all observers. Keep
+// one copy; type deductions and observer-specific timestamps remain separate.
+__global__ void snapshot_public_chain_kernel(
+    const uint64_t* source_lo, const uint64_t* source_hi,
+    uint64_t* history_lo, uint64_t* history_hi, int n, int step) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n * CM_NUM_PIDS) return;
+  int env = i / CM_NUM_PIDS, pid = i % CM_NUM_PIDS;
+  size_t src = (size_t)env * NUM_SEATS * CM_NUM_PIDS + pid;
+  size_t dst = ((size_t)step * n + env) * CM_NUM_PIDS + pid;
+  history_lo[dst] = source_lo[src];
+  history_hi[dst] = source_hi[src];
+}
+
+// Rebuild the existing observation-kernel layout. Reverse capture is the
+// transpose of the public chain, visible only for the observer's own victims.
+// One thread per victim/chain-row; all four observer rows are written on every
+// gather, including zeros, so reused minibatch storage cannot retain old bits.
+__global__ void gather_public_chain_kernel(
+    const uint64_t* history_lo, const uint64_t* history_hi,
+    const int64_t* indices, int batch_size,
+    uint64_t* chain_lo, uint64_t* chain_hi,
+    uint64_t* reverse_lo, uint64_t* reverse_hi) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= batch_size * CM_NUM_PIDS) return;
+  int env = i / CM_NUM_PIDS, pid = i % CM_NUM_PIDS;
+  size_t row = (size_t)indices[env] * CM_NUM_PIDS;
+  uint64_t lo = history_lo[row + pid], hi = history_hi[row + pid];
+  uint64_t rev_lo = 0, rev_hi = 0;
+  for (int killer = 0; killer < CM_NUM_PIDS; ++killer) {
+    uint64_t bits = pid < 64 ? history_lo[row + killer] : history_hi[row + killer];
+    bool captured = (bits >> (pid < 64 ? pid : pid - 64)) & 1ULL;
+    if (captured) {
+      if (killer < 64) rev_lo |= 1ULL << killer;
+      else rev_hi |= 1ULL << (killer - 64);
+    }
+  }
+  for (int obs = 0; obs < NUM_SEATS; ++obs) {
+    size_t dst = ((size_t)env * NUM_SEATS + obs) * CM_NUM_PIDS + pid;
+    chain_lo[dst] = lo;
+    chain_hi[dst] = hi;
+    reverse_lo[dst] = obs == pid / 30 ? rev_lo : 0;
+    reverse_hi[dst] = obs == pid / 30 ? rev_hi : 0;
+  }
+}
+
 template <typename T>
 void launch_snapshot_observer_slice(
     const T* source,
@@ -201,12 +247,10 @@ DeviceRolloutHistory::DeviceRolloutHistory(int steps, int envs)
   ALLOC_HISTORY(d_cm_direct_type, CM_HISTORY_STRIDE, uint16_t);
   ALLOC_HISTORY(d_cm_last_direct_step, CM_HISTORY_STRIDE, int16_t);
   ALLOC_HISTORY(d_cm_direct_other_count, CM_HISTORY_STRIDE, int16_t);
-  ALLOC_HISTORY(d_cm_chain_lo, CM_HISTORY_STRIDE, uint64_t);
-  ALLOC_HISTORY(d_cm_chain_hi, CM_HISTORY_STRIDE, uint64_t);
+  ALLOC_HISTORY(d_cm_chain_lo, CM_NUM_PIDS, uint64_t);
+  ALLOC_HISTORY(d_cm_chain_hi, CM_NUM_PIDS, uint64_t);
   ALLOC_HISTORY(d_cm_chain_type, CM_HISTORY_STRIDE, uint16_t);
   ALLOC_HISTORY(d_cm_last_chain_step, CM_HISTORY_STRIDE, int16_t);
-  ALLOC_HISTORY(d_cm_eaten_by_pid_lo, CM_HISTORY_STRIDE, uint64_t);
-  ALLOC_HISTORY(d_cm_eaten_by_pid_hi, CM_HISTORY_STRIDE, uint64_t);
   ALLOC_HISTORY(d_cm_rank_floor, CM_HISTORY_STRIDE, int8_t);
   ALLOC_HISTORY(d_cm_rank_floor_step, CM_HISTORY_STRIDE, int16_t);
   ALLOC_HISTORY(d_cm_is_gongb, CM_HISTORY_STRIDE, bool);
@@ -253,8 +297,6 @@ DeviceRolloutHistory::~DeviceRolloutHistory() {
   free_device(d_cm_chain_hi);
   free_device(d_cm_chain_type);
   free_device(d_cm_last_chain_step);
-  free_device(d_cm_eaten_by_pid_lo);
-  free_device(d_cm_eaten_by_pid_hi);
   free_device(d_cm_rank_floor);
   free_device(d_cm_rank_floor_step);
   free_device(d_cm_is_gongb);
@@ -335,12 +377,8 @@ void DeviceRolloutHistory::snapshot(
       d_cm_direct_other_count,
       state.d_cm_direct_other_count,
       int16_t);
-  SNAPSHOT_CM(d_cm_chain_lo, state.d_cm_chain_lo, uint64_t);
-  SNAPSHOT_CM(d_cm_chain_hi, state.d_cm_chain_hi, uint64_t);
   SNAPSHOT_CM(d_cm_chain_type, state.d_cm_chain_type, uint16_t);
   SNAPSHOT_CM(d_cm_last_chain_step, state.d_cm_last_chain_step, int16_t);
-  SNAPSHOT_CM(d_cm_eaten_by_pid_lo, state.d_cm_eaten_by_pid_lo, uint64_t);
-  SNAPSHOT_CM(d_cm_eaten_by_pid_hi, state.d_cm_eaten_by_pid_hi, uint64_t);
   SNAPSHOT_CM(d_cm_rank_floor, state.d_cm_rank_floor, int8_t);
   SNAPSHOT_CM(d_cm_rank_floor_step, state.d_cm_rank_floor_step, int16_t);
   SNAPSHOT_CM(d_cm_is_gongb, state.d_cm_is_gongb, bool);
@@ -349,6 +387,10 @@ void DeviceRolloutHistory::snapshot(
       d_cm_attacked_by_known_gongb,
       state.d_cm_attacked_by_known_gongb,
       bool);
+
+  snapshot_public_chain_kernel<<<(num_envs * CM_NUM_PIDS + 255) / 256, 256>>>(
+      state.d_cm_chain_lo, state.d_cm_chain_hi,
+      d_cm_chain_lo, d_cm_chain_hi, num_envs, step);
 
 #undef SNAPSHOT_CM
 
@@ -464,21 +506,11 @@ RolloutHistoryReconstruction DeviceRolloutHistory::reconstruct(
       d_cm_direct_other_count,
       replay_state->d_cm_direct_other_count,
       int16_t);
-  GATHER_CM(d_cm_chain_lo, replay_state->d_cm_chain_lo, uint64_t);
-  GATHER_CM(d_cm_chain_hi, replay_state->d_cm_chain_hi, uint64_t);
   GATHER_CM(d_cm_chain_type, replay_state->d_cm_chain_type, uint16_t);
   GATHER_CM(
       d_cm_last_chain_step,
       replay_state->d_cm_last_chain_step,
       int16_t);
-  GATHER_CM(
-      d_cm_eaten_by_pid_lo,
-      replay_state->d_cm_eaten_by_pid_lo,
-      uint64_t);
-  GATHER_CM(
-      d_cm_eaten_by_pid_hi,
-      replay_state->d_cm_eaten_by_pid_hi,
-      uint64_t);
   GATHER_CM(d_cm_rank_floor, replay_state->d_cm_rank_floor, int8_t);
   GATHER_CM(
       d_cm_rank_floor_step,
@@ -490,6 +522,11 @@ RolloutHistoryReconstruction DeviceRolloutHistory::reconstruct(
       d_cm_attacked_by_known_gongb,
       replay_state->d_cm_attacked_by_known_gongb,
       bool);
+
+  gather_public_chain_kernel<<<(batch_size * CM_NUM_PIDS + 255) / 256, 256>>>(
+      d_cm_chain_lo, d_cm_chain_hi, flat_indices, batch_size,
+      replay_state->d_cm_chain_lo, replay_state->d_cm_chain_hi,
+      replay_state->d_cm_eaten_by_pid_lo, replay_state->d_cm_eaten_by_pid_hi);
 
 #undef GATHER_CM
 

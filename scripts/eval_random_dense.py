@@ -13,7 +13,7 @@ Example::
 
 By default this follows the main training score exactly: the raw learner
 policy, both team assignments on paired seeds, greedy actions, and a fixed
-held-out GPU setup pool.  ``--single-team`` remains available for targeted
+held-out seeded lineup suite.  ``--single-team`` remains available for targeted
 diagnostics.
 """
 
@@ -50,7 +50,7 @@ def main() -> None:
         "--setup-seed",
         type=int,
         default=20_260_818,
-        help="Fixed uniform setup-pool seed; use a new seed for held-out checks",
+        help="Fixed uniform lineup seed; use a new seed for held-out checks",
     )
     action_mode = ap.add_mutually_exclusive_group()
     action_mode.add_argument(
@@ -67,6 +67,7 @@ def main() -> None:
         help="Sample policy actions instead; diagnostic only",
     )
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--records", type=Path, help="Per-game JSONL (default: beside checkpoint)")
     args = ap.parse_args()
 
     if not torch.cuda.is_available():
@@ -76,7 +77,7 @@ def main() -> None:
         evaluate_paired_vs_random,
         evaluate_vs_random_gpu,
     )
-    from junqi_rl.gpu_rollout import GpuRollout
+    from junqi_rl.analysis.protocol import write_game_records
     from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
 
     with open(args.config, encoding="utf-8") as f:
@@ -106,20 +107,7 @@ def main() -> None:
     policy.load_state_dict(weights)
     policy.eval()
 
-    if args.setup_seed is not None:
-        # The CUDA setup pool is process-global. Bootstrap it before the
-        # evaluator creates/reuses its bounded batch so this CLI can provide a
-        # genuinely held-out, reproducible setup distribution.
-        device_id = torch.device(args.device).index or 0
-        bootstrap = GpuRollout(
-            num_envs=min(64, args.num_games),
-            device_id=device_id,
-        )
-        pool_size = bootstrap.upload_fixed_evaluation_setup_pool(
-            seed=args.setup_seed,
-        )
-    else:
-        pool_size = 0
+    records: list[dict] = []
 
     if args.single_team:
         stats = evaluate_vs_random_gpu(
@@ -130,6 +118,8 @@ def main() -> None:
             max_moves=args.max_steps,
             device=args.device,
             seed=args.seed_base,
+            setup_seed=args.setup_seed,
+            game_records=records,
             autocast_dtype=autocast_dtype,
             greedy=args.greedy,
         )
@@ -142,6 +132,8 @@ def main() -> None:
             use_gpu=True,
             device=args.device,
             seed=args.seed_base,
+            setup_seed=args.setup_seed,
+            game_records=records,
             max_moves=args.max_steps,
             autocast_dtype=autocast_dtype,
             greedy=args.greedy,
@@ -156,8 +148,10 @@ def main() -> None:
     print(f"ckpt:     {args.ckpt}")
     print(f"weights:  policy")
     print(f"protocol: {protocol}")
-    if pool_size:
-        print(f"setups:   fixed seed={args.setup_seed} pool={pool_size}")
+    print(f"setups:   uniform seeded games, base={args.setup_seed}")
+    records_path = args.records or Path(args.ckpt).with_suffix(".eval-games.jsonl")
+    write_game_records(records_path, records)
+    print(f"records:  {records_path}")
     print(f"games:    {completed}/{requested}")
     print(f"win:      {stats['eval/win_rate']:.4f}")
     print(f"loss:     {stats['eval/loss_rate']:.4f}")
