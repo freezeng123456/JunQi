@@ -1,0 +1,129 @@
+"""Package review artifacts while leaving large raw data/checkpoints in place."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import zipfile
+
+
+def package(root, output):
+    root = root.resolve()
+    analysis = json.loads((root / 'analysis_final/synthesis.json').read_text())
+    assert analysis['status'] == 'all_experiments_and_diagnostics_verified'
+    assert (root / 'analysis_final/REPORT.md').is_file()
+    assert (root / 'analysis_final/PROTOCOL.md').is_file()
+    assert (root / 'analysis_final/FEATURE_CATALOG.md').is_file()
+    source = root / 'final-source.bundle'
+    assert not source.exists(), source
+    subprocess.run(['git', 'bundle', 'create', str(source), 'HEAD'], check=True)
+    files = [source]
+    for name in ('analysis_final', 'analysis_training', 'analysis_scale', 'analysis_early', 'analysis_policy'):
+        files.extend(sorted((root / name).glob('*')))
+    for name in ('dataset_audit.json', 'ambiguity_probe.json', 'opening_prior.json',
+                 'tabular_diagnostics.json', 'plot_visual_qa.json', 'recovery_status.json', 'recovery_scale_status.json',
+                 'recovery_diagnostics_status.json', 'recovery_early_status.json', 'early_analysis_stage.json', 'data_main/recovery_verified.json',
+                 'data_expanded/recovery_verified.json', 'local-regression-final.log', 'analysis-targeted-tests.log',
+                 'main_provenance_A.json', 'main_provenance_B.json',
+                 'remote_completion_A.json', 'remote_completion_B.json',
+                 'run_main.py', 'run_expanded.py', 'expanded_stages.py',
+                 'run_diagnostics_v2.py', 'run_early.py', 'verify_remote_completion.py',
+                 'source_inputs/SOURCE_INPUTS.json', 'source_inputs/frozen_policy_v4.pt',
+                 'junqi_cuda.cpython-312-x86_64-linux-gnu.so', 'native-inputs.sha256', 'runtime-deps.tgz'):
+        path = root / name
+        assert path.is_file(), path
+        files.append(path)
+    for name in ('historical_vs_random_audit.json', 'phase_a_config_validation.log',
+                 'phase_a_initializer_validation.log', 'source_inputs/phase_a_initializer_v4.pt',
+                 'source_inputs/phase_a_initializer_v4.json', 'recovery_policy_status.json',
+                 'run_current_gpu.py', 'run_current_gpu_v2.py', 'run_early_v2.py',
+                 'recover_policy_results.py', 'finalize_policy.py',
+                 'policy_analysis_stage.json'):
+        path = root / name
+        assert path.is_file(), path
+        files.append(path)
+    for backend in ('cpu', 'gpu'):
+        for role in 'AB':
+            files.extend(path for path in sorted((root / f'current_{backend}_{role}').rglob('*'))
+                         if path.is_file())
+    for name in ('phase_a_followup_plan.json', 'phase_a_resolved.yaml',
+                 'phase_a_resolved_validation.log', 'phase_a_remote_validation.log',
+                 'phase_a_decision_B.json', 'phase_a_followup_status.json',
+                 'run_b_priority_followup.py', 'recover_phase_a.py', 'recover_phase_a.log',
+                 'run_b_buffer_followup.py', 'run_buffer_followup_local.py', 'run_buffer_followup_local.log',
+                 'phase_a_buffer_plan.json', 'phase_a_buffer_status.json', 'phase_a_buffer_activation_B.json',
+                 'phase_a_buffer_decision_B.json', 'phase_a_buffer_remote_validation.json',
+                 'remote_completion_B_before_buffer.json'):
+        path = root / name
+        if path.is_file():
+            files.append(path)
+    for phase_name in ('phase_a_B', 'phase_a_buffer_B'):
+        phase_folder = root / phase_name
+        if not phase_folder.exists():
+            continue
+        files.extend(path for path in sorted(phase_folder.rglob('*'))
+                     if path.is_file() and path.suffix != '.pt')
+        phase_analysis = root / 'analysis_policy/phase_a.json'
+        if phase_analysis.exists():
+            phase = json.loads(phase_analysis.read_text())
+            checkpoint = Path(phase['checkpoint'])
+            assert checkpoint.is_file()
+            if checkpoint.is_relative_to(phase_folder):
+                files.append(checkpoint)
+    for prefix in ('training', 'scale', 'diagnostics', 'early'):
+        for role in 'AB':
+            folder = root / f'{prefix}_{role}'
+            files.extend(path for path in sorted(folder.rglob('*'))
+                         if path.is_file() and path.suffix != '.pt')
+    for name in ('data_main', 'data_expanded'):
+        files.extend(sorted((root / name).glob('*.pt.json')))
+    files = sorted(set(files))
+    entries = []
+    for path in files:
+        with path.open('rb') as handle:
+            digest = hashlib.file_digest(handle, 'sha256').hexdigest()
+        entries.append((path.relative_to(root).as_posix(), digest, path.stat().st_size))
+    readme = (
+        '# BeliefNet 公开特征实验交付包\n\n'
+        '请先阅读 analysis_final/REPORT.md。图、完整逐种子统计、协议、运行配置、日志、'
+        '诊断与源代码 bundle 均包含在本包。\n\n'
+        '数据生成用的冻结策略、对应原生扩展及源代码包含在本包。大体积原始数据和 best.pt／last.pt 不重复放入本包，已分别完整保存在本地 '
+        + str(root) + ' 下的 data_main、data_expanded、training_A/B、scale_A/B、early_A/B。'
+        '对应原始文件哈希保留在各目录 artifacts.sha256 或数据元信息中；'
+        '这些原始清单包含未装入 ZIP 的大文件，不能直接作为 ZIP 文件清单验证。\n\n'
+        '本包自身以 PACKAGE_SHA256.txt 校验。源代码 bundle 可由 git clone final-source.bundle 恢复；'
+        '各阶段的固定提交与运行环境见协议和 launcher_provenance.json。\n'
+    )
+    manifest = ''.join(f'{digest}  {name}\n' for name, digest, _ in entries)
+    readme_digest = hashlib.sha256(readme.encode()).hexdigest()
+    manifest += f'{readme_digest}  README.md\n'
+    assert not output.exists(), output
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        for path in files:
+            archive.write(path, path.relative_to(root).as_posix())
+        archive.writestr('README.md', readme)
+        archive.writestr('PACKAGE_SHA256.txt', manifest)
+    with zipfile.ZipFile(output) as archive:
+        assert archive.testzip() is None
+        for row in manifest.splitlines():
+            digest, name = row.split('  ', 1)
+            assert hashlib.sha256(archive.read(name)).hexdigest() == digest, name
+        count = len(archive.namelist())
+    with output.open('rb') as handle:
+        digest = hashlib.file_digest(handle, 'sha256').hexdigest()
+    result = {'zip': str(output), 'sha256': digest, 'files': count,
+              'bytes': output.stat().st_size, 'all_member_hashes_verified': True,
+              'raw_data_and_checkpoints_retained_locally': str(root),
+              'analysis_commit': analysis['analysis_commit']}
+    output.with_suffix('.verification.json').write_text(json.dumps(result, indent=2) + '\n')
+    print(json.dumps(result), flush=True)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--root', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    package(args.root, args.output)
