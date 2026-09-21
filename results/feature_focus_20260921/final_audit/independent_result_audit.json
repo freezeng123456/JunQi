@@ -1,0 +1,95 @@
+{
+  "N": {
+    "comparison_status": "complete",
+    "manifest_files": 14,
+    "matchups": {
+      "N_vs_start": {
+        "games": 2048,
+        "paired_seeds": 1024,
+        "counts_score_ci_verified": true
+      },
+      "N_vs_random": {
+        "games": 512,
+        "paired_seeds": 256,
+        "counts_score_ci_verified": true
+      }
+    }
+  },
+  "M": {
+    "comparison_status": "complete",
+    "manifest_files": 18,
+    "matchups": {
+      "M_vs_start": {
+        "games": 2048,
+        "paired_seeds": 1024,
+        "counts_score_ci_verified": true
+      },
+      "M_vs_N": {
+        "games": 2048,
+        "paired_seeds": 1024,
+        "counts_score_ci_verified": true
+      },
+      "M_vs_random": {
+        "games": 512,
+        "paired_seeds": 256,
+        "counts_score_ci_verified": true
+      }
+    }
+  },
+  "R": {
+    "comparison_status": "complete",
+    "manifest_files": 46,
+    "matchups": {
+      "R_vs_start": {
+        "games": 2048,
+        "paired_seeds": 1024,
+        "counts_score_ci_verified": true
+      },
+      "R_vs_N": {
+        "games": 2048,
+        "paired_seeds": 1024,
+        "counts_score_ci_verified": true
+      },
+      "R_vs_M": {
+        "games": 2048,
+        "paired_seeds": 1024,
+        "counts_score_ci_verified": true
+      },
+      "R_vs_random": {
+        "games": 512,
+        "paired_seeds": 256,
+        "counts_score_ci_verified": true
+      },
+      "R_diag_full_vs_N": {
+        "games": 512,
+        "paired_seeds": 256,
+        "counts_score_ci_verified": true
+      },
+      "R_without_threat_vs_N": {
+        "games": 512,
+        "paired_seeds": 256,
+        "counts_score_ci_verified": true
+      },
+      "R_without_location_vs_N": {
+        "games": 512,
+        "paired_seeds": 256,
+        "counts_score_ci_verified": true
+      },
+      "R_without_flags_vs_N": {
+        "games": 512,
+        "paired_seeds": 256,
+        "counts_score_ci_verified": true
+      },
+      "R_without_information_vs_N": {
+        "games": 512,
+        "paired_seeds": 256,
+        "counts_score_ci_verified": true
+      },
+      "R_without_resources_vs_N": {
+        "games": 512,
+        "paired_seeds": 256,
+        "counts_score_ci_verified": true
+      }
+    }
+  }
+}

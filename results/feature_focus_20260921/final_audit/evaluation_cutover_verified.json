@@ -1,0 +1,80 @@
+{
+  "N": {
+    "time": 1789965496.7300048,
+    "status": {
+      "time": 1789965461.988698,
+      "arm": "N",
+      "phase": "eval_N_vs_start",
+      "pid": 63971,
+      "deadline": 1790001000.0
+    },
+    "latest": [
+      "ckpt_037441.pt"
+    ],
+    "train_tail": "9152  kept_mean=nan  kept_min=nan  value_n=49152  nan_skip=0  grad_skip=0\n[ 37439] loss_p=+0.0046  loss_v=0.5301  ret=+0.0741  lr=1.00e-05  fps=10539  elapsed=6587s  kl_loss=+0.0060  approx_kl=+0.0061  kl_max=0.985  alpha=0.0060  H=0.380  Hc=0.449  mkl=+3.4871  n_upd=96  kept=49152  kept_mean=nan  kept_min=nan  value_n=49152  nan_skip=0  grad_skip=0\n\n[train] Signal 15 received \u2014 will stop after current rollout.\n[train] Graceful stop: saving final checkpoint.\n[train] Done. Total elapsed: 6593.0s\n",
+    "terminal_upload.json": {
+      "commit": "1153045c02d09e8256f550badc9a3eedf608620d",
+      "prefix": "feature_focus_20260921/N/terminal",
+      "files": 28,
+      "hashes_verified": true
+    },
+    "stage_3_upload.json": {
+      "commit": "c6c202032d825a059d452c214c83c72afbcc9fc8",
+      "prefix": "feature_focus_20260921/N/stage_3",
+      "files": 28,
+      "hashes_verified": true
+    }
+  },
+  "M": {
+    "time": 1789965496.812478,
+    "status": {
+      "time": 1789965457.0701187,
+      "arm": "M",
+      "phase": "eval_M_vs_start",
+      "pid": 21999,
+      "deadline": 1790001000.0
+    },
+    "latest": [
+      "ckpt_037316.pt"
+    ],
+    "train_tail": "49152  kept_mean=nan  kept_min=nan  value_n=49152  nan_skip=0  grad_skip=0\n[ 37311] loss_p=+0.0040  loss_v=0.5313  ret=+0.0724  lr=1.00e-05  fps=9803  elapsed=6251s  kl_loss=+0.0060  approx_kl=+0.0062  kl_max=1.031  alpha=0.0060  H=0.349  Hc=0.406  mkl=+3.4937  n_upd=96  kept=49152  kept_mean=nan  kept_min=nan  value_n=49152  nan_skip=0  grad_skip=0\n\n[train] Signal 15 received \u2014 will stop after current rollout.\n[train] Graceful stop: saving final checkpoint.\n[train] Done. Total elapsed: 6277.7s\n",
+    "terminal_upload.json": {
+      "commit": "8703cca22dcb3d228091d7c509b1998e5a0cd944",
+      "prefix": "feature_focus_20260921/M/terminal",
+      "files": 29,
+      "hashes_verified": true
+    },
+    "stage_3_upload.json": {
+      "commit": "154a2bd5d5fdabcc03c5036e39046a887db7c3c4",
+      "prefix": "feature_focus_20260921/M/stage_3",
+      "files": 29,
+      "hashes_verified": true
+    }
+  },
+  "R": {
+    "time": 1789965496.7215416,
+    "status": {
+      "time": 1789965462.124515,
+      "arm": "R",
+      "phase": "eval_R_vs_start",
+      "pid": 19174,
+      "deadline": 1790001000.0
+    },
+    "latest": [
+      "ckpt_036615.pt"
+    ],
+    "train_tail": " loss_p=+0.0032  loss_v=0.5424  ret=+0.0725  lr=1.00e-05  fps=8480  elapsed=1734s  kl_loss=+0.0060  approx_kl=+0.0061  kl_max=1.000  alpha=0.0060  H=0.354  Hc=0.411  mkl=+3.4904  n_upd=96  kept=49152  kept_mean=nan  kept_min=nan  value_n=49152  nan_skip=0  grad_skip=0\n[train] Checkpoint saved: /tmp/junqi_feature_focus_20260921/R/train/ckpt_036608.pt\n\n[train] Signal 15 received \u2014 will stop after current rollout.\n[train] Graceful stop: saving final checkpoint.\n[train] Done. Total elapsed: 1788.0s\n",
+    "terminal_upload.json": {
+      "commit": "c9fd7b5b6dd2d8a6af6878ca4f9f62bdf557b816",
+      "prefix": "feature_focus_20260921/R/terminal",
+      "files": 27,
+      "hashes_verified": true
+    },
+    "stage_3_upload.json": {
+      "commit": "eea59a53bd7fc720bf94de803e9de3c9b25f8cf0",
+      "prefix": "feature_focus_20260921/R/stage_3",
+      "files": 27,
+      "hashes_verified": true
+    }
+  }
+}

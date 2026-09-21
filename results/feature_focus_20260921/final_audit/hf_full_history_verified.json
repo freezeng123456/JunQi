@@ -1,0 +1,18 @@
+{
+  "private": true,
+  "revision": "d67e2677b8e212249f072f68ac0a32576b19f225",
+  "arms": {
+    "N": {
+      "cloud_files_verified": 286,
+      "hashes_match_local_archive": true
+    },
+    "M": {
+      "cloud_files_verified": 298,
+      "hashes_match_local_archive": true
+    },
+    "R": {
+      "cloud_files_verified": 361,
+      "hashes_match_local_archive": true
+    }
+  }
+}

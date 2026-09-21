@@ -1,0 +1,58 @@
+{
+  "source": "HF revision d67e2677b8e212249f072f68ac0a32576b19f225",
+  "total_games": 16896,
+  "primary_games": 12288,
+  "random_games": 1536,
+  "diagnostic_games": 3072,
+  "main_setup_identity_across_six_matchups": true,
+  "diagnostic_setup_identity": true,
+  "fresh_diagnostic_and_random_seeds": true,
+  "diagnostic_deltas": {
+    "threat": {
+      "games": 512,
+      "paired_seeds": 256,
+      "score_delta_knockout_minus_full": 0.0029296875,
+      "pair_bootstrap_delta_ci95": [
+        -0.015625,
+        0.0224609375
+      ]
+    },
+    "location": {
+      "games": 512,
+      "paired_seeds": 256,
+      "score_delta_knockout_minus_full": 0.0,
+      "pair_bootstrap_delta_ci95": [
+        -0.005859375,
+        0.005859375
+      ]
+    },
+    "flags": {
+      "games": 512,
+      "paired_seeds": 256,
+      "score_delta_knockout_minus_full": 0.001953125,
+      "pair_bootstrap_delta_ci95": [
+        0.0,
+        0.005859375
+      ]
+    },
+    "information": {
+      "games": 512,
+      "paired_seeds": 256,
+      "score_delta_knockout_minus_full": -0.005859375,
+      "pair_bootstrap_delta_ci95": [
+        -0.013671875,
+        0.0
+      ]
+    },
+    "resources": {
+      "games": 512,
+      "paired_seeds": 256,
+      "score_delta_knockout_minus_full": 0.001953125,
+      "pair_bootstrap_delta_ci95": [
+        0.0,
+        0.005859375
+      ]
+    }
+  },
+  "interpretation": "Inference-time knockout of one trained model; not independent retraining, not a feature ranking."
+}

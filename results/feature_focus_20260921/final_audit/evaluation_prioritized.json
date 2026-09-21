@@ -1,0 +1,29 @@
+{
+  "N": {
+    "time": 1789965423.75407,
+    "arm": "N",
+    "training_pid": 60247,
+    "reason": "User reported resource reclamation; primary target already complete. End optional extension gracefully and prioritize predeclared independent evaluation and recovery.",
+    "primary_rollouts": 36384,
+    "primary_selection_unchanged": true,
+    "action": "SIGTERM training child only; controller continues to evaluation"
+  },
+  "M": {
+    "time": 1789965423.750798,
+    "arm": "M",
+    "training_pid": 18328,
+    "reason": "User reported resource reclamation; primary target already complete. End optional extension gracefully and prioritize predeclared independent evaluation and recovery.",
+    "primary_rollouts": 36384,
+    "primary_selection_unchanged": true,
+    "action": "SIGTERM training child only; controller continues to evaluation"
+  },
+  "R": {
+    "time": 1789965423.753878,
+    "arm": "R",
+    "training_pid": 18407,
+    "reason": "User reported resource reclamation; primary target already complete. End optional extension gracefully and prioritize predeclared independent evaluation and recovery.",
+    "primary_rollouts": 36384,
+    "primary_selection_unchanged": true,
+    "action": "SIGTERM training child only; controller continues to evaluation"
+  }
+}
