@@ -1,0 +1,7 @@
+{
+  "primary_rule": "fixed 4096 new rollouts, independent of scores",
+  "rollouts": 36384,
+  "candidate_sha256": "6019b843272c21dde81433ccf903caf1497befba8ebdefccfd700103bf4434a4",
+  "start_sha256": "0484de01cd87e3365d6f1d844a1a229d15c3b1dac657c9171a5916b230587997",
+  "training_failure": null
+}

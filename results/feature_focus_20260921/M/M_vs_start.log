@@ -1,0 +1,1 @@
+M_vs_start {"status": "complete", "games": 2048, "counts": {"loss": 966, "win": 1038, "draw": 44}, "win_fraction": 0.5068359375, "score": 0.517578125, "pair_bootstrap_ci95": [0.498291015625, 0.536865234375], "pairs": 1024}

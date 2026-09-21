@@ -1,0 +1,1 @@
+M_vs_random {"status": "complete", "games": 512, "counts": {"win": 512}, "win_fraction": 1.0, "score": 1.0, "pair_bootstrap_ci95": [1.0, 1.0], "pairs": 256}
