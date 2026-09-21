@@ -1,0 +1,797 @@
+"""junqi_rl.networks.junqi_net — Policy + value network for 四国军棋.
+
+Architecture overview
+---------------------
+The network maps a canonical-frame observation to a policy distribution over
+the compact 16,641-action space and a scalar (or categorical) value estimate.
+
+Input
+~~~~~
+* ``obs_spatial``  : float32 tensor ``(B, OBS_CHANNELS, 17, 17)``  — 317 channels
+* ``obs_global``   : float32 tensor ``(B, OBS_GLOBAL_DIMS)``        — 28 scalars
+* ``legal_mask``   : bool tensor    ``(B, FLAT_ACTION_DIM)``         — 16,641 bits
+
+Pipeline
+~~~~~~~~
+1. **Graph stem** — extract the 129 on-board cells, embed them, then aggregate
+   static road and rail neighbours separately before combining the messages.
+   This injects board topology without treating the 160 off-board encoding
+   positions as zero-valued cells.
+
+2. **Positional embedding** — project GraphStem output to (129, D), then add
+   learnable positional embeddings (one per on-board cell).
+
+3. **Global token injection** — project ``obs_global`` (28,) → (1, D) and
+   prepend as a CLS token; sequence length becomes 130.
+
+4. **Transformer trunk** — L layers of pre-norm self-attention + FFN
+   (default L=6, D=256, 8 heads).
+
+5. **Heads**:
+   - *Policy head*: For each of the 129 cell tokens, project to
+     ``action_key_dim`` keys and queries; build the (129, 129) src-by-dst
+     score map → reshape to (16,641) logits; apply legal mask.
+   - *Value head*: Read from CLS token; project to 1 scalar or N_VF_CAT
+     categorical bins (default: scalar).
+
+Action space
+~~~~~~~~~~~~
+``action_id = compact_src * 129 + compact_dst`` over the 129 on-board cells.
+The model outputs logits in **canonical** frame.  Callers must convert to the
+world frame (``src_flat * 289 + dst_flat``) with ``unrotate_action_id`` before
+passing to ``JunqiEnv.step``.
+
+See also
+--------
+ADR-119 (flat action encoding), ADR-102 (canonical rotation), ADR-106 (obs layout).
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch import Tensor
+from torch.distributions import Categorical
+
+from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
+from junqi_rl.networks.combat_features import CombatOutcomeHead
+from junqi_core.board import (
+    COMPACT_ACTION_DIM,
+    COMPACT_RAIL_DEGREE,
+    COMPACT_RAIL_NEIGHBORS,
+    COMPACT_ROAD_DEGREE,
+    COMPACT_ROAD_NEIGHBORS,
+    COMPACT_TO_FLAT,
+    NUM_ON_BOARD_CELLS,
+)
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+BOARD_SIZE: int = 17
+NUM_CELLS: int = BOARD_SIZE * BOARD_SIZE        # 289
+# Compact action space: only on-board cells (129 × 129 = 16,641)
+FLAT_ACTION_DIM: int = COMPACT_ACTION_DIM       # 16,641 (was 83,521)
+N_VF_CAT: int = 3                               # categorical value bins (win/draw/lose)
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class JunqiNetConfig:
+    """All hyper-parameters for :class:`JunqiNet`.
+
+    Defaults mirror Ataraxos ``MoveTransformerConfig`` scaled to the
+    larger 4-player board (17×17 vs 10×10) and 16,641-action space.
+    """
+
+    # Spatial stem. Historical ``cnn_*`` field names are retained for
+    # config/checkpoint compatibility.
+    cnn_channels: int = 128
+    """Number of channels emitted by the spatial stem."""
+
+    cnn_layers: int = 3
+    """Number of message-passing rounds in the policy GraphStem."""
+
+    # Transformer trunk
+    depth: int = 6
+    """Number of transformer layers."""
+
+    embed_dim: int = 256
+    """Transformer embedding dimension (must be divisible by n_head)."""
+
+    n_head: int = 8
+    """Number of self-attention heads."""
+
+    ff_factor: int = 4
+    """Feed-forward hidden dim multiplier (ff_dim = embed_dim * ff_factor)."""
+
+    dropout: float = 0.0
+    """Dropout probability in transformer layers."""
+
+    pos_emb_std: float = 0.02
+    """Std for truncated-normal positional embedding initialisation."""
+
+    # Value head
+    use_cat_vf: bool = False
+    """If True, value head predicts N_VF_CAT bins (categorical RL).
+    If False, predicts a single scalar (standard actor-critic)."""
+
+    combat_outcome_features: bool = False
+    """Enable the 81-parameter observation-derived combat outcome residual."""
+
+    relational_features: bool = False
+    """Enable public-position threat, flag, camp and information relationships."""
+
+    tactical_features: bool = False
+    """Enable observation-only material/uncertainty attack residual."""
+
+    # Action head
+    action_key_dim: int = 64
+    """Dimension of query/key projections for the bilinear action logits."""
+
+
+# ---------------------------------------------------------------------------
+# Building blocks
+# ---------------------------------------------------------------------------
+
+
+class TransformerBlock(nn.Module):
+    """Pre-norm residual transformer layer.
+
+    ``x → LN → MHA → Add → LN → FFN → Add``
+
+    Parameters
+    ----------
+    embed_dim
+        Token dimension.
+    n_head
+        Number of attention heads.
+    ff_factor
+        Feed-forward hidden dim = embed_dim × ff_factor.
+    dropout
+        Dropout rate (applied inside MHA and FFN).
+    """
+
+    def __init__(
+        self,
+        embed_dim: int,
+        n_head: int,
+        ff_factor: int = 4,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.attn = nn.MultiheadAttention(
+            embed_dim,
+            n_head,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.norm2 = nn.LayerNorm(embed_dim)
+        ff_dim = embed_dim * ff_factor
+        self.ff = nn.Sequential(
+            nn.Linear(embed_dim, ff_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(ff_dim, embed_dim),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:  # (B, T, D)
+        # Self-attention (pre-norm)
+        x2 = self.norm1(x)
+        x2, _ = self.attn(x2, x2, x2, need_weights=False)
+        x = x + x2
+        # FFN (pre-norm)
+        x = x + self.ff(self.norm2(x))
+        return x
+
+
+class CNNStem(nn.Module):
+    """Convolutional stem: (B, C_in, 17, 17) → (B, D, 17, 17).
+
+    Uses residual blocks with GELU activations.  The spatial resolution is
+    preserved throughout (padding='same') so that the output can be
+    directly unrolled into 289 board-cell tokens.
+
+    Retained for :class:`~junqi_rl.networks.belief_net.BeliefNet`, whose head
+    predicts a type distribution at all 289 encoding positions.  The move
+    policy uses :class:`GraphStem` instead: it works on the 129 real cells and
+    over the board's own road and rail graphs, which a padded convolution
+    cannot represent.  BeliefNet has the same off-board problem and would
+    benefit from the same treatment, but changing it also moves the label
+    shape in belief_ppo, and it is disabled in the production config.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        num_layers: int = 3,
+    ) -> None:
+        super().__init__()
+        layers: list[nn.Module] = []
+        c_in = in_channels
+        for i in range(num_layers):
+            c_out = out_channels
+            layers += [
+                nn.Conv2d(c_in, c_out, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(c_out),
+                nn.GELU(),
+            ]
+            c_in = c_out
+        self.net = nn.Sequential(*layers)
+        # 1×1 projection to match residual if in_channels != out_channels
+        self.proj: nn.Module
+        if in_channels != out_channels:
+            self.proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
+        else:
+            self.proj = nn.Identity()
+
+    def forward(self, x: Tensor) -> Tensor:  # (B, C_in, 17, 17)
+        return self.net(x) + self.proj(x)  # type: ignore[operator]
+
+
+# ---------------------------------------------------------------------------
+# Main network
+# ---------------------------------------------------------------------------
+
+
+class GraphStem(nn.Module):
+    """Per-cell embedding plus neighbour aggregation over the board's own graphs.
+
+    Replaces a 3x3 convolutional stem over the 17x17 encoding. That encoding
+    holds 160 positions that are not on the board, and a padded convolution
+    both spends 55% of its work on them and folds their zeros into the
+    features of real cells: for the 81 on-board cells whose window overlaps
+    the void, "my neighbour is off the board" becomes indistinguishable from
+    "my neighbour is an empty square".
+
+    Junqi's connectivity is not a grid either. Two graphs describe it, and
+    they disagree with each other and with Euclidean distance:
+
+      * road, degree 0 to 8 -- one orthogonal step plus the diagonals a camp
+        allows, so a camp's neighbourhood is twice a plain cell's
+      * rail, degree 0 to 4 -- long-range and sparse; a single rail move can
+        cross the board, which a 7x7 receptive field cannot express at all
+
+    So aggregate along each graph separately and combine. Off-board cells are
+    absent from every neighbour list rather than present as zeros. This injects
+    the *static rail topology* into the stem; occupancy-conditioned long-range
+    rail reachability is not precomputed here and remains a dynamic relation
+    for later layers to infer from the current position.
+
+    Padded neighbour slots index one past the last cell; a zero row is
+    appended before gathering so they contribute nothing, and the sum is
+    divided by the true degree (floored at one for the cells with none).
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        num_layers: int = 3,
+        ffn_factor: int = 4,
+    ) -> None:
+        super().__init__()
+        self.embed = nn.Linear(in_channels, out_channels)
+        self.self_lin = nn.ModuleList()
+        self.road_lin = nn.ModuleList()
+        self.rail_lin = nn.ModuleList()
+        self.ffn = nn.ModuleList()
+        self.norm_msg = nn.ModuleList()
+        self.norm_ffn = nn.ModuleList()
+        for _ in range(num_layers):
+            self.self_lin.append(nn.Linear(out_channels, out_channels, bias=False))
+            self.road_lin.append(nn.Linear(out_channels, out_channels, bias=False))
+            self.rail_lin.append(nn.Linear(out_channels, out_channels, bias=False))
+            # A 3x3 convolution carries nine weights per channel pair; a
+            # neighbour mean carries one. Without something to make up the
+            # difference the stem is ~5x smaller than the one it replaces, and
+            # an Elo comparison could not separate the graph structure from
+            # the lost capacity. Give each round a transformer-style FFN.
+            self.ffn.append(
+                nn.Sequential(
+                    nn.Linear(out_channels, ffn_factor * out_channels),
+                    nn.GELU(),
+                    nn.Linear(ffn_factor * out_channels, out_channels),
+                )
+            )
+            self.norm_msg.append(nn.LayerNorm(out_channels))
+            self.norm_ffn.append(nn.LayerNorm(out_channels))
+
+        self.register_buffer(
+            "road_nb",
+            torch.from_numpy(COMPACT_ROAD_NEIGHBORS.astype("int64")),
+            persistent=False,
+        )
+        self.register_buffer(
+            "rail_nb",
+            torch.from_numpy(COMPACT_RAIL_NEIGHBORS.astype("int64")),
+            persistent=False,
+        )
+        self.register_buffer(
+            "road_deg",
+            torch.from_numpy(COMPACT_ROAD_DEGREE.astype("float32"))
+            .clamp_min(1.0)
+            .view(1, -1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "rail_deg",
+            torch.from_numpy(COMPACT_RAIL_DEGREE.astype("float32"))
+            .clamp_min(1.0)
+            .view(1, -1, 1),
+            persistent=False,
+        )
+
+    @staticmethod
+    def _aggregate(h: Tensor, neighbors: Tensor, degree: Tensor) -> Tensor:
+        """Mean of each cell's neighbours. ``h`` is (B, 129, C)."""
+        B, _, C = h.shape
+        padded = torch.cat([h, h.new_zeros(B, 1, C)], dim=1)   # (B, 130, C)
+        gathered = padded[:, neighbors]                        # (B, 129, deg, C)
+        return gathered.sum(dim=2) / degree
+
+    def forward(self, x: Tensor) -> Tensor:  # (B, 129, C_in) -> (B, 129, C_out)
+        h = self.embed(x)
+        for self_lin, road_lin, rail_lin, ffn, norm_msg, norm_ffn in zip(
+            self.self_lin, self.road_lin, self.rail_lin,
+            self.ffn, self.norm_msg, self.norm_ffn, strict=True,
+        ):
+            road = self._aggregate(h, self.road_nb, self.road_deg)
+            rail = self._aggregate(h, self.rail_nb, self.rail_deg)
+            h = norm_msg(h + F.gelu(self_lin(h) + road_lin(road) + rail_lin(rail)))
+            h = norm_ffn(h + ffn(h))
+        return h
+
+
+class JunqiNet(nn.Module):
+    """Policy + value network for 4-player 四国军棋.
+
+    Parameters
+    ----------
+    cfg
+        :class:`JunqiNetConfig` hyper-parameters.
+
+    Forward
+    -------
+    Call :meth:`forward` to get the full output dict (for training).
+    Call :meth:`act` for inference-only (no gradient, greedy / sampled action).
+
+    Output dict (``forward``)
+    -------------------------
+    ``action``         : int32 tensor  (B,)          canonical-frame action id
+    ``action_log_prob``: float tensor  (B,)          log-prob of chosen action
+    ``log_probs``      : float tensor  (B, 16641)    full log-prob distribution
+    ``value``          : float tensor  (B,) or (B, N_VF_CAT)   value estimate
+    """
+
+    def __init__(self, cfg: JunqiNetConfig | None = None) -> None:
+        super().__init__()
+        self.cfg = cfg or JunqiNetConfig()
+        cfg = self.cfg
+
+        # Counter for in-forward NaN/Inf guard hits. Incremented by forward()
+        # each time a row of logits was non-finite and had to be replaced
+        # with uniform-over-legal. Persists across calls; trainers can read
+        # this to surface fp16 instability frequency.
+        self._nan_fwd_count: int = 0
+
+        D = cfg.embed_dim
+
+        # -- Graph stem --------------------------------------------------------
+        self.stem = GraphStem(
+            OBS_CHANNELS, cfg.cnn_channels, cfg.cnn_layers, cfg.ff_factor
+        )
+
+        # Project stem output channels to embed_dim (may be a no-op if equal)
+        if cfg.cnn_channels != D:
+            self.patch_proj: nn.Module = nn.Linear(cfg.cnn_channels, D)
+        else:
+            self.patch_proj = nn.Identity()
+
+        # -- On-board cell index (129 of 289) for compact Transformer input ---
+        # Register as buffer so it moves with .to(device) and is not a parameter.
+        self.register_buffer(
+            "on_board_idx",
+            torch.from_numpy(COMPACT_TO_FLAT.astype("int64")),  # (129,) long
+            persistent=False,
+        )
+
+        # -- Positional embedding: one vector per on-board cell (129) + CLS ---
+        self.pos_emb = nn.Parameter(
+            torch.empty(1, NUM_ON_BOARD_CELLS + 1, D)  # (1, 130, D)
+        )
+        nn.init.trunc_normal_(self.pos_emb, std=cfg.pos_emb_std)
+
+        # -- Global (CLS) token projection ------------------------------------
+        self.global_proj = nn.Linear(OBS_GLOBAL_DIMS, D)
+
+        # -- Transformer trunk ------------------------------------------------
+        self.transformer = nn.Sequential(
+            *[
+                TransformerBlock(D, cfg.n_head, cfg.ff_factor, cfg.dropout)
+                for _ in range(cfg.depth)
+            ]
+        )
+        self.norm_out = nn.LayerNorm(D)
+
+        # -- Policy head -------------------------------------------------------
+        # Bilinear action logits: for each (src, dst) pair the score is
+        #   score[b, src, dst] = q[b, src] · k[b, dst]^T / sqrt(key_dim)
+        # which is then flattened to (B, 129*129) = (B, 16641).
+        Kd = cfg.action_key_dim
+        self.q_proj = nn.Linear(D, Kd, bias=False)
+        self.k_proj = nn.Linear(D, Kd, bias=False)
+
+        # -- Value head --------------------------------------------------------
+        if cfg.use_cat_vf:
+            self.value_head: nn.Module = nn.Linear(D, N_VF_CAT)
+        else:
+            self.value_head = nn.Linear(D, 1)
+
+        self._init_weights()
+        # Construct AFTER baseline initialization: disabled state dict and RNG
+        # consumption are unchanged; enabled base weights are identical too.
+        self.combat_head = CombatOutcomeHead() if cfg.combat_outcome_features else None
+        from junqi_rl.networks.tactical_features import TacticalFeatureHead
+        self.tactical_head = TacticalFeatureHead() if cfg.tactical_features else None
+        from junqi_rl.networks.relational_features import RelationalFeatureHead
+        self.relational_head = RelationalFeatureHead() if cfg.relational_features else None
+
+    # -------------------------------------------------------------------------
+    # Weight init
+    # -------------------------------------------------------------------------
+
+    def _init_weights(self) -> None:
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, (nn.LayerNorm, nn.BatchNorm2d)):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+
+    # -------------------------------------------------------------------------
+    # Forward helpers
+    # -------------------------------------------------------------------------
+
+    def _encode(
+        self,
+        obs_spatial: Tensor,   # (B, OBS_CHANNELS, 17, 17)
+        obs_global: Tensor,    # (B, OBS_GLOBAL_DIMS)
+    ) -> tuple[Tensor, Tensor]:
+        """Encode inputs → (cls_token, cell_tokens).
+
+        The CNN runs on the full 17×17 grid, but we only extract the 129
+        on-board cell patches for the Transformer (5x attention savings).
+
+        Returns
+        -------
+        cls : (B, D)   — global context token
+        cells : (B, 129, D) — per-on-board-cell tokens
+        """
+        B = obs_spatial.size(0)
+        D = self.cfg.embed_dim
+
+        # Take the 129 on-board cells first, so nothing downstream ever sees
+        # the 160 encoding positions that are not on the board.
+        cells = obs_spatial.permute(0, 2, 3, 1).reshape(B, NUM_CELLS, -1)
+        cells = cells[:, self.on_board_idx]      # (B, 129, OBS_CHANNELS)
+
+        # Graph stem → (B, 129, cnn_channels)
+        feat = self.stem(cells)
+
+        # Project to embed_dim → (B, 129, D)
+        cell_tokens = self.patch_proj(feat)  # type: ignore[operator]
+
+        # CLS token from global vector → (B, 1, D)
+        cls_token = self.global_proj(obs_global).unsqueeze(1)
+
+        # Concatenate → (B, 130, D)
+        tokens = torch.cat([cls_token, cell_tokens], dim=1)
+
+        # Add positional embeddings
+        tokens = tokens + self.pos_emb
+
+        # Transformer trunk
+        for layer in self.transformer:
+            tokens = layer(tokens)
+        tokens = self.norm_out(tokens)
+
+        cls_out = tokens[:, 0, :]          # (B, D)
+        cells_out = tokens[:, 1:, :]       # (B, 129, D)
+        return cls_out, cells_out
+
+    def _policy_logits(
+        self,
+        cells: Tensor,          # (B, 129, D)
+        legal_mask: Tensor,     # (B, 16641) bool
+        obs_spatial: Tensor | None = None,
+    ) -> Tensor:
+        """Compute action logits from on-board cell embeddings.
+
+        Score for (src → dst) = q[src] · k[dst]^T / sqrt(Kd).
+        Both src and dst range over 129 on-board cells, producing a
+        (B, 129, 129) attention map flattened to (B, 16641).
+        Illegal actions are masked to a very negative finite sentinel before
+        returning.  The finite form is important for the compiled full-
+        distribution entropy/KL computation; action legality is checked
+        explicitly by PPO before an update.
+        """
+        Kd = self.cfg.action_key_dim
+        q = self.q_proj(cells)   # (B, 129, Kd)
+        k = self.k_proj(cells)   # (B, 129, Kd)
+        # Cast to fp32 for the bilinear attention to avoid fp16 overflow
+        # when q·k^T accumulates over Kd dimensions.
+        q_f = q.float()
+        k_f = k.float()
+        attn = torch.bmm(q_f, k_f.transpose(1, 2)) / math.sqrt(Kd)
+        # Flatten to (B, 16641)
+        logits = attn.reshape(-1, FLAT_ACTION_DIM)
+        if self.combat_head is not None:
+            if obs_spatial is None:
+                raise ValueError("combat outcome features require the actor observation")
+            logits = logits + self.combat_head(obs_spatial)
+        if self.tactical_head is not None:
+            if obs_spatial is None:
+                raise ValueError("tactical features require the actor observation")
+            logits = logits + self.tactical_head(obs_spatial)
+        if self.relational_head is not None:
+            if obs_spatial is None:
+                raise ValueError("relational features require actor observations")
+            logits = logits + self.relational_head(obs_spatial, legal_mask).to(logits.dtype)
+        # Retain a finite sentinel here.  Under torch.compile, exact -inf in
+        # the normal action distribution makes entropy/KL terms hit 0 * -inf
+        # and can poison every PPO gradient.  A direct selected-action mask
+        # assertion in PPO makes the sentinel unable to conceal a legality
+        # reconstruction error.
+        _NEG_INF = torch.tensor(-1e9, dtype=torch.float32, device=logits.device)
+        logits = torch.where(legal_mask, logits, _NEG_INF)
+        return logits
+
+    def _value(self, cls: Tensor) -> Tensor:
+        """Compute value from CLS token.
+
+        Returns
+        -------
+        (B,) scalar value  OR  (B, N_VF_CAT) log-probs (categorical).
+        """
+        # Run value head in fp32 to prevent fp16 overflow in the final
+        # Linear / log_softmax. Under fp16 autocast a transformer trunk
+        # can produce CLS tokens with peak magnitudes that exceed fp16's
+        # ±65504 dynamic range when multiplied by the value-head weight,
+        # producing +inf in `v` and then NaN in `log_softmax`. The cast
+        # is essentially free (cls is (B, D), B≤2048, D≤512).
+        v = self.value_head(cls.float())
+        if self.cfg.use_cat_vf:
+            return v.log_softmax(dim=-1)   # (B, N_VF_CAT)
+        return v.squeeze(-1)               # (B,)
+
+    def _policy_from_encoded(
+        self,
+        cells: Tensor,
+        legal_mask: Tensor,
+        *,
+        actions: Tensor | None = None,
+        obs_spatial: Tensor | None = None,
+    ) -> dict[str, Tensor]:
+        """Evaluate or sample the policy from already encoded cell tokens."""
+        logits = self._policy_logits(cells, legal_mask, obs_spatial)
+        # Cast to fp32 for numerically stable log_softmax / sampling
+        # (fp16 logits with large masked regions can overflow).
+        logits_f = logits.float()
+
+        # Any non-finite value in a row poisons Categorical.sample(). During
+        # PPO evaluation the trainer owns the batched finite check, so avoid
+        # host synchronisations in that path.
+        if actions is None:
+            finite_mask = torch.isfinite(logits_f).all(dim=-1)
+            if not bool(finite_mask.all()):
+                self._nan_fwd_count += int((~finite_mask).sum().item())
+                fallback = torch.where(
+                    legal_mask,
+                    torch.zeros_like(logits_f),
+                    torch.full_like(logits_f, float("-inf")),
+                )
+                logits_f = torch.where(
+                    (~finite_mask).unsqueeze(-1), fallback, logits_f,
+                )
+
+        # Dead/dummy rows have no legal actions. Make their distribution
+        # finite so one such row cannot poison the complete minibatch.
+        no_legal = ~legal_mask.any(dim=-1)
+        if actions is None:
+            if bool(no_legal.any()):
+                logits_f = torch.where(
+                    no_legal.unsqueeze(-1),
+                    torch.zeros_like(logits_f),
+                    logits_f,
+                )
+        else:
+            logits_f = torch.where(
+                no_legal.unsqueeze(-1),
+                torch.zeros_like(logits_f),
+                logits_f,
+            )
+
+        log_probs = logits_f.log_softmax(dim=-1)
+        if actions is None:
+            chosen_actions = Categorical(logits=logits_f).sample()
+        else:
+            if actions.ndim != 1 or actions.shape[0] != logits_f.shape[0]:
+                raise ValueError(
+                    "actions must have shape (B,), matching the observation "
+                    f"batch; got {tuple(actions.shape)} for B={logits_f.shape[0]}"
+                )
+            chosen_actions = actions.to(device=logits_f.device, dtype=torch.long)
+
+        return {
+            "action": chosen_actions.int(),
+            "action_log_prob": log_probs.gather(
+                1, chosen_actions.unsqueeze(1)
+            ).squeeze(1),
+            "log_probs": log_probs,
+        }
+
+    # -------------------------------------------------------------------------
+    # Public API
+    # -------------------------------------------------------------------------
+
+    def forward(
+        self,
+        obs_spatial: Tensor,    # (B, OBS_CHANNELS, 17, 17)  float32
+        obs_global: Tensor,     # (B, OBS_GLOBAL_DIMS)        float32
+        legal_mask: Tensor,     # (B, FLAT_ACTION_DIM)        bool
+        *,
+        actions: Tensor | None = None,
+    ) -> dict[str, Tensor]:
+        """Full forward pass used during training.
+
+        Returns a dict with keys:
+        ``action``, ``action_log_prob``, ``log_probs``, ``value``.
+
+        ``actions`` is an optional training-only fast path.  When supplied,
+        the method evaluates those actions instead of drawing a throwaway
+        sample.  The returned keys, shapes and checkpoint structure are
+        unchanged.  Existing callers that pass the original three inputs keep
+        the exact sampling behaviour.
+
+        NaN-safe: if any row of ``logits_f`` contains NaN/Inf (observed
+        on T4 with fp16 autocast under slow-lr-decay regimes — see v29
+        R51 crash), we replace that row's logits with a uniform-over-
+        legal fallback so ``Categorical.sample()`` doesn't blow up.
+        The PPO trainer's outer NaN guard will still catch and skip the
+        bad minibatch via the returned log_probs, so the optimiser
+        stay consistent. Counter ``_nan_fwd_count`` is incremented so
+        callers can surface the frequency.
+        """
+        cls, cells = self._encode(obs_spatial, obs_global)
+        out = self._policy_from_encoded(
+            cells, legal_mask, actions=actions, obs_spatial=obs_spatial,
+        )
+        out["value"] = self._value(cls)
+        return out
+
+    def forward_policy_value_shared(
+        self,
+        obs_spatial: Tensor,
+        obs_global: Tensor,
+        policy_indices: Tensor,
+        legal_mask: Tensor,
+        *,
+        actions: Tensor,
+    ) -> dict[str, Tensor]:
+        """Training-only shared encoder path for split policy/value samples.
+
+        The observations contain every value sample. ``policy_indices`` picks
+        the advantage-filtered subset whose cell tokens enter the action head.
+        The returned policy tensors have size ``Bp`` while ``value`` has size
+        ``Bv``. This method adds no parameters and leaves :meth:`forward` and
+        checkpoint structure unchanged.
+        """
+        if policy_indices.ndim != 1:
+            raise ValueError("policy_indices must have shape (Bp,)")
+        policy_indices = policy_indices.to(
+            device=obs_spatial.device, dtype=torch.long,
+        )
+        if policy_indices.numel() != actions.shape[0]:
+            raise ValueError(
+                "policy_indices and actions must have the same length; "
+                f"got {policy_indices.numel()} and {actions.shape[0]}"
+            )
+        cls, cells = self._encode(obs_spatial, obs_global)
+        policy_cells = cells.index_select(0, policy_indices)
+        out = self._policy_from_encoded(
+            policy_cells, legal_mask, actions=actions,
+            obs_spatial=(obs_spatial.index_select(0, policy_indices)
+                         if self.combat_head is not None else None),
+        )
+        out["value"] = self._value(cls)
+        return out
+
+    def forward_value(
+        self,
+        obs_spatial: Tensor,
+        obs_global: Tensor,
+    ) -> Tensor:
+        """Training-only value path that skips the large action head.
+
+        This reuses the exact encoder and value head from :meth:`forward`.
+        It adds no parameters and does not change the public forward inputs,
+        outputs, state dict, or checkpoint compatibility.
+        """
+        cls, _cells = self._encode(obs_spatial, obs_global)
+        return self._value(cls)
+
+    @torch.no_grad()
+    def act(
+        self,
+        obs_spatial: Tensor,    # (B, OBS_CHANNELS, 17, 17)
+        obs_global: Tensor,     # (B, OBS_GLOBAL_DIMS)
+        legal_mask: Tensor,     # (B, FLAT_ACTION_DIM)
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        """Inference-only forward using Gumbel-max sampling.
+
+        Uses the Gumbel-max trick for fast sampling without building the full
+        probability distribution.  Illegal actions have logits = -inf, so
+        logits + Gumbel = -inf and they never win the argmax.
+
+        Returns
+        -------
+        actions     : int32  (B,)
+        log_probs   : float  (B,)   log-prob of chosen action
+        values      : float  (B,) or (B, N_VF_CAT)
+        """
+        cls, cells = self._encode(obs_spatial, obs_global)
+        logits = self._policy_logits(cells, legal_mask, obs_spatial)  # (B, 16641), illegal=-inf
+
+        logits_f = logits.float()
+        u = torch.rand_like(logits_f).clamp_(1e-10, 1.0)
+        gumbel = -torch.log(-torch.log(u))
+        actions = (logits_f + gumbel).argmax(dim=-1)
+        lse = logits_f.logsumexp(dim=-1)
+        log_probs = (
+            logits_f.gather(1, actions.unsqueeze(1)).squeeze(1)
+            - lse
+        )
+
+        # Mean entropy over legal actions, for collect-wide H (not the
+        # advantage-filtered training batch). Illegal logits are -inf.
+        log_p = logits_f - lse.unsqueeze(-1)
+        safe_p = torch.where(legal_mask, log_p.exp(), torch.zeros_like(log_p))
+        safe_log_p = torch.where(legal_mask, log_p, torch.zeros_like(log_p))
+        self._last_entropy_t = -(safe_p * safe_log_p).sum(dim=-1)
+
+        values = self._value(cls)
+        return actions.int(), log_probs, values
+
+    @torch.no_grad()
+    def act_greedy(
+        self,
+        obs_spatial: Tensor,
+        obs_global: Tensor,
+        legal_mask: Tensor,
+    ) -> Tensor:
+        """Greedy (argmax) action selection — useful for evaluation."""
+        _, cells = self._encode(obs_spatial, obs_global)
+        logits = self._policy_logits(cells, legal_mask, obs_spatial)
+        return logits.argmax(dim=-1).int()
+
+    def num_parameters(self) -> int:
+        """Total trainable parameter count."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)

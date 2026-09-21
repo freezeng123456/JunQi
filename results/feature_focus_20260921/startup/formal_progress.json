@@ -1,0 +1,68 @@
+{
+  "N": {
+    "time": 1789932194.6874154,
+    "status": {
+      "time": 1789931795.984042,
+      "arm": "N",
+      "phase": "train_1",
+      "pid": 47924,
+      "deadline": 1789990200.0
+    },
+    "last_progress": "[ 32335] loss_p=+0.0036  loss_v=0.5414  ret=+0.0700  lr=1.00e-05  fps=10642  elapsed=298s  kl_loss=+0.0060  approx_kl=+0.0059  kl_max=1.000  alpha=0.0060  H=0.345  Hc=0.391  mkl=+3.5040  n_upd=96  kept=49152  kept_mean=nan  kept_min=nan  value_n=49152  nan_skip=0  grad_skip=0",
+    "latest_saved": [],
+    "compute_processes": [
+      "1054376"
+    ],
+    "guard": {
+      "time": 1789932178.9163277,
+      "signaled_pids": {},
+      "train_cutoff": 1789990200.0,
+      "eval_cutoff": 1790001000.0
+    },
+    "failures": {}
+  },
+  "M": {
+    "time": 1789932194.9284482,
+    "status": {
+      "time": 1789931576.4738839,
+      "arm": "M",
+      "phase": "train_1",
+      "pid": 6115,
+      "deadline": 1789990200.0
+    },
+    "last_progress": "[ 32367] loss_p=+0.0026  loss_v=0.5378  ret=+0.0729  lr=1.00e-05  fps=9957  elapsed=528s  kl_loss=+0.0059  approx_kl=+0.0060  kl_max=0.996  alpha=0.0060  H=0.348  Hc=0.402  mkl=+3.5105  n_upd=96  kept=49152  kept_mean=nan  kept_min=nan  value_n=49152  nan_skip=0  grad_skip=0",
+    "latest_saved": [],
+    "compute_processes": [
+      "1396564"
+    ],
+    "guard": {
+      "time": 1789932179.235208,
+      "signaled_pids": {},
+      "train_cutoff": 1789990200.0,
+      "eval_cutoff": 1790001000.0
+    },
+    "failures": {}
+  },
+  "R": {
+    "time": 1789932195.4679449,
+    "status": {
+      "time": 1789931580.4183502,
+      "arm": "R",
+      "phase": "train_1",
+      "pid": 5474,
+      "deadline": 1789990200.0
+    },
+    "last_progress": "[ 32351] loss_p=+0.0053  loss_v=0.5337  ret=+0.0730  lr=1.00e-05  fps=8421  elapsed=502s  kl_loss=+0.0060  approx_kl=+0.0061  kl_max=1.016  alpha=0.0060  H=0.355  Hc=0.409  mkl=+3.5016  n_upd=96  kept=49152  kept_mean=nan  kept_min=nan  value_n=49152  nan_skip=0  grad_skip=0",
+    "latest_saved": [],
+    "compute_processes": [
+      "3125515"
+    ],
+    "guard": {
+      "time": 1789932179.5674784,
+      "signaled_pids": {},
+      "train_cutoff": 1789990200.0,
+      "eval_cutoff": 1790001000.0
+    },
+    "failures": {}
+  }
+}

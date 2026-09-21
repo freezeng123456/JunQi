@@ -1,0 +1,87 @@
+{
+  "N": {
+    "status": {
+      "time": 1789931795.984042,
+      "arm": "N",
+      "phase": "train_1",
+      "pid": 47924,
+      "deadline": 1789990200.0
+    },
+    "gpu_identity.log": "{\"fp32\": \"exact_initial_policy_and_value\", \"bf16\": \"exact_initial_policy_and_value\"}\n",
+    "smoke_verified.json": "{\n  \"strict_reload\": true,\n  \"smoke_discarded\": true,\n  \"new_tensors_changed\": {}\n}\n",
+    "smoke_upload.json": "{\n  \"commit\": \"72c9695f014300b3437217c34ccb0aecaf3cda14\",\n  \"prefix\": \"feature_focus_20260921/N/smoke\",\n  \"files\": 11,\n  \"hashes_verified\": true\n}\n",
+    "smoke_audit": {
+      "added_module_tensor_changes": {},
+      "status": "finite_strict_reload_verified",
+      "sha256": "c7fea027f842632895e56e2d711e9ac0c3b0120a8e84e9c1308fe5adc8022a83",
+      "rollouts": 32292,
+      "optimizer_updates": 3100087,
+      "finite_tensors": 348,
+      "policy_tensors": 87,
+      "parameters": 942292,
+      "changed_inherited_tensors": 87
+    }
+  },
+  "M": {
+    "status": {
+      "time": 1789931576.4738839,
+      "arm": "M",
+      "phase": "train_1",
+      "pid": 6115,
+      "deadline": 1789990200.0
+    },
+    "gpu_identity.log": "{\"fp32\": \"exact_initial_policy_and_value\", \"bf16\": \"exact_initial_policy_and_value\"}\n",
+    "smoke_verified.json": "{\n  \"strict_reload\": true,\n  \"smoke_discarded\": true,\n  \"new_tensors_changed\": {\n    \"tactical_head.mlp.0.weight\": true,\n    \"tactical_head.mlp.0.bias\": true,\n    \"tactical_head.mlp.2.weight\": true,\n    \"tactical_head.mlp.2.bias\": true\n  }\n}\n",
+    "smoke_upload.json": "{\n  \"commit\": \"82d5dce644509afb8b0b001215e0046e0a022bd1\",\n  \"prefix\": \"feature_focus_20260921/M/smoke\",\n  \"files\": 12,\n  \"hashes_verified\": true\n}\n",
+    "block_1.log": "[config] Loaded YAML: /tmp/junqi_feature_focus_20260921/M/block_1.yaml\n[train] Runtime config saved to /tmp/junqi_feature_focus_20260921/M/train/cfg.runtime.yaml\n[train] device=cuda  num_envs=128  steps_per_env=512\n[train] GPU: NVIDIA H20\n[train] JunqiNet parameters: 942,645\n[train] lr schedule (unit=rollout, decay=0.0, ceil=1.0e-05, floor=1.0e-05):\n[train]   R=0:1.00e-05  R=10:1.00e-05  R=50:1.00e-05  R=100:1.00e-05  R=500:1.00e-05  R=1000:1.00e-05  R=1500:1.00e-05\n[train] magnet \u03b1 (unit=rollout, shape=uniform_legal, coef=0.006, decay=0.0, floor=0.006):\n[train]   t=1:0.0060  t=2:0.0060  t=25:0.0060  t=100:0.0060  t=900:0.0060  t=3000:0.0060\n[train] minibatch_group=global  adv_filter_scope=timestep  value_sample_scope=policy  value_minibatch_size=256  value_path=chunked_or_policy  steps_per_env=512  adv_filt_rate=0.75\n[train]   \u26a0\ufe0f  lr will hit floor at R=0 (< total_rollouts=34336). Most of the planned training will run with frozen lr. Consider lowering ppo.lr_decay or raising ppo.lr_floor.\n[train] GpuRollout: 128 envs (all on-device, uniform-random setups)\n[train] RolloutBufferGPU (zero-CPU collect path, storage=compact_history, obs=torch.bfloat16, mode=self-play, legacy-no-value-on-random, reward-shaping=OFF (terminal-only))\n[train] Rollout storage: 2.06 GiB\n[train] Resuming from /tmp/junqi_feature_focus_20260921/M/initial.pt\n[train] Resumed: rollout=32288, train_step=3099703\n[train] Starting training loop: rollouts 32288 \u2192 34336\n[train] Total env steps per rollout: 65,536\n[train] Frozen baseline for h2h: /tmp/junqi_feature_focus_20260921/start.pt (embed=128, depth=4)\n",
+    "smoke.log": " (unit=rollout, shape=uniform_legal, coef=0.006, decay=0.0, floor=0.006):\n[train]   t=1:0.0060  t=2:0.0060  t=25:0.0060  t=100:0.0060  t=900:0.0060  t=3000:0.0060\n[train] minibatch_group=global  adv_filter_scope=timestep  value_sample_scope=policy  value_minibatch_size=256  value_path=chunked_or_policy  steps_per_env=512  adv_filt_rate=0.75\n[train]   \u26a0\ufe0f  lr will hit floor at R=0 (< total_rollouts=32292). Most of the planned training will run with frozen lr. Consider lowering ppo.lr_decay or raising ppo.lr_floor.\n[train] GpuRollout: 128 envs (all on-device, uniform-random setups)\n[train] RolloutBufferGPU (zero-CPU collect path, storage=compact_history, obs=torch.bfloat16, mode=self-play, legacy-no-value-on-random, reward-shaping=OFF (terminal-only))\n[train] Rollout storage: 2.06 GiB\n[train] Resuming from /tmp/junqi_feature_focus_20260921/M/initial.pt\n[train] Resumed: rollout=32288, train_step=3099703\n[train] Starting training loop: rollouts 32288 \u2192 32292\n[train] Total env steps per rollout: 65,536\n[train] Frozen baseline for h2h: /tmp/junqi_feature_focus_20260921/start.pt (embed=128, depth=4)\n[train] Checkpoint saved: /tmp/junqi_feature_focus_20260921/M/smoke/ckpt_032292.pt\n[train] Evaluating (rollout 32292)\u2026\n[eval]  win=1.000  loss=0.000  draw=0.000  ongoing=0.000  avg_len=110  done=256/256  ci95=[0.985, 1.000]\n[h2h]   vs_baseline  win=0.477  loss=0.508  draw=0.016  score=0.484  avg_len=113  done=256/256  ci95=[0.416, 0.538]\n[train] New best baseline H2H score=0.484; saved /tmp/junqi_feature_focus_20260921/M/smoke/ckpt_best_h2h.pt\n[train] New best vs-random win=1.000; saved /tmp/junqi_feature_focus_20260921/M/smoke/ckpt_best_random.pt\n[train] Training complete. Final checkpoint: /tmp/junqi_feature_focus_20260921/M/smoke/ckpt_032292.pt\n[train] Done. Total elapsed: 38.0s\n",
+    "smoke_audit": {
+      "added_module_tensor_changes": {
+        "tactical_head.mlp.0.weight": true,
+        "tactical_head.mlp.0.bias": true,
+        "tactical_head.mlp.2.weight": true,
+        "tactical_head.mlp.2.bias": true
+      },
+      "status": "finite_strict_reload_verified",
+      "sha256": "ffe2c76e26a1963df992322a7045781b63824333a5f2e85780b2a7438c59586f",
+      "rollouts": 32292,
+      "optimizer_updates": 3100087,
+      "finite_tensors": 364,
+      "policy_tensors": 91,
+      "parameters": 942645,
+      "changed_inherited_tensors": 91
+    }
+  },
+  "R": {
+    "status": {
+      "time": 1789931580.4183502,
+      "arm": "R",
+      "phase": "train_1",
+      "pid": 5474,
+      "deadline": 1789990200.0
+    },
+    "gpu_identity.log": "{\"fp32\": \"exact_initial_policy_and_value\", \"bf16\": \"exact_initial_policy_and_value\"}\n",
+    "smoke_verified.json": "{\n  \"strict_reload\": true,\n  \"smoke_discarded\": true,\n  \"new_tensors_changed\": {\n    \"tactical_head.mlp.0.weight\": true,\n    \"tactical_head.mlp.0.bias\": true,\n    \"tactical_head.mlp.2.weight\": true,\n    \"tactical_head.mlp.2.bias\": true,\n    \"relational_head.weights\": true,\n    \"relational_head.special_weights\": true\n  }\n}\n",
+    "smoke_upload.json": "{\n  \"commit\": \"4e6afded2d0f3fc4c46ab577b69fcc6a77641084\",\n  \"prefix\": \"feature_focus_20260921/R/smoke\",\n  \"files\": 12,\n  \"hashes_verified\": true\n}\n",
+    "block_1.log": "[config] Loaded YAML: /tmp/junqi_feature_focus_20260921/R/block_1.yaml\n[train] Runtime config saved to /tmp/junqi_feature_focus_20260921/R/train/cfg.runtime.yaml\n[train] device=cuda  num_envs=128  steps_per_env=512\n[train] GPU: NVIDIA H20\n[train] JunqiNet parameters: 942,804\n[train] lr schedule (unit=rollout, decay=0.0, ceil=1.0e-05, floor=1.0e-05):\n[train]   R=0:1.00e-05  R=10:1.00e-05  R=50:1.00e-05  R=100:1.00e-05  R=500:1.00e-05  R=1000:1.00e-05  R=1500:1.00e-05\n[train] magnet \u03b1 (unit=rollout, shape=uniform_legal, coef=0.006, decay=0.0, floor=0.006):\n[train]   t=1:0.0060  t=2:0.0060  t=25:0.0060  t=100:0.0060  t=900:0.0060  t=3000:0.0060\n[train] minibatch_group=global  adv_filter_scope=timestep  value_sample_scope=policy  value_minibatch_size=256  value_path=chunked_or_policy  steps_per_env=512  adv_filt_rate=0.75\n[train]   \u26a0\ufe0f  lr will hit floor at R=0 (< total_rollouts=34336). Most of the planned training will run with frozen lr. Consider lowering ppo.lr_decay or raising ppo.lr_floor.\n[train] GpuRollout: 128 envs (all on-device, uniform-random setups)\n[train] RolloutBufferGPU (zero-CPU collect path, storage=compact_history, obs=torch.bfloat16, mode=self-play, legacy-no-value-on-random, reward-shaping=OFF (terminal-only))\n[train] Rollout storage: 2.06 GiB\n[train] Resuming from /tmp/junqi_feature_focus_20260921/R/initial.pt\n[train] Resumed: rollout=32288, train_step=3099703\n[train] Starting training loop: rollouts 32288 \u2192 34336\n[train] Total env steps per rollout: 65,536\n[train] Frozen baseline for h2h: /tmp/junqi_feature_focus_20260921/start.pt (embed=128, depth=4)\n",
+    "smoke.log": " (unit=rollout, shape=uniform_legal, coef=0.006, decay=0.0, floor=0.006):\n[train]   t=1:0.0060  t=2:0.0060  t=25:0.0060  t=100:0.0060  t=900:0.0060  t=3000:0.0060\n[train] minibatch_group=global  adv_filter_scope=timestep  value_sample_scope=policy  value_minibatch_size=256  value_path=chunked_or_policy  steps_per_env=512  adv_filt_rate=0.75\n[train]   \u26a0\ufe0f  lr will hit floor at R=0 (< total_rollouts=32292). Most of the planned training will run with frozen lr. Consider lowering ppo.lr_decay or raising ppo.lr_floor.\n[train] GpuRollout: 128 envs (all on-device, uniform-random setups)\n[train] RolloutBufferGPU (zero-CPU collect path, storage=compact_history, obs=torch.bfloat16, mode=self-play, legacy-no-value-on-random, reward-shaping=OFF (terminal-only))\n[train] Rollout storage: 2.06 GiB\n[train] Resuming from /tmp/junqi_feature_focus_20260921/R/initial.pt\n[train] Resumed: rollout=32288, train_step=3099703\n[train] Starting training loop: rollouts 32288 \u2192 32292\n[train] Total env steps per rollout: 65,536\n[train] Frozen baseline for h2h: /tmp/junqi_feature_focus_20260921/start.pt (embed=128, depth=4)\n[train] Checkpoint saved: /tmp/junqi_feature_focus_20260921/R/smoke/ckpt_032292.pt\n[train] Evaluating (rollout 32292)\u2026\n[eval]  win=1.000  loss=0.000  draw=0.000  ongoing=0.000  avg_len=106  done=256/256  ci95=[0.985, 1.000]\n[h2h]   vs_baseline  win=0.480  loss=0.512  draw=0.008  score=0.484  avg_len=109  done=256/256  ci95=[0.420, 0.542]\n[train] New best baseline H2H score=0.484; saved /tmp/junqi_feature_focus_20260921/R/smoke/ckpt_best_h2h.pt\n[train] New best vs-random win=1.000; saved /tmp/junqi_feature_focus_20260921/R/smoke/ckpt_best_random.pt\n[train] Training complete. Final checkpoint: /tmp/junqi_feature_focus_20260921/R/smoke/ckpt_032292.pt\n[train] Done. Total elapsed: 44.9s\n",
+    "smoke_audit": {
+      "added_module_tensor_changes": {
+        "tactical_head.mlp.0.weight": true,
+        "tactical_head.mlp.0.bias": true,
+        "tactical_head.mlp.2.weight": true,
+        "tactical_head.mlp.2.bias": true,
+        "relational_head.weights": true,
+        "relational_head.special_weights": true
+      },
+      "status": "finite_strict_reload_verified",
+      "sha256": "abf2d4c7f0d6e849143fa39bf4295bb40039eabc47d7e739073a8495974edcbe",
+      "rollouts": 32292,
+      "optimizer_updates": 3100087,
+      "finite_tensors": 372,
+      "policy_tensors": 93,
+      "parameters": 942804,
+      "changed_inherited_tensors": 93
+    }
+  }
+}
