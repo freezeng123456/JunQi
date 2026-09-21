@@ -1,0 +1,23 @@
+# Same audited raw-policy architecture and conservative optimizer as phase A.
+# Phase B changes the opponent to four-seat self-play and uses terminal rewards.
+extends: phase_a_random_no_belief_20260913.yaml
+save_dir: /tmp/junqi_selfplay_20260914/results/train
+total_rollouts: 20000
+seed: 9142
+env:
+  seed: 9142
+random_opponent: false
+reward_shaping: false
+eval_every: 256
+eval_num_games: 512
+eval_setup_seed: 5091400
+eval_game_seed: 6091400
+eval_baseline_ckpt: /tmp/junqi_selfplay_20260914/baseline.pt
+eval_baseline_games: 256
+save_every: 128
+log_every: 16
+# A sustained loss of basic competence stops this stage for diagnosis.
+# It does not terminate the user's wider training objective.
+early_stop_win_rate: 0.99
+early_stop_patience: 3
+early_stop_min_rollout: 512

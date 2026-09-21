@@ -1,0 +1,18 @@
+# Bounded continuation of guarded_s501 raw policy; fresh optimizer, no EMA.
+extends: phase_a_random_no_belief_20260913.yaml
+save_dir: /tmp/junqi_guarded_20260914/results/train
+total_rollouts: 128
+seed: 914
+env:
+  seed: 914
+eval_every: 16
+eval_num_games: 512
+eval_setup_seed: 3091400
+eval_game_seed: 4091400
+eval_baseline_ckpt: /tmp/junqi_guarded_20260914/guarded_s501_raw_policy_v4_2048wins.pt
+eval_baseline_games: 128
+save_every: 4
+log_every: 4
+early_stop_win_rate: 0.995
+early_stop_patience: 1
+early_stop_min_rollout: 16
