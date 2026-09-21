@@ -1,0 +1,42 @@
+{
+  "D": {
+    "checkpoint": "outputs/JunQi-feature-focus-20260921/preserved/D/ckpt_latest.pt",
+    "sha256": "16046e2ace44bfe243860ff6f17185f77a69b397cc056e57ed0a5c74b3ab7033",
+    "archive": "previous_D.tar.gz",
+    "archive_sha256": "0f65d763a1db954614d5570888ca5e0014d97da9d9686fb1d7f38b8f33af5c66",
+    "rollouts": 27263,
+    "finite_tensors": 444,
+    "strict_reload": true,
+    "remote_sha256_verified": true
+  },
+  "F": {
+    "checkpoint": "outputs/JunQi-feature-focus-20260921/preserved/F/ckpt_latest.pt",
+    "sha256": "c635ecce1ec2bff2351748dc0dda6e819001f6aa3bb19da67a82b2cf16111253",
+    "archive": "previous_F.tar.gz",
+    "archive_sha256": "56a71d1592ed1ed2b699632dfc64ef1101473846ab3edccaba64e1545c906c73",
+    "rollouts": 27432,
+    "finite_tensors": 364,
+    "strict_reload": true,
+    "remote_sha256_verified": true
+  },
+  "A": {
+    "checkpoint": "outputs/JunQi-feature-focus-20260921/preserved/A/ckpt_latest.pt",
+    "sha256": "0484de01cd87e3365d6f1d844a1a229d15c3b1dac657c9171a5916b230587997",
+    "archive": "previous_lr.tar.gz",
+    "archive_sha256": "3d43298a54b4ecac8fd5daa3dd56251e7a345b375d2c369cbcfae996d7528a66",
+    "rollouts": 32288,
+    "finite_tensors": 348,
+    "strict_reload": true,
+    "remote_sha256_verified": true
+  },
+  "B": {
+    "checkpoint": "outputs/JunQi-feature-focus-20260921/preserved/B/ckpt_latest.pt",
+    "sha256": "44f5d1c2123ab9f01185bfe8eb488adbec68644e9e7294899c9ef1b7ec1e0db6",
+    "archive": "previous_lr.tar.gz",
+    "archive_sha256": "3d43298a54b4ecac8fd5daa3dd56251e7a345b375d2c369cbcfae996d7528a66",
+    "rollouts": 32624,
+    "finite_tensors": 348,
+    "strict_reload": true,
+    "remote_sha256_verified": true
+  }
+}

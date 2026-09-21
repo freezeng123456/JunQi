@@ -1,0 +1,35 @@
+{
+  "M": {
+    "hf_commit": "82d5dce644509afb8b0b001215e0046e0a022bd1",
+    "manifest_entries": 11,
+    "strict_cpu_reload": true,
+    "raw_export_equal": true,
+    "finite_tensors": 364,
+    "sha256": "ffe2c76e26a1963df992322a7045781b63824333a5f2e85780b2a7438c59586f",
+    "smoke_discarded": true
+  },
+  "R": {
+    "hf_commit": "4e6afded2d0f3fc4c46ab577b69fcc6a77641084",
+    "manifest_entries": 11,
+    "strict_cpu_reload": true,
+    "raw_export_equal": true,
+    "finite_tensors": 372,
+    "sha256": "abf2d4c7f0d6e849143fa39bf4295bb40039eabc47d7e739073a8495974edcbe",
+    "smoke_discarded": true,
+    "relation_weight_max_abs": 0.00044820457696914673,
+    "special_weights": [
+      8.218520815717056e-05,
+      3.613089211285114e-05,
+      -0.0004460300551727414
+    ]
+  },
+  "N": {
+    "hf_commit": "72c9695f014300b3437217c34ccb0aecaf3cda14",
+    "manifest_entries": 10,
+    "strict_cpu_reload": true,
+    "raw_export_equal": true,
+    "finite_tensors": 348,
+    "sha256": "c7fea027f842632895e56e2d711e9ac0c3b0120a8e84e9c1308fe5adc8022a83",
+    "smoke_discarded": true
+  }
+}

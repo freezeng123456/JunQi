@@ -1,0 +1,11 @@
+{
+  "revision": "d67e2677b8e212249f072f68ac0a32576b19f225",
+  "verified_files": 466,
+  "local": "/Users/zenghang/Documents/Codex/2026-09-08/j/outputs/JunQi-feature-focus-20260921/recovered",
+  "selection": [
+    "feature_focus_20260921/*/comparison/*",
+    "feature_focus_20260921/*/delivery/*",
+    "feature_focus_20260921/*/primary/*",
+    "feature_focus_20260921/*/terminal/*"
+  ]
+}

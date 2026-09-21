@@ -1,0 +1,44 @@
+{
+  "N": {
+    "archive": "/Users/zenghang/Documents/Codex/2026-09-08/j/outputs/JunQi-feature-focus-20260921/full_history/N.tar.gz",
+    "archive_sha256": "43a9afa1517fea198c3352f5026a2751f2d5bd4ff8bbda1d1078bc4c37642f71",
+    "bytes": 579962350,
+    "files_hashed": 286,
+    "manifests": 11,
+    "manifest_entries_verified": 453,
+    "hf_complete_receipt": {
+      "commit": "52739550c83739d1bc668eb5db133fd34caed885",
+      "prefix": "feature_focus_20260921/N/complete",
+      "files": 276,
+      "hashes_verified": true
+    }
+  },
+  "M": {
+    "archive": "/Users/zenghang/Documents/Codex/2026-09-08/j/outputs/JunQi-feature-focus-20260921/full_history/M.tar.gz",
+    "archive_sha256": "caf4fdd1db3ed3f066c7661f067e8bf159007b5fe836c520341bdcd92b24f97c",
+    "bytes": 569975888,
+    "files_hashed": 298,
+    "manifests": 11,
+    "manifest_entries_verified": 477,
+    "hf_complete_receipt": {
+      "commit": "2f30f731f79157f2ae68d03997cae6b902d3ea95",
+      "prefix": "feature_focus_20260921/M/complete",
+      "files": 288,
+      "hashes_verified": true
+    }
+  },
+  "R": {
+    "archive": "/Users/zenghang/Documents/Codex/2026-09-08/j/outputs/JunQi-feature-focus-20260921/full_history/R.tar.gz",
+    "archive_sha256": "2e4b632b4e90e3ce1b8b5534a3c4338e503f8ebe5b644f8563a017b903ba470a",
+    "bytes": 546167662,
+    "files_hashed": 361,
+    "manifests": 13,
+    "manifest_entries_verified": 604,
+    "hf_complete_receipt": {
+      "commit": "d67e2677b8e212249f072f68ac0a32576b19f225",
+      "prefix": "feature_focus_20260921/R/complete",
+      "files": 349,
+      "hashes_verified": true
+    }
+  }
+}

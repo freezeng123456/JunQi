@@ -1,0 +1,62 @@
+{
+  "N_primary": {
+    "sha256": "a86939d757022f9a3627841973cd47d0e816ca50087adb004b4b0f64ea8bcec4",
+    "rollouts": 36384,
+    "optimizer_updates": 3492927,
+    "finite_tensors": 348,
+    "parameters": 942292,
+    "strict_reload": true,
+    "optimizer_reload_and_moments_verified": true,
+    "raw_policy_equal": true
+  },
+  "N_terminal": {
+    "sha256": "d152fe1691ec3d6c34736a59f26f5bde114394d6e46d49fc552b175ffa9f9b99",
+    "rollouts": 37441,
+    "optimizer_updates": 3594402,
+    "finite_tensors": 348,
+    "parameters": 942292,
+    "strict_reload": true,
+    "optimizer_reload_and_moments_verified": true,
+    "raw_policy_equal": true
+  },
+  "M_primary": {
+    "sha256": "6019b843272c21dde81433ccf903caf1497befba8ebdefccfd700103bf4434a4",
+    "rollouts": 36384,
+    "optimizer_updates": 3492926,
+    "finite_tensors": 364,
+    "parameters": 942645,
+    "strict_reload": true,
+    "optimizer_reload_and_moments_verified": true,
+    "raw_policy_equal": true
+  },
+  "M_terminal": {
+    "sha256": "cc459332e4320e10bc8901af40e5ea7a2841e27a1a117de84ae5e5b01424e174",
+    "rollouts": 37316,
+    "optimizer_updates": 3582401,
+    "finite_tensors": 364,
+    "parameters": 942645,
+    "strict_reload": true,
+    "optimizer_reload_and_moments_verified": true,
+    "raw_policy_equal": true
+  },
+  "R_primary": {
+    "sha256": "6895534e6c2315047d3c89a25db2be95fdc005ce925cec13918b78c184084d0f",
+    "rollouts": 36384,
+    "optimizer_updates": 3492931,
+    "finite_tensors": 372,
+    "parameters": 942804,
+    "strict_reload": true,
+    "optimizer_reload_and_moments_verified": true,
+    "raw_policy_equal": true
+  },
+  "R_terminal": {
+    "sha256": "fa17509dff244d538bfbffe1be3a306b7399b591144321373a6da59f04fe7e40",
+    "rollouts": 36615,
+    "optimizer_updates": 3515107,
+    "finite_tensors": 372,
+    "parameters": 942804,
+    "strict_reload": true,
+    "optimizer_reload_and_moments_verified": true,
+    "raw_policy_equal": true
+  }
+}

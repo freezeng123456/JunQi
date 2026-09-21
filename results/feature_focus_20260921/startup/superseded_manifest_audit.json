@@ -1,0 +1,20 @@
+{
+  "previous_D.tar.gz": {
+    "archived_files_hashed": 62,
+    "manifests": 2,
+    "manifest_entries_verified": 26,
+    "checkpoint_files": 15
+  },
+  "previous_F.tar.gz": {
+    "archived_files_hashed": 64,
+    "manifests": 2,
+    "manifest_entries_verified": 26,
+    "checkpoint_files": 17
+  },
+  "previous_lr.tar.gz": {
+    "archived_files_hashed": 430,
+    "manifests": 14,
+    "manifest_entries_verified": 230,
+    "checkpoint_files": 135
+  }
+}

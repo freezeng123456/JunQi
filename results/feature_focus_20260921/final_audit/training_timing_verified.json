@@ -1,0 +1,44 @@
+{
+  "N": {
+    "block_1_seconds": 13810.0,
+    "block_1_nan_skip_max": 0,
+    "block_1_grad_skip_max": 0,
+    "block_2_seconds": 13017.0,
+    "block_2_nan_skip_max": 0,
+    "block_2_grad_skip_max": 0,
+    "block_3_seconds": 6593.0,
+    "block_3_nan_skip_max": 0,
+    "block_3_grad_skip_max": 0,
+    "primary_training_seconds": 26827.0,
+    "primary_environment_steps": 268435456,
+    "primary_environment_steps_per_second": 10006.167517799233
+  },
+  "M": {
+    "block_1_seconds": 13571.1,
+    "block_1_nan_skip_max": 0,
+    "block_1_grad_skip_max": 0,
+    "block_2_seconds": 13915.6,
+    "block_2_nan_skip_max": 0,
+    "block_2_grad_skip_max": 0,
+    "block_3_seconds": 6277.7,
+    "block_3_nan_skip_max": 0,
+    "block_3_grad_skip_max": 0,
+    "primary_training_seconds": 27486.7,
+    "primary_environment_steps": 268435456,
+    "primary_environment_steps_per_second": 9766.012507867441
+  },
+  "R": {
+    "block_1_seconds": 16044.7,
+    "block_1_nan_skip_max": 0,
+    "block_1_grad_skip_max": 0,
+    "block_2_seconds": 15929.4,
+    "block_2_nan_skip_max": 0,
+    "block_2_grad_skip_max": 0,
+    "block_3_seconds": 1788.0,
+    "block_3_nan_skip_max": 0,
+    "block_3_grad_skip_max": 0,
+    "primary_training_seconds": 31974.1,
+    "primary_environment_steps": 268435456,
+    "primary_environment_steps_per_second": 8395.403029326862
+  }
+}

@@ -1,0 +1,1 @@
+R_vs_random {"status": "complete", "games": 512, "counts": {"win": 511, "draw": 1}, "win_fraction": 0.998046875, "score": 0.9990234375, "pair_bootstrap_ci95": [0.9970703125, 1.0], "pairs": 256}

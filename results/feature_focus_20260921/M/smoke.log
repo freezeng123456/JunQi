@@ -1,0 +1,27 @@
+[config] Loaded YAML: /tmp/junqi_feature_focus_20260921/M/block_0.yaml
+[train] Runtime config saved to /tmp/junqi_feature_focus_20260921/M/smoke/cfg.runtime.yaml
+[train] device=cuda  num_envs=128  steps_per_env=512
+[train] GPU: NVIDIA H20
+[train] JunqiNet parameters: 942,645
+[train] lr schedule (unit=rollout, decay=0.0, ceil=1.0e-05, floor=1.0e-05):
+[train]   R=0:1.00e-05  R=10:1.00e-05  R=50:1.00e-05  R=100:1.00e-05  R=500:1.00e-05  R=1000:1.00e-05  R=1500:1.00e-05
+[train] magnet α (unit=rollout, shape=uniform_legal, coef=0.006, decay=0.0, floor=0.006):
+[train]   t=1:0.0060  t=2:0.0060  t=25:0.0060  t=100:0.0060  t=900:0.0060  t=3000:0.0060
+[train] minibatch_group=global  adv_filter_scope=timestep  value_sample_scope=policy  value_minibatch_size=256  value_path=chunked_or_policy  steps_per_env=512  adv_filt_rate=0.75
+[train]   ⚠️  lr will hit floor at R=0 (< total_rollouts=32292). Most of the planned training will run with frozen lr. Consider lowering ppo.lr_decay or raising ppo.lr_floor.
+[train] GpuRollout: 128 envs (all on-device, uniform-random setups)
+[train] RolloutBufferGPU (zero-CPU collect path, storage=compact_history, obs=torch.bfloat16, mode=self-play, legacy-no-value-on-random, reward-shaping=OFF (terminal-only))
+[train] Rollout storage: 2.06 GiB
+[train] Resuming from /tmp/junqi_feature_focus_20260921/M/initial.pt
+[train] Resumed: rollout=32288, train_step=3099703
+[train] Starting training loop: rollouts 32288 → 32292
+[train] Total env steps per rollout: 65,536
+[train] Frozen baseline for h2h: /tmp/junqi_feature_focus_20260921/start.pt (embed=128, depth=4)
+[train] Checkpoint saved: /tmp/junqi_feature_focus_20260921/M/smoke/ckpt_032292.pt
+[train] Evaluating (rollout 32292)…
+[eval]  win=1.000  loss=0.000  draw=0.000  ongoing=0.000  avg_len=110  done=256/256  ci95=[0.985, 1.000]
+[h2h]   vs_baseline  win=0.477  loss=0.508  draw=0.016  score=0.484  avg_len=113  done=256/256  ci95=[0.416, 0.538]
+[train] New best baseline H2H score=0.484; saved /tmp/junqi_feature_focus_20260921/M/smoke/ckpt_best_h2h.pt
+[train] New best vs-random win=1.000; saved /tmp/junqi_feature_focus_20260921/M/smoke/ckpt_best_random.pt
+[train] Training complete. Final checkpoint: /tmp/junqi_feature_focus_20260921/M/smoke/ckpt_032292.pt
+[train] Done. Total elapsed: 38.0s

@@ -1,0 +1,10 @@
+{
+  "feature_knockout": null,
+  "first": "/tmp/junqi_feature_focus_20260921/N/train/ckpt_036384.pt",
+  "first_sha256": "a86939d757022f9a3627841973cd47d0e816ca50087adb004b4b0f64ea8bcec4",
+  "second": "None",
+  "second_sha256": null,
+  "games": 512,
+  "setup_seed": 53921000,
+  "game_seed": 54921000
+}

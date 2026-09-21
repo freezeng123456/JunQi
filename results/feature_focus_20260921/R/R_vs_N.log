@@ -1,0 +1,1 @@
+R_vs_N {"status": "complete", "games": 2048, "counts": {"win": 1002, "loss": 1016, "draw": 30}, "win_fraction": 0.4892578125, "score": 0.49658203125, "pair_bootstrap_ci95": [0.478759765625, 0.51513671875], "pairs": 1024}

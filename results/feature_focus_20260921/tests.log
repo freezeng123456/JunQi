@@ -1,0 +1,12 @@
+.............................                                            [100%]
+=============================== warnings summary ===============================
+tests/test_checkpoint_compat.py::test_matching_legacy_checkpoint_without_metadata_is_accepted
+  /Users/zenghang/Documents/Codex/2026-09-08/j/work/JunQi-feature-focus-20260921/tests/test_checkpoint_compat.py:41: UserWarning: checkpoint: legacy observation semantics are unspecified. Hidden-information and live-inventory fixes changed inputs without changing tensor shapes; loading these weights does not reproduce the original training run.
+    validate_policy_checkpoint(net, {"policy": net.state_dict()})
+
+tests/test_checkpoint_compat.py::test_checkpoint_shape_mismatch_fails_before_load_state_dict
+  /Users/zenghang/Documents/Codex/2026-09-08/j/work/JunQi-feature-focus-20260921/tests/test_checkpoint_compat.py:53: UserWarning: legacy baseline: legacy observation semantics are unspecified. Hidden-information and live-inventory fixes changed inputs without changing tensor shapes; loading these weights does not reproduce the original training run.
+    validate_policy_checkpoint(net, {"policy": state}, source="legacy baseline")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+29 passed, 2 warnings in 2.97s

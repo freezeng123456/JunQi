@@ -1,0 +1,20 @@
+{
+  "source_commit": "741527582ae01c297f59f247a723f69f09afddfe",
+  "base_source_commit": "cff8496c09a8d9cea2bf25ff48c65ec388e304ad",
+  "start_sha256": "0484de01cd87e3365d6f1d844a1a229d15c3b1dac657c9171a5916b230587997",
+  "start_rollouts": 32288,
+  "start_origin": "lr_20260920/A/stage_3; previous fixed lr1e-5 arm",
+  "native_sha256": "973ef6a088ba7660d1b8874965fbbe4778176a6a1074eb37c7d13198b04256c1",
+  "primary_rollouts": 36384,
+  "extra_rollouts": 38432,
+  "seeds": [
+    9211,
+    9212,
+    9213
+  ],
+  "fixed_lr": 1e-05,
+  "fixed_alpha": 0.006,
+  "local_tests_passed": 29,
+  "user_pivot": "feature-only exploration; all Codex JunQi automations remain PAUSED",
+  "old_F_correction": "rank-value direction reversed in version1; corrected in version2; no old weights silently migrated"
+}

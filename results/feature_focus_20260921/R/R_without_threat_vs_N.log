@@ -1,0 +1,1 @@
+R_without_threat_vs_N {"status": "complete", "games": 512, "counts": {"loss": 255, "win": 252, "draw": 5}, "win_fraction": 0.4921875, "score": 0.4970703125, "pair_bootstrap_ci95": [0.458984375, 0.5361328125], "pairs": 256}
