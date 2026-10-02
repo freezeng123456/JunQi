@@ -3,7 +3,7 @@
 
 Usage
 -----
-# Basic training with defaults:
+# Current V100 facts baseline, measured in completed games:
 python scripts/train.py
 
 # Override fields via YAML config:
@@ -22,6 +22,7 @@ Config hierarchy (later sources override earlier):
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import sys
@@ -181,7 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Train 四国军棋 AI with PPO",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--config", default="", help="Path to YAML config file")
+    parser.add_argument(
+        "--config", default=os.path.join(_PROJECT_ROOT, "configs", "v100_facts_games.yaml"),
+        help="YAML profile; defaults to the V100 facts completed-game run. "
+             "Historical configurations require an explicit path.",
+    )
     parser.add_argument(
         "--resume",
         "--resume_cli",
@@ -195,6 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--use_gpu_rollout", action="store_true", default=None,
                         help="Use GpuRollout (all-GPU game logic) instead of VectorJunqiEnv")
     parser.add_argument("--total_rollouts", type=int, default=None)
+    parser.add_argument("--target_completed_games", type=int, default=None)
     parser.add_argument("--save_dir", default=None)
     parser.add_argument("--device", default=None)
     parser.add_argument("--seed", type=int, default=None)
@@ -233,6 +239,8 @@ def train(cfg: TrainConfig) -> None:
     world_size, global_rank, _local_rank = _init_distributed(cfg)
     is_rank0 = global_rank == 0
     is_distributed = world_size > 1
+    if cfg.target_completed_games and is_distributed:
+        raise ValueError("completed-game runtime continuation currently supports a single GPU")
 
     # ``compact_history`` is process-local: every DDP rank owns a distinct
     # GpuRollout, CUDA device, history allocation, and minibatch reconstruction
@@ -245,6 +253,7 @@ def train(cfg: TrainConfig) -> None:
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
     if cfg.torch_deterministic:
+        torch.use_deterministic_algorithms(True)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
     else:
@@ -312,6 +321,12 @@ def train(cfg: TrainConfig) -> None:
 
     # ---- Model ----
     policy = JunqiNet(cfg.net)
+    if cfg.init_policy:
+        initial = load_evaluation_policy(cfg.init_policy, device="cpu", net_config=cfg.net)
+        policy.load_state_dict(initial.state_dict(), strict=True)
+        del initial
+        if is_rank0:
+            print(f"[train] Initial policy loaded; optimizer and rollout counters start fresh: {cfg.init_policy}")
     n_params = sum(p.numel() for p in policy.parameters())
     if is_rank0:
         print(f"[train] JunqiNet parameters: {n_params:,}")
@@ -418,6 +433,8 @@ def train(cfg: TrainConfig) -> None:
         mixed_own_team_styles = tuple(cfg.mixed_own_team_styles)
         env = GpuRollout(
             num_envs=cfg.env.num_envs,
+            include_global=cfg.net.use_global_summary,
+            identity_encoding=cfg.net.identity_encoding,
             show_mode=show_mode,
             device_id=env_device_id,
             canonical_setup_styles=canonical_styles,
@@ -439,6 +456,8 @@ def train(cfg: TrainConfig) -> None:
     else:
         env = VectorJunqiEnv(
             num_envs=cfg.env.num_envs,
+            include_global=cfg.net.use_global_summary,
+            identity_encoding=cfg.net.identity_encoding,
             show_mode=show_mode,
             max_num_moves=cfg.env.max_num_moves,
         )
@@ -463,6 +482,7 @@ def train(cfg: TrainConfig) -> None:
         )
         rollout = RolloutBufferGPU(
             num_envs=cfg.env.num_envs,
+            obs_global_dims=trainer.policy.observation_global_dims,
             steps_per_env=cfg.env.steps_per_env,
             gamma=cfg.ppo.gamma,
             gae_lambda=cfg.ppo.gae_lambda,
@@ -500,6 +520,7 @@ def train(cfg: TrainConfig) -> None:
     else:
         rollout = RolloutBuffer(
             num_envs=cfg.env.num_envs,
+            obs_global_dims=trainer.policy.observation_global_dims,
             steps_per_env=cfg.env.steps_per_env,
             gamma=cfg.ppo.gamma,
             gae_lambda=cfg.ppo.gae_lambda,
@@ -614,6 +635,7 @@ def train(cfg: TrainConfig) -> None:
 
     # ---- Resume ----
     start_rollout = 0
+    resume_sd = None
     if cfg.resume:
         if is_rank0:
             print(f"[train] Resuming from {cfg.resume}")
@@ -687,7 +709,34 @@ def train(cfg: TrainConfig) -> None:
             f"depth={_eval_baseline_policy.cfg.depth})"
         )
 
+    game_progress = None
+    eval_rng_state = None
+    restored_world = False
+    legacy_environment_steps = start_rollout * cfg.env.num_envs * cfg.env.steps_per_env
+    if cfg.target_completed_games:
+        from junqi_rl.training.game_progress import GameProgress, capture_runtime, restore_runtime
+        game_progress = GameProgress(cfg.env.num_envs, device)
+        if resume_sd is not None and "runtime_state" in resume_sd:
+            legacy_environment_steps = restore_runtime(
+                resume_sd["runtime_state"], env, game_progress, rng, cfg)
+            restored_world = True
+            print(f"[games] Restored live games and RNG; completed={game_progress.completed_games}")
+        elif resume_sd is not None:
+            old_cfg = resume_sd.get("train_cfg", {}).get("env", {})
+            legacy_environment_steps = start_rollout * old_cfg.get("num_envs", cfg.env.num_envs) * old_cfg.get("steps_per_env", cfg.env.steps_per_env)
+            print("[games] Legacy checkpoint: completed-game history unknown; starting a new tracked lineage with fresh games")
+        trainer.runtime_state_provider = lambda: capture_runtime(
+            env, game_progress, rng, cfg, legacy_environment_steps, saved_rng=eval_rng_state)
+        next_game_save = (game_progress.completed_games // cfg.save_every_games + 1) * cfg.save_every_games
+        next_game_eval = (game_progress.completed_games // cfg.eval_every_games + 1) * cfg.eval_every_games
+        print(f"[games] Target={cfg.target_completed_games}; legacy environment steps={legacy_environment_steps}")
+    final_rollout = start_rollout
+    game_target_reached = bool(game_progress is not None and game_progress.completed_games >= cfg.target_completed_games)
+
     for rollout_idx in range(start_rollout, cfg.total_rollouts):
+        if game_target_reached:
+            break
+
         mc.step = rollout_idx
 
         # ---- P0 arrangement-net refresh (before collect) ----
@@ -834,7 +883,7 @@ def train(cfg: TrainConfig) -> None:
                 buffer=rollout,
                 device=device,
                 seed_base=cfg.env.seed + rollout_idx,
-                reset_at_start=(rollout_idx == start_rollout),
+                reset_at_start=(rollout_idx == start_rollout and not restored_world),
                 act_chunk_size=int(getattr(cfg.ppo, "act_chunk_size", 0) or 0),
             )
             # Pass random_opponent from config to v2 collector. When
@@ -884,6 +933,8 @@ def train(cfg: TrainConfig) -> None:
                 kwargs["on_termination"] = _combined_on_termination
             if needs_arr_snapshot_refresh:
                 kwargs["on_reset"] = _refresh_arr_snapshot_after_reset
+            if game_progress is not None:
+                kwargs["game_progress"] = game_progress
             _collect(**kwargs)
         else:
             behavior_policy = trainer.policy
@@ -902,6 +953,23 @@ def train(cfg: TrainConfig) -> None:
         t0 = time.time()
         metrics = trainer.train_epoch(rollout, rng=rng)
         t_train = time.time() - t0
+        final_rollout = rollout_idx + 1
+        if game_progress is not None:
+            records = game_progress.finish(final_rollout)
+            with open(os.path.join(cfg.save_dir, "training_games.jsonl"), "a") as out:
+                for record in records:
+                    out.write(json.dumps(record) + "\n")
+            progress_row = dict(game_progress.summary(), rollout=final_rollout,
+                optimizer_updates=trainer.num_train_step,
+                total_environment_steps=legacy_environment_steps + game_progress.environment_steps,
+                elapsed_s=logger.elapsed())
+            with open(os.path.join(cfg.save_dir, "game_progress.jsonl"), "a") as out:
+                out.write(json.dumps(progress_row) + "\n")
+            game_target_reached = game_progress.completed_games >= cfg.target_completed_games
+            if final_rollout % cfg.log_every == 0 or game_target_reached:
+                print(f"[games] completed={game_progress.completed_games}/{cfg.target_completed_games} "
+                      f"mean_moves={progress_row['mean_completed_game_moves']:.1f} "
+                      f"reasons={dict(game_progress.reasons)}")
 
         # ---- ArrangementNet PPO update ----
         # Under DDP: must call into arr_trainer.train_epoch on EVERY rank so
@@ -1082,7 +1150,11 @@ def train(cfg: TrainConfig) -> None:
             mc.reset()
 
         # ---- Periodic checkpoint (rank-0 only; others wait at barrier) ----
-        if (rollout_idx + 1) % cfg.save_every == 0:
+        save_due = ((game_progress.completed_games >= next_game_save or game_target_reached)
+                    if game_progress is not None else (rollout_idx + 1) % cfg.save_every == 0)
+        if save_due:
+            if game_progress is not None:
+                next_game_save = (game_progress.completed_games // cfg.save_every_games + 1) * cfg.save_every_games
             if is_rank0:
                 ckpt_path = save_checkpoint(
                     trainer, cfg, rollout_idx + 1, cfg.save_dir,
@@ -1099,11 +1171,18 @@ def train(cfg: TrainConfig) -> None:
 
         # ---- Periodic evaluation (rank-0 only; others wait) ----
         # Evaluate the actual learner policy used for collection.
-        if (rollout_idx + 1) % cfg.eval_every == 0:
+        eval_due = ((game_progress.completed_games >= next_game_eval or game_target_reached)
+                    if game_progress is not None else (rollout_idx + 1) % cfg.eval_every == 0)
+        if eval_due:
+            if game_progress is not None:
+                next_game_eval = (game_progress.completed_games // cfg.eval_every_games + 1) * cfg.eval_every_games
             eval_should_stop = torch.zeros(1, dtype=torch.long,
                                            device=device if device.type == "cuda" else "cpu")
             if is_rank0:
                 print(f"[train] Evaluating (rollout {rollout_idx + 1})…")
+                if game_progress is not None:
+                    from junqi_rl.training.game_progress import capture_rng, restore_rng
+                    eval_rng_state = capture_rng(rng)
                 try:
                     eval_seed = cfg.eval_game_seed
                     # A fixed seed per game covers the first and all later
@@ -1112,6 +1191,25 @@ def train(cfg: TrainConfig) -> None:
                     eval_records = []
                     eval_policy = trainer.policy
                     eval_policy.eval()
+                    eval_belief_net = None
+                    eval_belief_options = None
+                    if (belief_enabled and rollout_idx >= cfg.belief.warmup_rollouts
+                            and belief_trainer.num_train_step >= cfg.belief.min_train_updates):
+                        eval_belief_net = belief_trainer.net
+                        eval_ramp = (min(1.0, (rollout_idx - cfg.belief.warmup_rollouts + 1)
+                                         / cfg.belief.neural_ramp_rollouts)
+                                     if cfg.belief.neural_ramp_rollouts else 1.0)
+                        eval_belief_options = dict(
+                            chunk_size=cfg.belief.infer_chunk_size,
+                            neural_weight=cfg.belief.neural_weight * eval_ramp,
+                            max_kl=cfg.belief.max_kl_to_rules,
+                            rule_only_input=cfg.belief.rule_only_input,
+                            max_policy_kl=cfg.belief.max_policy_kl_on_refresh,
+                            min_entropy_ratio=cfg.belief.min_policy_entropy_ratio,
+                        )
+                    eval_belief_kwargs = dict(belief_net=eval_belief_net,
+                        belief_refresh_steps=cfg.env.steps_per_env * cfg.belief.refresh_every,
+                        belief_options=eval_belief_options)
                     eval_metrics = evaluate_paired_vs_random(
                         eval_policy,
                         num_games=cfg.eval_num_games,
@@ -1122,6 +1220,7 @@ def train(cfg: TrainConfig) -> None:
                         max_moves=cfg.env.max_num_moves,
                         autocast_dtype=cfg.ppo.get_dtype(),
                         greedy=True,
+                        **eval_belief_kwargs,
                     )
                     eval_metrics["eval/game_seed"] = float(eval_seed)
                     eval_metrics["eval/greedy"] = 1.0
@@ -1160,6 +1259,7 @@ def train(cfg: TrainConfig) -> None:
                             max_moves=cfg.env.max_num_moves,
                             autocast_dtype=cfg.ppo.get_dtype(),
                             greedy=True,
+                            **eval_belief_kwargs,
                         )
                         write_game_records(
                             os.path.join(cfg.save_dir, f"eval_{rollout_idx + 1:06d}_h2h.jsonl"),
@@ -1180,6 +1280,15 @@ def train(cfg: TrainConfig) -> None:
                             f"{h2h.get('h2h/win_rate_ci95_high', 1.0):.3f}]"
                         )
 
+                        if game_progress is not None:
+                            from junqi_rl.analysis.protocol import paired_score_interval
+                            paired = paired_score_interval(h2h_records, seed=h2h_seed)
+                            paired.update(completed_training_games=game_progress.completed_games,
+                                baseline_checkpoint=cfg.eval_baseline_ckpt, rollout=rollout_idx + 1,
+                                wins=h2h["h2h/wins"], losses=h2h["h2h/losses"], draws=h2h["h2h/draws"])
+                            with open(os.path.join(cfg.save_dir, f"paired_h2h_{rollout_idx+1:06d}.json"), "w") as out:
+                                json.dump(paired, out, indent=2)
+                            print(f"[h2h-paired] score={paired['score']:.3f} ci95=[{paired['score_ci95_low']:.3f}, {paired['score_ci95_high']:.3f}] layouts={paired['layout_pairs']}")
                         h2h_score = completed_evaluation_score(h2h, prefix="h2h")
                         if h2h_score is not None and h2h_score > _best_h2h_score:
                             _best_h2h_score = h2h_score
@@ -1263,6 +1372,12 @@ def train(cfg: TrainConfig) -> None:
                 except Exception:
                     print("[train] Evaluation failed:")
                     traceback.print_exc()
+                    if game_progress is not None:
+                        raise
+                finally:
+                    if game_progress is not None:
+                        restore_rng(eval_rng_state, rng)
+                        eval_rng_state = None
             # Broadcast the should-stop flag to every rank so they all exit
             # the loop together. Without this, only rank 0 would see the
             # verdict and the others would deadlock at the next all-reduce.
@@ -1270,6 +1385,9 @@ def train(cfg: TrainConfig) -> None:
                 dist.broadcast(eval_should_stop, src=0)
             if int(eval_should_stop.item()) == 1:
                 _stop_requested[0] = True
+
+        if game_target_reached:
+            break
 
         # ---- Stop if requested ----
         if _stop_requested[0]:
@@ -1288,13 +1406,25 @@ def train(cfg: TrainConfig) -> None:
     if not _stop_requested[0]:
         if is_rank0:
             final_path = save_checkpoint(
-                trainer, cfg, cfg.total_rollouts, cfg.save_dir,
+                trainer, cfg, final_rollout, cfg.save_dir,
                 arr_trainer=arr_trainer,
                 belief_trainer=belief_trainer,
             )
             print(f"[train] Training complete. Final checkpoint: {final_path}")
         if is_distributed:
             dist.barrier()
+
+    if game_progress is not None:
+        status = "target_reached" if game_target_reached else ("interrupted" if _stop_requested[0] else "rollout_ceiling")
+        result = dict(game_progress.summary(), status=status,
+            target_completed_games=cfg.target_completed_games, rollout=final_rollout,
+            optimizer_updates=trainer.num_train_step,
+            legacy_environment_steps=legacy_environment_steps,
+            legacy_completed_games=None, elapsed_s=logger.elapsed())
+        with open(os.path.join(cfg.save_dir, "training_result.json"), "w") as out:
+            json.dump(result, out, indent=2)
+        if not game_target_reached and not _stop_requested[0]:
+            raise RuntimeError("rollout safety ceiling reached before completed-game target")
 
     logger.close()
     if is_rank0:

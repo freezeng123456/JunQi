@@ -113,6 +113,8 @@ class GpuRolloutHistory:
         num_steps: int,
         num_envs: int,
         show_mode: ShowMode,
+        include_global: bool = True,
+        identity_encoding: str = "legacy_probabilities",
     ) -> None:
         if not hasattr(_cuda, "DeviceRolloutHistory"):
             raise RuntimeError(
@@ -122,10 +124,21 @@ class GpuRolloutHistory:
         self.num_steps = int(num_steps)
         self.num_envs = int(num_envs)
         self.show_mode = show_mode
-        self._impl = _cuda.DeviceRolloutHistory(
-            self.num_steps,
-            self.num_envs,
-        )
+        from junqi_core.observation import validate_identity_encoding
+        validate_identity_encoding(identity_encoding, include_global)
+        self.identity_encoding = identity_encoding
+        self.known_only = identity_encoding == "known_only"
+        if self.known_only and not getattr(_cuda, "KNOWN_ONLY_OBSERVATIONS", False):
+            raise RuntimeError("known_only requires rebuilding junqi_cuda")
+        self.global_dims = OBS_GLOBAL_DIMS if include_global else 0
+        if self.known_only:
+            self._impl = _cuda.DeviceRolloutHistory(self.num_steps, self.num_envs, False, False)
+        elif include_global:
+            self._impl = _cuda.DeviceRolloutHistory(self.num_steps, self.num_envs)
+        else:
+            if not getattr(_cuda, "OPTIONAL_GLOBAL_OBSERVATIONS", False):
+                raise RuntimeError("Spatial-only history requires rebuilding junqi_cuda with python3 build_cuda.py")
+            self._impl = _cuda.DeviceRolloutHistory(self.num_steps, self.num_envs, False)
 
     @property
     def history_bytes(self) -> int:
@@ -198,14 +211,13 @@ class GpuRolloutHistory:
             ),
             device=flat_indices.device,
         ).to(dtype=dtype)
-        global_ = torch.as_tensor(
-            _CudaArrayInterfaceView(
-                pointers["d_global_ptr"],
-                (batch_size, OBS_GLOBAL_DIMS),
-                "<f4",
-            ),
-            device=flat_indices.device,
-        ).to(dtype=dtype)
+        if self.global_dims:
+            global_ = torch.as_tensor(
+                _CudaArrayInterfaceView(pointers["d_global_ptr"], (batch_size, self.global_dims), "<f4"),
+                device=flat_indices.device,
+            ).to(dtype=dtype)
+        else:
+            global_ = torch.empty((batch_size, 0), dtype=dtype, device=flat_indices.device)
         legal_mask = torch.as_tensor(
             _CudaArrayInterfaceView(
                 pointers["d_legal_mask_ptr"],
@@ -389,7 +401,7 @@ def _build_belief_prior_table() -> np.ndarray:
     Returns shape (30, 12) float32.  Camp slots are all-zero.
     Matches :func:`junqi_core.info_model._per_slot_prior_vector`.
     """
-    from junqi_core.info_model import TRACKED_TYPES
+    from junqi_core.identity import TRACKED_TYPES
     from junqi_core.rules import (
         BACK_TWO_ROWS_INDICES,
         CAMP_INDICES,
@@ -505,6 +517,8 @@ class GpuRollout:
         mixed_setup: bool = False,
         mixed_own_team_styles: tuple[str, ...] = ("T",),
         max_num_moves: int | None = None,
+        include_global: bool = True,
+        identity_encoding: str = "legacy_probabilities",
     ) -> None:
         if show_mode is not ShowMode.DARK:
             raise ValueError("GpuRollout native beliefs currently support DARK only")
@@ -513,6 +527,10 @@ class GpuRollout:
                 "junqi_cuda extension is not available. "
                 "Build it with: python3 build_cuda.py"
             )
+        if type(include_global) is not bool:
+            raise ValueError("include_global must be a boolean")
+        if not include_global and not getattr(_cuda, "OPTIONAL_GLOBAL_OBSERVATIONS", False):
+            raise RuntimeError("Spatial-only observations require rebuilding junqi_cuda with python3 build_cuda.py")
         if num_envs <= 0:
             raise ValueError(f"num_envs must be positive, got {num_envs}")
         if _cuda.get_gpu_count() == 0:
@@ -524,6 +542,13 @@ class GpuRollout:
 
         self.num_envs = num_envs
         self.show_mode = show_mode
+        from junqi_core.observation import validate_identity_encoding
+        validate_identity_encoding(identity_encoding, include_global)
+        self.identity_encoding = identity_encoding
+        self.known_only = identity_encoding == "known_only"
+        if self.known_only and not getattr(_cuda, "KNOWN_ONLY_OBSERVATIONS", False):
+            raise RuntimeError("known_only requires rebuilding junqi_cuda")
+        self.global_dims = OBS_GLOBAL_DIMS if include_global else 0
         self._device_id = device_id
         self._canonical_setup_styles = canonical_setup_styles
         self._mixed_setup = bool(mixed_setup)
@@ -539,7 +564,8 @@ class GpuRollout:
         self.state = _cuda.DeviceGameStateBatch(num_envs, max_num_moves=move_limit)
         self._obs_all = None  # allocated only when an all-seat consumer requests it
         # Single-seat obs buffer for acting-seat-only builds (4x less memory)
-        self.obs_single = _cuda.DeviceObservationSingleBatch(num_envs)
+        self.obs_single = (_cuda.DeviceObservationSingleBatch(num_envs) if include_global
+                           else _cuda.DeviceObservationSingleBatch(num_envs, False))
 
         # Observer mapping: slot k observes the k-th seat (identity); users
         # override via :meth:`set_observer_seats` if they need a different
@@ -549,15 +575,15 @@ class GpuRollout:
         )
         _cuda.upload_state_observer_seats(self.state, self._observer_seats)
 
-        # Default beliefs are all zero — the belief network drops in later.
-        # Phase 1: beliefs will be initialised to proper priors after the first
-        # reset via init_beliefs_for_reset_envs().
-        self._beliefs = np.zeros(
-            (num_envs, 4, NUM_TRACKED_TYPES, BOARD_SIZE * BOARD_SIZE),
-            dtype=np.float32,
-        )
-        _cuda.upload_state_beliefs(self.state, self._beliefs)
-        self._beliefs_enabled = hasattr(_cuda, "init_beliefs_for_reset_envs")
+        # Facts-only collection never creates rule probabilities or uploads priors.
+        self._beliefs = None
+        self._beliefs_enabled = not self.known_only and hasattr(_cuda, "init_beliefs_for_reset_envs")
+        if not self.known_only:
+            self._beliefs = np.zeros((num_envs, 4, NUM_TRACKED_TYPES, BOARD_SIZE * BOARD_SIZE), dtype=np.float32)
+            _cuda.upload_state_beliefs(self.state, self._beliefs)
+            if self._beliefs_enabled:
+                _cuda.upload_belief_prior_table(_build_belief_prior_table().ravel())
+                _cuda.upload_seat_strongholds(_build_seat_strongholds())
         self._last_step_ptrs: dict = {}  # raw device pointers from last step_device
 
         # Last step's MoveResult (for reward shaping, termination, etc).
@@ -582,8 +608,47 @@ class GpuRollout:
     def obs(self):
         """Lazy all-seat output buffer; actor-only collection does not need it."""
         if self._obs_all is None:
-            self._obs_all = _cuda.DeviceObservationBatch(self.num_envs)
+            self._obs_all = (_cuda.DeviceObservationBatch(self.num_envs) if self.global_dims
+                             else _cuda.DeviceObservationBatch(self.num_envs, False))
         return self._obs_all
+
+    def state_dict(self):
+        if not self.known_only or not getattr(_cuda, "FACTS_RUNTIME_CHECKPOINT", False):
+            raise RuntimeError("facts runtime checkpoint requires known_only and a rebuilt native extension")
+        return dict(version=1, identity_encoding=self.identity_encoding,
+            global_dims=self.global_dims, show_mode=self.show_mode.value,
+            native=self.state.checkpoint_to_host(), setup_pool=_training_setup_pool.copy())
+
+    def load_state_dict(self, state):
+        global _training_setup_pool
+        if (state["version"] != 1 or not self.known_only
+                or state["identity_encoding"] != self.identity_encoding
+                or state["global_dims"] != self.global_dims
+                or state["show_mode"] != self.show_mode.value):
+            raise ValueError("GPU world checkpoint schema mismatch")
+        pool = np.asarray(state["setup_pool"])
+        if pool.dtype != np.int8 or pool.ndim != 2 or pool.shape[1] != 120:
+            raise ValueError("invalid saved setup pool")
+        self.state.checkpoint_from_host(state["native"])
+        _training_setup_pool = np.ascontiguousarray(pool).copy()
+        _cuda.upload_setup_pool(_training_setup_pool)
+        self._last_step_ptrs = {}
+        self._last_result = None
+
+    def setup_pool_hashes(self):
+        """Hash the actual reset pool once per counted training segment."""
+        import hashlib
+        return [hashlib.sha256(row.tobytes()).hexdigest() for row in _training_setup_pool]
+
+    def move_counter_torch(self):
+        import torch
+        return torch.as_tensor(_CudaArrayInterfaceView(self.state.d_move_counter_ptr,
+            (self.num_envs,), "<i4"), device="cuda")
+
+    def moves_since_last_combat_torch(self):
+        import torch
+        return torch.as_tensor(_CudaArrayInterfaceView(self.state.d_moves_since_last_combat_ptr,
+            (self.num_envs,), "<i4"), device="cuda")
 
     def create_rollout_history(self, num_steps: int) -> GpuRolloutHistory:
         """Allocate compact pre-action state history for one PPO rollout."""
@@ -592,6 +657,8 @@ class GpuRollout:
             num_steps=num_steps,
             num_envs=self.num_envs,
             show_mode=self.show_mode,
+            include_global=bool(self.global_dims),
+            identity_encoding=self.identity_encoding,
         )
 
     @staticmethod
@@ -652,12 +719,6 @@ class GpuRollout:
             pool = _build_setup_pool(pool_size, seed=42)
         _cuda.upload_setup_pool(pool)
         _training_setup_pool = pool
-        # Phase 1 belief: upload prior table and stronghold positions
-        if hasattr(_cuda, "upload_belief_prior_table"):
-            prior_table = _build_belief_prior_table()
-            _cuda.upload_belief_prior_table(prior_table.ravel())
-            strongholds = _build_seat_strongholds()
-            _cuda.upload_seat_strongholds(strongholds)
         _reset_pool_uploaded = True
 
     def upload_fixed_evaluation_setup_pool(
@@ -892,6 +953,7 @@ class GpuRollout:
         """
         _cuda.build_observation_batch_resident(
             self.state, self.obs, np.int8(self.show_mode.value),
+            **({"known_only": True} if self.known_only else {}),
         )
         return self.obs.copy_to_host()
 
@@ -921,17 +983,18 @@ class GpuRollout:
 
         _cuda.build_observation_batch_resident(
             self.state, self.obs, np.int8(self.show_mode.value),
+            **({"known_only": True} if self.known_only else {}),
         )
         N = self.num_envs
         sp_view = _CudaArrayInterfaceView(
             self.obs.d_spatial_ptr, (N, 4, OBS_CHANNELS, 17, 17), "<f4"
         )
-        gl_view = _CudaArrayInterfaceView(
-            self.obs.d_global_ptr, (N, 4, 28), "<f4"
-        )
+        global_tensor = (torch.as_tensor(_CudaArrayInterfaceView(
+            self.obs.d_global_ptr, (N, 4, self.global_dims), "<f4"), device="cuda")
+            if self.global_dims else torch.empty((N, 4, 0), device=f"cuda:{self._device_id}"))
         return (
             torch.as_tensor(sp_view, device="cuda"),
-            torch.as_tensor(gl_view, device="cuda"),
+            global_tensor,
         )
 
     def build_acting_seat_observation_torch(
@@ -960,22 +1023,25 @@ class GpuRollout:
             self.state, self.obs_single,
             acting_seats_t.data_ptr(),
             np.int8(self.show_mode.value),
+            **({"known_only": True} if self.known_only else {}),
         )
         N = self.num_envs
         sp_view = _CudaArrayInterfaceView(
             self.obs_single.d_spatial_ptr, (N, OBS_CHANNELS, 17, 17), "<f4"
         )
-        gl_view = _CudaArrayInterfaceView(
-            self.obs_single.d_global_ptr, (N, 28), "<f4"
-        )
+        global_tensor = (torch.as_tensor(_CudaArrayInterfaceView(
+            self.obs_single.d_global_ptr, (N, self.global_dims), "<f4"), device="cuda")
+            if self.global_dims else torch.empty((N, 0), device=acting_seats_t.device))
         return (
             torch.as_tensor(sp_view, device="cuda"),
-            torch.as_tensor(gl_view, device="cuda"),
+            global_tensor,
         )
 
     def current_beliefs_torch(self) -> "torch.Tensor":
         """Active world-frame beliefs, as a borrowed view before stepping."""
         import torch
+        if self.known_only:
+            raise RuntimeError("known_only has no probability buffer")
         ptr = _cuda.state_beliefs_ptr(self.state, False)
         return torch.as_tensor(_CudaArrayInterfaceView(
             ptr, (self.num_envs, 4, NUM_TRACKED_TYPES, BOARD_SIZE * BOARD_SIZE), "<f4"
@@ -989,6 +1055,8 @@ class GpuRollout:
         this rollout and must not be retained across stepping/reset.
         """
         import torch
+        if self.known_only:
+            raise RuntimeError("known_only has no rule probability buffer")
         ptr = _cuda.state_beliefs_ptr(self.state, True)
         return torch.as_tensor(_CudaArrayInterfaceView(
             ptr, (self.num_envs, 4, NUM_TRACKED_TYPES, BOARD_SIZE * BOARD_SIZE), "<f4"
@@ -1001,6 +1069,8 @@ class GpuRollout:
         this rollout's persistent buffer; subsequent ``build_all_seat_observations``
         calls will read the new values.
         """
+        if self.known_only:
+            raise RuntimeError("known_only cannot publish identity probabilities")
         if beliefs.shape != (self.num_envs, 4, NUM_TRACKED_TYPES, BOARD_SIZE * BOARD_SIZE):
             raise ValueError(
                 f"beliefs shape must be ({self.num_envs}, 4, 12, 289), "

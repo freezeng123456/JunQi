@@ -10,9 +10,10 @@ import torch
 from torch import Tensor, nn
 
 from junqi_core.board import COMPACT_TO_FLAT, NUM_ON_BOARD_CELLS
-from junqi_core.info_model import TRACKED_TYPES
+from junqi_core.identity import TRACKED_TYPES
 from junqi_core.observation import CHANNEL_LAYOUT
 from junqi_core.rules import Event, resolve_combat
+from junqi_rl.networks.feature_context import PolicyFeatureContext
 
 COMBAT_FEATURE_VERSION = 1
 OUTCOME_NAMES = ("eat_survive", "own_dies", "mutual_death")
@@ -49,8 +50,8 @@ class CombatOutcomeHead(nn.Module):
         enemy = torch.where(occupancy, enemy, 0.0)
         return own, enemy
 
-    def forward(self, obs: Tensor) -> Tensor:
-        own, enemy = self._pieces(obs)  # B,12,129
+    def forward(self, obs: Tensor, *, context: PolicyFeatureContext | None = None) -> Tensor:
+        own, enemy = self._pieces(obs) if context is None else context.combat_pieces()  # B,12,129
         # B, attacker type, destination, outcome; fixed shapes compile cleanly.
         features = torch.einsum("bdj,ado->bajo", enemy, self.outcome_table)
         scores = self.residual(features).squeeze(-1).float()  # B,12,129

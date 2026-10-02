@@ -685,6 +685,7 @@ def collect_rollout_gpu_v2(
     autocast_dtype=None,  # torch.dtype; defaults to bfloat16 below
     act_chunk_size: int = 0,
     on_observation=None,
+    game_progress=None,
 ):
     """Zero-CPU hot-path rollout collector.
 
@@ -766,6 +767,8 @@ def collect_rollout_gpu_v2(
 
     # Track done flags on GPU
     done_t = rollout_world.terminated_torch().clone()
+    if game_progress is not None:
+        game_progress.begin(rollout_world, T, reset_seed=seed_base)
     callbacks_enabled = on_termination is not None or on_reset is not None
 
     step_counter = 0
@@ -909,6 +912,8 @@ def collect_rollout_gpu_v2(
 
         # Detect newly-terminated envs
         fired_t = new_term_t & ~done_t
+        if game_progress is not None:
+            game_progress.record(rollout_world, result, fired_t, t)
 
         # ---- Reward shaping (densify credit for vs-random training) ------
         # The CUDA reward kernel emits PURE terminal ±1 (mirrors Ataraxos).
@@ -986,6 +991,8 @@ def collect_rollout_gpu_v2(
         # caches (e.g. arrangement snapshots) after the new setup is installed.
         seed_stride = step_counter * 1_000_003
         rollout_world.reset_terminated_device(seed=seed_base + seed_stride)
+        if game_progress is not None:
+            game_progress.after_reset(rollout_world, fired_t, reset_seed=seed_base + seed_stride)
         done_t = rollout_world.terminated_torch().clone()
         if on_reset is not None and fired_any:
             on_reset(fired_t=fired_t, rollout_world=rollout_world)

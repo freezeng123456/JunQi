@@ -15,7 +15,20 @@ from junqi_rl.networks.tactical_features import TacticalFeatureHead
 from tests.test_feature_information_boundaries import position
 from tests.test_combat_outcome_features import inputs
 from experiments.feature_focus_20260921.migrate import migrate
-START=Path(os.environ.get('JUNQI_START_CHECKPOINT',str(Path(__file__).resolve().parents[3]/'outputs/JunQi-feature-focus-20260921/payload/start.pt')))
+START=Path(os.environ.get('JUNQI_FEATURE_FOCUS_START_CHECKPOINT',os.environ.get(
+ 'JUNQI_START_CHECKPOINT',str(Path(__file__).resolve().parents[3]/'outputs/JunQi-feature-focus-20260921/payload/start.pt')))).expanduser()
+
+
+@pytest.fixture
+def migration_start():
+ # Keep missing external artifacts distinct from migration/schema failures.
+ try:
+  START.stat()
+ except FileNotFoundError:
+  pytest.skip(f"External M/R migration checkpoint missing: {START}; "
+              "set JUNQI_FEATURE_FOCUS_START_CHECKPOINT to the original start.pt "
+              "(JUNQI_START_CHECKPOINT is also supported)")
+ return START
 
 def idx(x,y):return int(FLAT_TO_COMPACT[y*17+x])
 def observe(st,observer=Seat.SOUTH):
@@ -82,9 +95,9 @@ def test_pressure_camp_and_hidden_identity_boundary():
  assert head(empty,mask)[0,src*129+target]==0
 
 @pytest.mark.parametrize('kind',['M','R'])
-def test_feature_migration_is_neutral_and_new_parameters_learn(kind,tmp_path):
- torch.set_num_threads(1);old,new,state=migrate(START,tmp_path/'initial.pt',kind)
- original=torch.load(START,map_location='cpu',weights_only=False)
+def test_feature_migration_is_neutral_and_new_parameters_learn(kind,tmp_path,migration_start):
+ torch.set_num_threads(1);old,new,state=migrate(migration_start,tmp_path/'initial.pt',kind)
+ original=torch.load(migration_start,map_location='cpu',weights_only=False)
  old_names=[n for n,_ in old.named_parameters()];new_names=[n for n,_ in new.named_parameters()]
  for n in old_names:
   for key,value in original['optimizer']['state'][old_names.index(n)].items():

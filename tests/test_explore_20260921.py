@@ -12,7 +12,21 @@ from tests.test_combat_outcome_features import inputs
 from junqi_core.state import Action
 from experiments.explore_20260921.migrate import migrate
 
-START=Path(os.environ.get('JUNQI_START_CHECKPOINT',str(Path(__file__).resolve().parents[3]/'outputs/JunQi-lr-20260920/payload/start.pt')))
+START=Path(os.environ.get('JUNQI_EXPLORE_START_CHECKPOINT',os.environ.get(
+    'JUNQI_START_CHECKPOINT',str(Path(__file__).resolve().parents[3]/'outputs/JunQi-lr-20260920/payload/start.pt')))).expanduser()
+
+
+@pytest.fixture
+def migration_start():
+    # This test needs the historical optimizer state, not a synthetic policy.
+    # Only absence skips it; malformed or unreadable checkpoints still fail.
+    try:
+        START.stat()
+    except FileNotFoundError:
+        pytest.skip(f"External F/D migration checkpoint missing: {START}; "
+                    "set JUNQI_EXPLORE_START_CHECKPOINT to the original start.pt "
+                    "(JUNQI_START_CHECKPOINT is also supported)")
+    return START
 
 def sample(defender=PieceType.LIANZH,bright=False):
     s=position(PieceType.PAIZH,defender)
@@ -41,9 +55,9 @@ def test_tactical_known_combat_and_information_boundary():
     assert torch.count_nonzero(head(empty))==0
 
 @pytest.mark.parametrize('kind',['F','D'])
-def test_migration_preserves_function_and_moments_and_can_update(kind,tmp_path):
+def test_migration_preserves_function_and_moments_and_can_update(kind,tmp_path,migration_start):
     torch.set_num_threads(1)
-    old,new,sd=migrate(START,tmp_path/'migrated.pt',kind)
+    old,new,sd=migrate(migration_start,tmp_path/'migrated.pt',kind)
     obs,g,mask,_=sample();obs=obs.expand(2,-1,-1,-1).clone();g=g.expand(2,-1).clone()
     # Use multiple legal choices so added modules get a nonzero policy gradient.
     mask=torch.ones(2,16641,dtype=torch.bool)
@@ -52,7 +66,7 @@ def test_migration_preserves_function_and_moments_and_can_update(kind,tmp_path):
             a=old._encode(obs,g);b=new._encode(obs,g)
             torch.testing.assert_close(old._policy_logits(a[1],mask,obs),new._policy_logits(b[1],mask,obs),rtol=0,atol=0)
             torch.testing.assert_close(old._value(a[0]),new._value(b[0]),rtol=0,atol=0)
-    orig=torch.load(START,map_location='cpu',weights_only=False)
+    orig=torch.load(migration_start,map_location='cpu',weights_only=False)
     old_names=[n for n,_ in old.named_parameters()];new_names=[n for n,_ in new.named_parameters()]
     for n in old_names:
         for k,v in orig['optimizer']['state'][old_names.index(n)].items():

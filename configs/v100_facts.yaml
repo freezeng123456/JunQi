@@ -1,0 +1,26 @@
+# Original bounded facts run; resolved values preserved on 2026-10-03.
+# Use v100_facts_games.yaml for the current completed-game training entry.
+extends: facts_base.yaml
+env:
+  num_envs: 32
+  steps_per_env: 128
+  max_num_moves: 4000
+  seed: 20261002
+  use_gpu_rollout: true
+rollout:
+  storage_mode: compact_history
+  csr_legal_mask: true
+  csr_k_max: 256
+save_dir: exps/v100_facts
+total_rollouts: 512
+save_every: 64
+eval_every: 64
+eval_num_games: 16
+log_every: 5
+device: cuda
+seed: 20261002
+resume: ''
+init_policy: ''
+eval_setup_seed: 5100200
+eval_game_seed: 6100200
+early_stop_win_rate: 0.0

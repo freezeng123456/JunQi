@@ -12,9 +12,9 @@ import torch
 from torch import nn
 from junqi_core.board import (COMPACT_TO_FLAT, FLAT_TO_COMPACT, COMPACT_ROAD_NEIGHBORS,
     COMPACT_RAIL_NEIGHBORS, cell_info, is_camp, is_stronghold, is_railway)
-from junqi_core.observation import CHANNEL_LAYOUT
-from junqi_core.info_model import TRACKED_TYPES
+from junqi_core.identity import TRACKED_TYPES
 from junqi_core.rules import PieceType, Event, resolve_combat
+from junqi_rl.networks.feature_context import PolicyFeatureContext
 
 RELATIONAL_FEATURE_VERSION=1
 DEST_NAMES=('removal_pressure','survival_pressure','friendly_support','enemy_mobile_pressure',
@@ -74,14 +74,12 @@ class RelationalFeatureHead(nn.Module):
         self.weights=nn.Parameter(torch.zeros(12,len(DEST_NAMES)))
         self.special_weights=nn.Parameter(torch.zeros(3))
 
-    def context(self,obs):
-        flat=obs.flatten(-2).index_select(-1,self.on_board).float()
-        own=flat[:,CHANNEL_LAYOUT['piece_own']]
-        ally=flat[:,CHANNEL_LAYOUT['prob_teammate']]
-        enemy=flat[:,CHANNEL_LAYOUT['belief_left_side']]+flat[:,CHANNEL_LAYOUT['belief_right_side']]
-        enemy_occ=(flat[:,CHANNEL_LAYOUT['piece_left_side_enemy']]+flat[:,CHANNEL_LAYOUT['piece_right_side_enemy']]).squeeze(1)>0
-        enemy=enemy*enemy_occ[:,None,:]
-        occupied=(own.sum(1)+ally.sum(1)+flat[:,CHANNEL_LAYOUT['dark_teammate']].squeeze(1)+enemy_occ)>0
+    def context(self,obs, *, context: PolicyFeatureContext | None = None):
+        context = context if context is not None else PolicyFeatureContext(obs, self.on_board)
+        own, enemy, enemy_occ = context.pieces()
+        enemy_occ = enemy_occ.squeeze(1)
+        ally = context.channels("prob_teammate")
+        occupied=(own.sum(1)+ally.sum(1)+context.channels("dark_teammate").squeeze(1)+enemy_occ)>0
         # Matrix multiplication uses only binary occupancy/path entries, so BF16
         # exactly represents the small integer intermediate counts.
         clear=(occupied.float()@self.interiors.T)==0
@@ -110,11 +108,11 @@ class RelationalFeatureHead(nn.Module):
         features=torch.stack((loss/(1+loss),survive/(1+survive),repeat(support/(1+support)),repeat(pressure/(1+pressure)),
             static(self.camp),static(self.stronghold),static(self.rail),repeat(own_flag),repeat(ally_flag),repeat(enemy_flag),
             repeat(own_flag*alarm/(1+alarm)),repeat(enemy[:,flag]),information),-1)
-        known_engineer=flat[:,CHANNEL_LAYOUT['cm_my_is_gongb']].squeeze(1)
+        known_engineer=context.channels("cm_my_is_gongb").squeeze(1)
         return own,features,reach,enemy_occ,known_engineer
 
-    def forward(self,obs,legal_mask):
-        own,features,reach,enemy_occ,known_engineer=self.context(obs)
+    def forward(self,obs,legal_mask, *, context: PolicyFeatureContext | None = None):
+        own,features,reach,enemy_occ,known_engineer=self.context(obs, context=context)
         type_scores=(features*self.weights[None,:,None,:]).sum(-1)
         logits=torch.bmm(own.transpose(1,2),type_scores)
         # Destination-minus-source features encode the change made by the move.

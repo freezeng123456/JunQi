@@ -1,7 +1,7 @@
 import copy
 import torch
 
-from scripts.pilot_joint_belief import max_parameter_delta
+from scripts.legacy_pilot_joint_belief import max_parameter_delta
 
 
 def test_learning_delta_excludes_batch_normalization_counters():

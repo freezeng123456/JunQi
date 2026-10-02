@@ -205,6 +205,7 @@ def refresh_beliefs_neural(
     neural_weight: float = 1.0,
     max_kl: float | None = None,
     rule_only_input: bool = False,
+    observer_seats: tuple[int, ...] | None = None,
 ) -> dict[str, float]:
     """Run BeliefNet on the current rollout state and push results to d_belief.
 
@@ -260,6 +261,8 @@ def refresh_beliefs_neural(
         over enemy cells), ``belief_infer/max_prob_mean`` (avg confidence
         in top-1 type — 1/12 = pure uniform, 1.0 = fully certain).
     """
+    if getattr(rollout, "identity_encoding", "legacy_probabilities") != "legacy_probabilities":
+        raise ValueError("Legacy probability publication cannot consume known_only")
     N = rollout.num_envs
 
     belief_net.eval()
@@ -273,6 +276,12 @@ def refresh_beliefs_neural(
     # need .clone(); that isn't the current integration pattern.)
     rules = rollout.rule_beliefs_torch()
     live_enemy = _live_enemy_world_mask(obs_sp_all)
+    if observer_seats is not None:
+        if not observer_seats or any(type(seat) is not int or seat not in range(4) for seat in observer_seats):
+            raise ValueError("observer_seats must contain observer IDs in 0..3")
+        selected = torch.zeros(4, dtype=torch.bool, device=live_enemy.device)
+        selected[list(observer_seats)] = True
+        live_enemy = live_enemy & selected[None, :, None]
     if rule_only_input:
         obs_sp_all = rule_only_belief_observations(obs_sp_all, rules)
     C_in, H, W = obs_sp_all.shape[2:]
@@ -388,6 +397,8 @@ def guarded_refresh_beliefs_neural(rollout, belief_net, policy, *,
     Failed attempts restore the exact active distribution, not an older host
     cache. Rule facts remain protected by every candidate projection.
     """
+    if getattr(rollout, "identity_encoding", "legacy_probabilities") != "legacy_probabilities":
+        raise ValueError("Legacy probability publication cannot consume known_only")
     if not math.isfinite(max_policy_kl) or max_policy_kl <= 0:
         raise ValueError('max_policy_kl must be finite and positive')
     if not 0 < min_entropy_ratio <= 1:
@@ -399,6 +410,10 @@ def guarded_refresh_beliefs_neural(rollout, belief_net, policy, *,
     kwargs['empty_cache'] = False
     try:
         before, active = _publication_policy_distribution(rollout, policy)
+        if kwargs.get('observer_seats') is not None:
+            selected = torch.zeros(4, dtype=torch.bool, device=active.device)
+            selected[list(kwargs['observer_seats'])] = True
+            active = active & selected[None, :]
         entropy_before = -(before.exp() * before).sum(-1)
         for attempt in range(9):
             metrics = refresh_beliefs_neural(rollout, belief_net, neural_weight=weight, **kwargs)

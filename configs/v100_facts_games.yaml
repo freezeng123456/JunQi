@@ -1,0 +1,10 @@
+# First counted continuation: completed games, not rollout count, define success.
+extends: v100_facts.yaml
+save_dir: exps/v100_facts_games
+target_completed_games: 2000
+total_rollouts: 100000
+save_every_games: 500
+eval_every_games: 2000
+eval_num_games: 100
+eval_baseline_games: 200
+torch_deterministic: true

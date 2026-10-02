@@ -49,6 +49,7 @@ import torch
 from torch import Tensor
 
 from junqi_core.rules import ALL_SEATS, Seat
+from junqi_core.board import COMPACT_TO_FLAT, NUM_ON_BOARD_CELLS, BOARD_SIZE
 from junqi_rl.action_lut import ROTATE_LUT, UNROTATE_LUT, build_legal_mask_batch
 from junqi_rl.env import VectorJunqiEnv, rotate_action_id, unrotate_action_id
 from junqi_rl.networks.junqi_net import JunqiNet
@@ -88,6 +89,26 @@ def _get_actor_rewards(
     actor_rewards = rewards[env_indices, seat_indices].astype(np.float32)
     actor_rewards[~done] = 0.0
     return actor_rewards
+
+
+def _scalar_values(values: Tensor, batch_size: int) -> np.ndarray:
+    """Read scalar values or log-probs over the fixed [-1, 0, +1] bins.
+
+    Preserve the historical scalar-column output accepted by this collector.
+    Other shapes are errors rather than silently selecting one value column.
+    """
+    array = values.float().cpu().numpy()
+    if array.shape == (batch_size,):
+        return array
+    if array.shape == (batch_size, 1):
+        return array[:, 0]
+    if array.shape == (batch_size, 3):
+        probabilities = np.exp(array)
+        return probabilities[:, 2] - probabilities[:, 0]
+    raise ValueError(
+        f"policy values must have shape ({batch_size},), ({batch_size}, 1), "
+        f"or ({batch_size}, 3); got {array.shape}"
+    )
 
 
 @torch.no_grad()
@@ -199,10 +220,7 @@ def collect_rollout(
         combat_metrics.add(sp_t, actions_can, lm_t)
 
         # ---- Convert values to numpy ----
-        values_np = values.cpu().numpy()
-        if values_np.ndim > 1:
-            values_np = values_np[:, 0]
-        values_np = values_np.astype(np.float32)
+        values_np = _scalar_values(values, N)
 
         # ---- Vectorised canonical → world action conversion ----
         actions_can_np = actions_can.cpu().numpy().astype(np.int32)
@@ -212,7 +230,9 @@ def collect_rollout(
                 actions_world[i] = 0
             else:
                 # LUT unrotate: single array index (O(1) per env)
-                actions_world[i] = UNROTATE_LUT[current_seats[i].value][actions_can_np[i]]
+                compact = int(UNROTATE_LUT[current_seats[i].value][actions_can_np[i]])
+                actions_world[i] = (int(COMPACT_TO_FLAT[compact // NUM_ON_BOARD_CELLS]) * BOARD_SIZE**2
+                                    + int(COMPACT_TO_FLAT[compact % NUM_ON_BOARD_CELLS]))
 
         # ---- Store experience BEFORE stepping ----
         rollout.add(
@@ -274,9 +294,6 @@ def collect_rollout(
         lm_t = torch.from_numpy(legal_mask_np[live]).to(_device)
         with torch.no_grad():
             _, _, last_values = policy.act(sp_t, gl_t, lm_t)
-        bootstrap = last_values.cpu().numpy()
-        if bootstrap.ndim > 1:
-            bootstrap = bootstrap[:, 0]
-        last_val_np[live] = bootstrap.astype(np.float32)
+        last_val_np[live] = _scalar_values(last_values, int(live.sum()))
 
     rollout.compute_returns(last_val_np, last_seats=acting_idx)

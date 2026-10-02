@@ -42,17 +42,20 @@ from __future__ import annotations
 
 import random
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import numpy as np
 
 from junqi_core.board import BOARD_SIZE, NUM_CELLS
-from junqi_core.info_model import BeliefTensor, NUM_TRACKED_TYPES
+from junqi_core.identity import NUM_TRACKED_TYPES
 from junqi_core.rules import ALL_SEATS, Seat, ShowMode
 from junqi_core.setup import generate_random_setup
 from junqi_core.state import GameState
 
 from .env import JunqiEnv, JunqiStepInfo
+
+if TYPE_CHECKING:
+    from junqi_core.info_model import BeliefTensor
 
 # ---------------------------------------------------------------------------
 # Import the CUDA extension (optional — allows import even without GPU)

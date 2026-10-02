@@ -447,9 +447,91 @@ static py::tuple py_obs_copy_to_host(const DeviceObservationBatch& self) {
         (ssize_t)n, (ssize_t)NUM_SEATS,
         (ssize_t)NUM_OBS_CHANNELS, (ssize_t)BOARD_SIZE, (ssize_t)BOARD_SIZE});
     auto global_ = py::array_t<float>({
-        (ssize_t)n, (ssize_t)NUM_SEATS, (ssize_t)NUM_GLOBAL_DIMS});
+        (ssize_t)n, (ssize_t)NUM_SEATS, (ssize_t)self.global_dims});
     self.copy_to_host(spatial.mutable_data(), global_.mutable_data());
     return py::make_tuple(spatial, global_);
+}
+
+// Complete facts-only state at a rollout boundary; no pointers or scratch are serialized.
+template<typename T>
+static void checkpoint_field(py::dict& arrays, const char* name, T* ptr, size_t count,
+                             bool load, bool validate) {
+    if (load) {
+        auto arr = arrays[name].cast<py::array>();
+        if (!arr.dtype().equal(py::dtype::of<T>()) || !(arr.flags() & py::array::c_style)
+            || (size_t)arr.size() != count)
+            throw std::runtime_error(std::string("checkpoint field mismatch: ") + name);
+        if (!validate) CUDA_CHECK_PY(cudaMemcpy(ptr, arr.data(), count*sizeof(T), cudaMemcpyHostToDevice));
+    } else {
+        auto arr = py::array_t<T>((ssize_t)count);
+        CUDA_CHECK_PY(cudaMemcpy(arr.mutable_data(), ptr, count*sizeof(T), cudaMemcpyDeviceToHost));
+        arrays[name] = arr;
+    }
+}
+static void checkpoint_arrays(DeviceGameStateBatch& self, py::dict& arrays, bool load, bool validate=false) {
+    const size_t n = self.num_envs;
+    if (self.d_belief || self.d_rule_belief)
+        throw std::runtime_error("complete state checkpoint currently requires known_only");
+    checkpoint_field<int16_t>(arrays, "d_cell_piece_id_per_piece", self.d_cell_piece_id_per_piece, n * 120, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_piece_seat_arr", self.d_piece_seat_arr, n * 120, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_piece_type_arr", self.d_piece_type_arr, n * 120, load, validate);
+    checkpoint_field<bool>(arrays, "d_alive", self.d_alive, n * 120, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_pos_x", self.d_pos_x, n * 120, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_pos_y", self.d_pos_y, n * 120, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_zero_x", self.d_zero_x, n * 120, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_zero_y", self.d_zero_y, n * 120, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_move_count_arr", self.d_move_count_arr, n * 120, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_active_eat_arr", self.d_active_eat_arr, n * 120, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_passive_surv_arr", self.d_passive_surv_arr, n * 120, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_death_reason_arr", self.d_death_reason_arr, n * 120, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_death_step_arr", self.d_death_step_arr, n * 120, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_death_loc_flat_arr", self.d_death_loc_flat_arr, n * 120, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_cell_piece_id", self.d_cell_piece_id, n * 289, load, validate);
+    checkpoint_field<bool>(arrays, "d_seat_dead_arr", self.d_seat_dead_arr, n * 4, load, validate);
+    checkpoint_field<bool>(arrays, "d_seat_flag_revealed_arr", self.d_seat_flag_revealed_arr, n * 4, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_turn", self.d_turn, n, load, validate);
+    checkpoint_field<int64_t>(arrays, "d_zobrist", self.d_zobrist, n, load, validate);
+    checkpoint_field<int32_t>(arrays, "d_move_counter", self.d_move_counter, n, load, validate);
+    checkpoint_field<int32_t>(arrays, "d_moves_since_last_combat", self.d_moves_since_last_combat, n, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_observer_seats", self.d_observer_seats, n * 4, load, validate);
+    checkpoint_field<bool>(arrays, "d_terminated", self.d_terminated, n, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_winner_team", self.d_winner_team, n, load, validate);
+    checkpoint_field<bool>(arrays, "d_draw", self.d_draw, n, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_move_history", self.d_move_history, n * MOVE_HISTORY_LEN * 2, load, validate);
+    checkpoint_field<int32_t>(arrays, "d_history_write_idx", self.d_history_write_idx, n, load, validate);
+    checkpoint_field<int32_t>(arrays, "d_history_count", self.d_history_count, n, load, validate);
+    checkpoint_field<uint64_t>(arrays, "d_cm_direct_lo", self.d_cm_direct_lo, n * 4 * 120, load, validate);
+    checkpoint_field<uint64_t>(arrays, "d_cm_direct_hi", self.d_cm_direct_hi, n * 4 * 120, load, validate);
+    checkpoint_field<uint16_t>(arrays, "d_cm_direct_type", self.d_cm_direct_type, n * 4 * 120, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_cm_last_direct_step", self.d_cm_last_direct_step, n * 4 * 120, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_cm_direct_other_count", self.d_cm_direct_other_count, n * 4 * 120, load, validate);
+    checkpoint_field<uint64_t>(arrays, "d_cm_chain_lo", self.d_cm_chain_lo, n * 4 * 120, load, validate);
+    checkpoint_field<uint64_t>(arrays, "d_cm_chain_hi", self.d_cm_chain_hi, n * 4 * 120, load, validate);
+    checkpoint_field<uint16_t>(arrays, "d_cm_chain_type", self.d_cm_chain_type, n * 4 * 120, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_cm_last_chain_step", self.d_cm_last_chain_step, n * 4 * 120, load, validate);
+    checkpoint_field<uint64_t>(arrays, "d_cm_eaten_by_pid_lo", self.d_cm_eaten_by_pid_lo, n * 4 * 120, load, validate);
+    checkpoint_field<uint64_t>(arrays, "d_cm_eaten_by_pid_hi", self.d_cm_eaten_by_pid_hi, n * 4 * 120, load, validate);
+    checkpoint_field<int8_t>(arrays, "d_cm_rank_floor", self.d_cm_rank_floor, n * 4 * 120, load, validate);
+    checkpoint_field<int16_t>(arrays, "d_cm_rank_floor_step", self.d_cm_rank_floor_step, n * 4 * 120, load, validate);
+    checkpoint_field<bool>(arrays, "d_cm_is_gongb", self.d_cm_is_gongb, n * 4 * 120, load, validate);
+    checkpoint_field<bool>(arrays, "d_cm_not_gongb", self.d_cm_not_gongb, n * 4 * 120, load, validate);
+    checkpoint_field<bool>(arrays, "d_cm_attacked_by_known_gongb", self.d_cm_attacked_by_known_gongb, n * 4 * 120, load, validate);
+}
+static py::dict checkpoint_to_host(DeviceGameStateBatch& self) {
+    py::dict arrays;
+    checkpoint_arrays(self, arrays, false);
+    py::dict state;
+    state["version"] = 1; state["num_envs"] = self.num_envs;
+    state["max_num_moves"] = self.max_num_moves; state["arrays"] = arrays;
+    return state;
+}
+static void checkpoint_from_host(DeviceGameStateBatch& self, py::dict state) {
+    if (state["version"].cast<int>() != 1 || state["num_envs"].cast<int>() != self.num_envs
+        || state["max_num_moves"].cast<int>() != self.max_num_moves)
+        throw std::runtime_error("state checkpoint version/shape mismatch");
+    auto arrays = state["arrays"].cast<py::dict>();
+    checkpoint_arrays(self, arrays, true, true); // Validate all fields before mutation.
+    checkpoint_arrays(self, arrays, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +539,9 @@ static py::tuple py_obs_copy_to_host(const DeviceObservationBatch& self) {
 // ---------------------------------------------------------------------------
 PYBIND11_MODULE(junqi_cuda, m) {
     m.doc() = "JunQi GPU-accelerated game engine backend";
+    m.attr("OPTIONAL_GLOBAL_OBSERVATIONS") = true;
+    m.attr("KNOWN_ONLY_OBSERVATIONS") = true;
+    m.attr("FACTS_RUNTIME_CHECKPOINT") = true;
 
     // --- Constants ---
     m.attr("NUM_ENVS_MAX")       = NUM_ENVS_MAX;
@@ -520,8 +605,16 @@ PYBIND11_MODULE(junqi_cuda, m) {
         "GPU-resident batch of game states (SoA layout).")
         .def(py::init<int, int>(), py::arg("num_envs"), py::arg("max_num_moves") = 4000,
              "Allocate device memory with a per-batch episode move limit.")
+        .def("checkpoint_to_host", &checkpoint_to_host)
+        .def("checkpoint_from_host", &checkpoint_from_host)
+        .def_property_readonly("d_zobrist_ptr", [](const DeviceGameStateBatch& self) { return reinterpret_cast<uintptr_t>(self.d_zobrist); })
+        .def_property_readonly("d_move_counter_ptr", [](const DeviceGameStateBatch& self) { return reinterpret_cast<uintptr_t>(self.d_move_counter); })
+        .def_property_readonly("d_moves_since_last_combat_ptr", [](const DeviceGameStateBatch& self) { return reinterpret_cast<uintptr_t>(self.d_moves_since_last_combat); })
         .def_readonly("num_envs", &DeviceGameStateBatch::num_envs)
         .def_readonly("max_num_moves", &DeviceGameStateBatch::max_num_moves)
+        .def_property_readonly("has_belief_buffers", [](const DeviceGameStateBatch& state) {
+            return state.d_belief != nullptr || state.d_rule_belief != nullptr;
+        })
         // --- Phase 2: device pointer accessors for zero-copy torch views ---
         .def_property_readonly("d_turn_ptr",
             [](const DeviceGameStateBatch& self) {
@@ -680,9 +773,10 @@ same sequence of actions through both backends.
     // --- DeviceObservationBatch ---
     py::class_<DeviceObservationBatch>(m, "DeviceObservationBatch",
         "GPU-resident observation tensors for all (env, seat) pairs.")
-        .def(py::init<int>(), py::arg("num_envs"),
+        .def(py::init<int, bool>(), py::arg("num_envs"), py::arg("include_global") = true,
              "Allocate device memory for num_envs × NUM_SEATS observation tensors.")
         .def_readonly("num_envs", &DeviceObservationBatch::num_envs)
+        .def_readonly("global_dims", &DeviceObservationBatch::global_dims)
         .def_property_readonly("d_spatial_ptr",
             [](const DeviceObservationBatch& self) {
                 return reinterpret_cast<uintptr_t>(self.d_spatial);
@@ -711,9 +805,10 @@ global_ : np.ndarray  shape (N, 4, 28)          float32
     // Single-seat variant: (N, 101, 17, 17) instead of (N, 4, 101, 17, 17).
     py::class_<DeviceObservationSingleBatch>(m, "DeviceObservationSingleBatch",
         "GPU-resident observation tensors for ONE seat per env (acting seat only).")
-        .def(py::init<int>(), py::arg("num_envs"),
+        .def(py::init<int, bool>(), py::arg("num_envs"), py::arg("include_global") = true,
              "Allocate device memory for num_envs single-seat observation tensors.")
         .def_readonly("num_envs", &DeviceObservationSingleBatch::num_envs)
+        .def_readonly("global_dims", &DeviceObservationSingleBatch::global_dims)
         .def_property_readonly("d_spatial_ptr",
             [](const DeviceObservationSingleBatch& self) {
                 return reinterpret_cast<uintptr_t>(self.d_spatial);
@@ -729,12 +824,16 @@ global_ : np.ndarray  shape (N, 4, 28)          float32
     py::class_<DeviceRolloutHistory>(m, "DeviceRolloutHistory",
         "Compact GPU-resident history that reconstructs PPO minibatches on device.")
         .def(
-            py::init<int, int>(),
+            py::init<int, int, bool, bool>(),
             py::arg("num_steps"),
             py::arg("num_envs"),
+            py::arg("include_global") = true,
+            py::arg("store_beliefs") = true,
             "Allocate compact state history for (num_steps, num_envs).")
         .def_readonly("num_steps", &DeviceRolloutHistory::num_steps)
         .def_readonly("num_envs", &DeviceRolloutHistory::num_envs)
+        .def_readonly("include_global", &DeviceRolloutHistory::include_global)
+        .def_readonly("store_beliefs", &DeviceRolloutHistory::store_beliefs)
         .def_readonly("history_bytes", &DeviceRolloutHistory::history_bytes)
         .def_readonly("replay_capacity", &DeviceRolloutHistory::replay_capacity)
         .def(
@@ -744,7 +843,7 @@ global_ : np.ndarray  shape (N, 4, 28)          float32
                uintptr_t d_acting_seats_ptr,
                int step) {
                 GpuScratch& scratch = GpuScratch::instance();
-                if (!state.d_belief && (scratch.d_belief == nullptr ||
+                if (history.store_beliefs && !state.d_belief && (scratch.d_belief == nullptr ||
                     scratch.belief_cap < state.num_envs)) {
                     throw std::runtime_error(
                         "DeviceRolloutHistory.snapshot requires resident beliefs");
@@ -753,7 +852,7 @@ global_ : np.ndarray  shape (N, 4, 28)          float32
                     reinterpret_cast<const int8_t*>(d_acting_seats_ptr);
                 history.snapshot(
                     state,
-                    state.d_belief ? state.d_belief : scratch.d_belief,
+                    history.store_beliefs ? (state.d_belief ? state.d_belief : scratch.d_belief) : nullptr,
                     d_acting,
                     step);
             },
@@ -804,18 +903,19 @@ masks on device, and return raw device pointers to reusable output buffers.
         [](const DeviceGameStateBatch& state,
            DeviceObservationSingleBatch& obs_out,
            uintptr_t d_acting_seats_ptr,
-           int8_t show_mode) {
+           int8_t show_mode, bool known_only) {
+            if (known_only && obs_out.global_dims) throw std::invalid_argument("known_only requires no globals");
             GpuScratch& scratch = GpuScratch::instance();
-            if (!state.d_belief && scratch.d_belief == nullptr) {
+            if (!known_only && !state.d_belief && scratch.d_belief == nullptr) {
                 throw std::runtime_error(
                     "build_observation_single_seat: call upload_beliefs first.");
             }
             const int8_t* d_acting = reinterpret_cast<const int8_t*>(d_acting_seats_ptr);
             build_observation_single_seat(
-                state, state.d_belief ? state.d_belief : scratch.d_belief, d_acting, obs_out, show_mode);
+                state, known_only ? nullptr : (state.d_belief ? state.d_belief : scratch.d_belief), d_acting, obs_out, show_mode);
         },
         py::arg("state"), py::arg("obs_out"),
-        py::arg("d_acting_seats_ptr"), py::arg("show_mode") = (int8_t)2,
+        py::arg("d_acting_seats_ptr"), py::arg("show_mode") = (int8_t)2, py::arg("known_only") = false,
         R"doc(
 Build observation for ONE seat per env (the acting seat).
 d_acting_seats_ptr: device pointer to (N,) int8 acting seat values.
@@ -1193,19 +1293,20 @@ No host transfers occur.
     m.def("build_observation_batch_resident",
         [](const DeviceGameStateBatch& state,
            DeviceObservationBatch& obs_out,
-           int8_t show_mode) {
+           int8_t show_mode, bool known_only) {
+            if (known_only && obs_out.global_dims) throw std::invalid_argument("known_only requires no globals");
             GpuScratch& scratch = GpuScratch::instance();
-            if ((!state.d_belief && !scratch.d_belief) ||
+            if ((!known_only && !state.d_belief && !scratch.d_belief) ||
                 (!state.d_observer_seats && !scratch.d_observer_seats)) {
                 throw std::runtime_error(
                     "build_observation_batch_resident: call upload_beliefs and "
                     "upload_observer_seats first to populate the scratch buffers.");
             }
-            build_observation_batch(state, state.d_belief ? state.d_belief : scratch.d_belief,
+            build_observation_batch(state, known_only ? nullptr : (state.d_belief ? state.d_belief : scratch.d_belief),
                                     state.d_observer_seats ? state.d_observer_seats : scratch.d_observer_seats,
                                     obs_out, show_mode);
         },
-        py::arg("state"), py::arg("obs_out"), py::arg("show_mode") = (int8_t)2,
+        py::arg("state"), py::arg("obs_out"), py::arg("show_mode") = (int8_t)2, py::arg("known_only") = false,
         "Variant of ``build_observation_batch`` that uses beliefs and\n"
         "observer_seats already uploaded via ``upload_beliefs`` and\n"
         "``upload_observer_seats``.  Does ZERO H2D per call; intended for\n"

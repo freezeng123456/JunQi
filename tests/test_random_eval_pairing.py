@@ -78,11 +78,17 @@ def test_cpu_unique_game_seeds(monkeypatch, head_to_head, team):
         return result
 
     class Policy:
+        identity_encoding = "legacy_probabilities"
+        uses_global_summary = True
+
         def eval(self):
             return self
 
         def act_greedy(self, sp, gl, mask):
             return mask.long().argmax(-1)
+
+        def __call__(self, sp, gl, mask, *, actions):
+            return {"log_probs": mask.float().log().log_softmax(dim=-1)}
 
     monkeypatch.setattr(JunqiEnv, "reset", reset)
     monkeypatch.setattr(JunqiEnv, "_step_game_only", step)
@@ -108,3 +114,88 @@ def test_cpu_unique_game_seeds(monkeypatch, head_to_head, team):
     assert sorted(started) == list(range(100, 100 + num_games))
     assert sorted(finished) == sorted(started)
     assert count == num_games
+
+
+class DistributionPolicy:
+    def __init__(self, log_probs):
+        self.log_probs = log_probs
+
+    def __call__(self, spatial, global_, legal, *, actions):
+        # The evaluator must request the distribution without sampling.
+        assert actions.shape == legal.shape[:1]
+        return {"log_probs": self.log_probs}
+
+    def act_greedy(self, *args):
+        raise AssertionError("Unchecked greedy inference bypassed the distribution")
+
+
+@pytest.mark.parametrize("greedy", [False, True])
+@pytest.mark.parametrize("bad_log_prob", [float("nan"), float("inf"), -float("inf"),
+                                           1000.0, -1000.0])
+def test_evaluation_rejects_invalid_legal_distribution(greedy, bad_log_prob):
+    import torch
+
+    policy = DistributionPolicy(torch.tensor([[-torch.inf, bad_log_prob, -torch.inf]]))
+    legal = torch.tensor([[False, True, False]])
+    with pytest.raises(ValueError, match="Invalid evaluation policy distribution"):
+        random_eval._policy_actions(policy, None, None, legal, torch.tensor([9]),
+                                    ply=0, greedy=greedy)
+
+
+@pytest.mark.parametrize("greedy", [False, True])
+def test_evaluation_rejects_empty_legal_row_in_batch(greedy):
+    import torch
+
+    policy = DistributionPolicy(torch.zeros(2, 3))
+    legal = torch.tensor([[False, True, False], [False, False, False]])
+    with pytest.raises(ValueError, match="Invalid evaluation policy distribution"):
+        random_eval._policy_actions(policy, None, None, legal, torch.tensor([9, 10]),
+                                    ply=0, greedy=greedy)
+
+
+@pytest.mark.parametrize("greedy", [False, True])
+def test_evaluation_accepts_illegal_negative_infinity(greedy):
+    import torch
+
+    legal = torch.tensor([[False, True, False], [False, False, True]])
+    policy = DistributionPolicy(torch.where(legal, 0.0, -torch.inf))
+    actions = random_eval._policy_actions(policy, None, None, legal,
+                                         torch.tensor([9, 10]), ply=3, greedy=greedy)
+    assert actions.tolist() == [1, 2]
+    assert actions.dtype == torch.int32
+
+
+def test_evaluation_greedy_and_seeded_sampling_use_checked_distribution():
+    import torch
+
+    legal = torch.tensor([[False, True, True]]).expand(128, -1)
+    log_probs = torch.tensor([[0.0, 0.25, 0.75]]).log().expand(128, -1)
+    policy = DistributionPolicy(log_probs)
+    seeds = torch.arange(128)
+    greedy = random_eval._policy_actions(policy, None, None, legal, seeds, 7, True)
+    assert torch.equal(greedy, torch.full((128,), 2, dtype=torch.int32))
+    first = random_eval._policy_actions(policy, None, None, legal, seeds, 7, False)
+    torch.rand(16)
+    second = random_eval._policy_actions(policy, None, None, legal, seeds, 7, False)
+    assert torch.equal(first, second)
+    assert set(first.tolist()) == {1, 2}
+
+
+@pytest.mark.parametrize("greedy", [False, True])
+def test_actual_policy_nonfinite_logits_abort_without_fallback(monkeypatch, greedy):
+    import torch
+    from junqi_core.board import COMPACT_ACTION_DIM
+    from junqi_core.observation import OBS_CHANNELS
+    from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
+
+    policy = JunqiNet(JunqiNetConfig(
+        cnn_channels=8, cnn_layers=1, depth=1, embed_dim=16, n_head=2,
+        ff_factor=2, action_key_dim=8, use_global_summary=False,
+        identity_encoding="known_only")).eval()
+    legal = torch.ones(1, COMPACT_ACTION_DIM, dtype=torch.bool)
+    monkeypatch.setattr(policy, "_policy_logits",
+                        lambda *args: torch.full(legal.shape, torch.nan))
+    with pytest.raises(ValueError, match="Invalid evaluation policy distribution"):
+        random_eval._policy_actions(policy, torch.zeros(1, OBS_CHANNELS, 17, 17),
+                                    torch.zeros(1, 0), legal, torch.tensor([9]), 0, greedy)
+    assert policy._nan_fwd_count == 0

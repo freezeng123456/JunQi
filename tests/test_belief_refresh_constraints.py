@@ -54,6 +54,16 @@ class ConstantNet(torch.nn.Module):
         return {"logits": logits}
 
 
+@pytest.mark.parametrize('observers', [(0, 2), (1, 3)])
+def test_evaluation_refresh_changes_only_the_selected_policy_team(observers):
+    ro = CaptureRollout(public_mine=False)
+    refresh_beliefs_neural(ro, ConstantNet(), observer_seats=observers, empty_cache=False)
+    other = [seat for seat in range(4) if seat not in observers]
+    np.testing.assert_array_equal(ro.uploaded[:, other], ro.rules.numpy()[:, other])
+    # The other policy continues to see its exact rule-derived information.
+    assert np.count_nonzero(ro.uploaded[ro.rules.numpy() == 0]) == 0
+
+
 def test_refresh_preserves_public_mine_and_all_rule_exclusions():
     ro = CaptureRollout()
     refresh_beliefs_neural(ro, ConstantNet(), empty_cache=False)

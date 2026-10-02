@@ -160,6 +160,7 @@ def _minibatch_buffer(advantages, seats=None, random_opponent=False, grouping="g
     b.adv_filt_thresh = 0.0
     b.adv_filt_rate = 1.0
     b.obs_spatial = torch.zeros((*shape, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE))
+    b.obs_global_dims = OBS_GLOBAL_DIMS
     b.obs_global = torch.zeros((*shape, OBS_GLOBAL_DIMS))
     b.legal_mask = torch.ones((*shape, FLAT_ACTION_DIM), dtype=torch.bool)
     b.actions = torch.zeros(shape, dtype=torch.int32)
@@ -474,3 +475,45 @@ def test_collection_rejects_terminal_start_without_auto_reset(lifecycle):
     with pytest.raises(RuntimeError, match="auto_reset_done"):
         collector.collect_rollout(env, policy, buf, auto_reset_done=False)
     assert env._done[0]
+
+
+@pytest.mark.parametrize("output", ["scalar", "scalar_column", "categorical"])
+def test_collection_stores_scalar_expectations_and_bootstraps(lifecycle, monkeypatch, output):
+    env, policy, buf = lifecycle(N=2, T=1)
+    expected = torch.tensor([0.5, -0.25])
+    if output == "categorical":
+        predictions = torch.tensor([[0.1, 0.3, 0.6], [0.6, 0.05, 0.35]]).log()
+    else:
+        predictions = expected if output == "scalar" else expected[:, None]
+    actual_act = policy.act
+    actual_compute = buf.compute_returns
+    captured = {}
+
+    def act(*args):
+        actions, log_probs, _ = actual_act(*args)
+        return actions, log_probs, predictions
+
+    def compute(last_values, **kwargs):
+        captured["bootstrap"] = last_values.copy()
+        return actual_compute(last_values, **kwargs)
+
+    monkeypatch.setattr(policy, "act", act)
+    monkeypatch.setattr(buf, "compute_returns", compute)
+    collector.collect_rollout(env, policy, buf, seed_base=1)
+    np.testing.assert_allclose(buf.values[0], expected.numpy(), atol=1e-7)
+    np.testing.assert_allclose(captured["bootstrap"], expected.numpy(), atol=1e-7)
+
+
+@pytest.mark.parametrize("shape", [(2, 2), (2, 4), (2, 3, 1), (1,), (1, 3)])
+def test_collection_rejects_invalid_value_shapes(lifecycle, monkeypatch, shape):
+    env, policy, buf = lifecycle(N=2, T=1)
+    actual_act = policy.act
+
+    def act(*args):
+        actions, log_probs, _ = actual_act(*args)
+        return actions, log_probs, torch.zeros(shape)
+
+    monkeypatch.setattr(policy, "act", act)
+    with pytest.raises(ValueError, match="policy values must have shape"):
+        collector.collect_rollout(env, policy, buf, seed_base=1)
+    assert env._envs[0].moves == 0

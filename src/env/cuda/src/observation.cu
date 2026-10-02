@@ -53,6 +53,9 @@
 
 namespace junqi_cuda {
 
+// Piece enum values shared with rules.py.
+static constexpr int8_t PT_JUNQI = 2, PT_DILEI = 3, PT_SILING = 5, PT_GONGB = 13;
+
 // ---------------------------------------------------------------------------
 // Constants for bucket encoding (must match Python observation.py)
 // ---------------------------------------------------------------------------
@@ -97,11 +100,14 @@ __device__ __forceinline__ void fill_channel(float* spatial, int ch, float v)
 // ---------------------------------------------------------------------------
 // DeviceObservationBatch — constructor
 // ---------------------------------------------------------------------------
-DeviceObservationBatch::DeviceObservationBatch(int n) : num_envs(n) {
+DeviceObservationBatch::DeviceObservationBatch(int n, bool include_global)
+    : num_envs(n), global_dims(include_global ? NUM_GLOBAL_DIMS : 0) {
     CUDA_CHECK(cudaMalloc(&d_spatial,
         (size_t)n * NUM_SEATS * NUM_OBS_CHANNELS * BOARD_SIZE * BOARD_SIZE * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_global,
-        (size_t)n * NUM_SEATS * NUM_GLOBAL_DIMS * sizeof(float)));
+    if (include_global) {
+        CUDA_CHECK(cudaMalloc(&d_global,
+            (size_t)n * NUM_SEATS * NUM_GLOBAL_DIMS * sizeof(float)));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -121,9 +127,11 @@ void DeviceObservationBatch::copy_to_host(
     CUDA_CHECK(cudaMemcpy(h_spatial, d_spatial,
         (size_t)num_envs * NUM_SEATS * NUM_OBS_CHANNELS * BOARD_SIZE * BOARD_SIZE * sizeof(float),
         cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(h_global, d_global,
-        (size_t)num_envs * NUM_SEATS * NUM_GLOBAL_DIMS * sizeof(float),
-        cudaMemcpyDeviceToHost));
+    if (global_dims) {
+        CUDA_CHECK(cudaMemcpy(h_global, d_global,
+            (size_t)num_envs * NUM_SEATS * NUM_GLOBAL_DIMS * sizeof(float),
+            cudaMemcpyDeviceToHost));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -211,7 +219,7 @@ __global__ void observation_kernel(
     // avoid 120 × 12 = 1440 gmem reads per thread.  bel_base[obs_seat]
     // is 12 × 289 = 3468 floats (13.5 KiB) — fits in shared.  We use
     // threads to cooperatively load it.
-    __shared__ float s_bel_obs[NUM_TRACKED_TYPES * NUM_CELLS];  // 3468 floats
+    extern __shared__ float s_bel_obs[];  // absent in known-only mode
 
     // Per-seat boolean flags (4 entries each) for this env.
     __shared__ bool s_seat_dead[4];
@@ -245,12 +253,11 @@ __global__ void observation_kernel(
 
     // Co-op load of the observer's belief slice into shared.
     // Source base: d_belief_tensor + env * NUM_SEATS*12*289 + obs_seat*12*289
-    const float* bel_env_base = d_belief_tensor
-        + (size_t)env * NUM_SEATS * NUM_TRACKED_TYPES * NUM_CELLS;
-    const float* bel_obs_src = bel_env_base
-        + (size_t)obs_seat * NUM_TRACKED_TYPES * NUM_CELLS;
-    for (int i = tid; i < NUM_TRACKED_TYPES * NUM_CELLS; i += BLK) {
-        s_bel_obs[i] = bel_obs_src[i];
+    if (d_belief_tensor) {
+        const float* src = d_belief_tensor
+            + ((size_t)env * NUM_SEATS + obs_seat) * NUM_TRACKED_TYPES * NUM_CELLS;
+        for (int i = tid; i < NUM_TRACKED_TYPES * NUM_CELLS; i += BLK)
+            s_bel_obs[i] = src[i];
     }
     __syncthreads();
 
@@ -271,12 +278,12 @@ __global__ void observation_kernel(
     // Output pointers.
     float* spatial = d_obs_spatial
         + ((size_t)env * num_seats + slot) * SPATIAL_SZ;
-    float* global_out = d_obs_global
-        + ((size_t)env * num_seats + slot) * NUM_GLOBAL_DIMS;
+    float* global_out = d_obs_global ? d_obs_global
+        + ((size_t)env * num_seats + slot) * NUM_GLOBAL_DIMS : nullptr;
 
     // --------- Co-op zero-init of the spatial + global blocks ----------
     for (int i = tid; i < SPATIAL_SZ; i += BLK) spatial[i] = 0.0f;
-    if (tid < NUM_GLOBAL_DIMS) global_out[tid] = 0.0f;
+    if (global_out && tid < NUM_GLOBAL_DIMS) global_out[tid] = 0.0f;
     __syncthreads();
 
     // Channel base offsets (must match Python CHANNEL_LAYOUT exactly)
@@ -324,6 +331,22 @@ __global__ void observation_kernel(
                 int flat_w = py * BOARD_SIZE + px;
                 int plane_off = cy * BOARD_SIZE + cx;
 
+                // Known-only schema: read observable identity facts directly.
+                // Never construct or normalize a distribution for unknown pieces.
+                int known_type = -1;
+                if (!d_belief_tensor) {
+                    size_t ci = ((size_t)env * NUM_SEATS + obs_seat) * 120 + p;
+                    if (d_cm_is_gongb[ci]) known_type = PT_GONGB - 2;
+                    bool mine = false;
+                    for (int witness = 0; witness < NUM_SEATS; ++witness)
+                        mine |= (d_cm_direct_type[((size_t)env * NUM_SEATS + witness) * 120 + p]
+                                 & ((uint16_t)1 << (PT_SILING - 2))) != 0;
+                    if (mine) known_type = PT_DILEI - 2;
+                    if (s_seat_flagr[ps] && pt == PT_JUNQI) known_type = PT_JUNQI - 2;
+                    if (ps == obs_seat || show_mode == 0 || (show_mode == 2 && ps == teammate_seat))
+                        known_type = type_idx;
+                }
+
                 // ch 0..11 : piece_own
                 if (ps == obs_seat && type_idx >= 0) {
                     spatial[(CH_OWN + type_idx) * PLANE + plane_off] = 1.0f;
@@ -332,7 +355,8 @@ __global__ void observation_kernel(
                 // ch 12..23 : prob_teammate (observer's belief at teammate cell)
                 if (ps == teammate_seat) {
                     for (int ti = 0; ti < NUM_TRACKED_TYPES; ++ti) {
-                        float prob = s_bel_obs[ti * NUM_CELLS + flat_w];
+                        float prob = d_belief_tensor ? s_bel_obs[ti * NUM_CELLS + flat_w]
+                                                    : (ti == known_type ? 1.0f : 0.0f);
                         if (prob > 0.0f)
                             spatial[(CH_TEAMMATE + ti) * PLANE + plane_off] = prob;
                     }
@@ -356,7 +380,8 @@ __global__ void observation_kernel(
                 // ch 27..38 : belief_left_side
                 if (ps == left_seat) {
                     for (int ti = 0; ti < NUM_TRACKED_TYPES; ++ti) {
-                        float prob = s_bel_obs[ti * NUM_CELLS + flat_w];
+                        float prob = d_belief_tensor ? s_bel_obs[ti * NUM_CELLS + flat_w]
+                                                    : (ti == known_type ? 1.0f : 0.0f);
                         if (prob > 0.0f)
                             spatial[(CH_BELIEF_LEFT + ti) * PLANE + plane_off] = prob;
                     }
@@ -365,7 +390,8 @@ __global__ void observation_kernel(
                 // ch 39..50 : belief_right_side
                 if (ps == right_seat) {
                     for (int ti = 0; ti < NUM_TRACKED_TYPES; ++ti) {
-                        float prob = s_bel_obs[ti * NUM_CELLS + flat_w];
+                        float prob = d_belief_tensor ? s_bel_obs[ti * NUM_CELLS + flat_w]
+                                                    : (ti == known_type ? 1.0f : 0.0f);
                         if (prob > 0.0f)
                             spatial[(CH_BELIEF_RIGHT + ti) * PLANE + plane_off] = prob;
                     }
@@ -415,10 +441,10 @@ __global__ void observation_kernel(
                     spatial[(CH_PIECE_SLOT + slot_ch) * PLANE + plane_off] = 1.0f;
 
                 // Accumulate remaining_left/right (for global reduce).
-                if (ps == left_seat) {
+                if (global_out && ps == left_seat) {
                     for (int ti = 0; ti < NUM_TRACKED_TYPES; ++ti)
                         local_rem_left[ti] += s_bel_obs[ti * NUM_CELLS + flat_w];
-                } else if (ps == right_seat) {
+                } else if (global_out && ps == right_seat) {
                     for (int ti = 0; ti < NUM_TRACKED_TYPES; ++ti)
                         local_rem_right[ti] += s_bel_obs[ti * NUM_CELLS + flat_w];
                 }
@@ -535,7 +561,7 @@ __global__ void observation_kernel(
     // Pass 6 — reduce per-thread remaining_left/right into global_out
     // via atomicAdd.  Only threads 0..119 have non-zero partials.
     // --------------------------------------------------------------------
-    if (tid < 120) {
+    if (global_out && tid < 120) {
         for (int ti = 0; ti < NUM_TRACKED_TYPES; ++ti) {
             if (local_rem_left[ti] != 0.0f)
                 atomicAdd(&global_out[ti], local_rem_left[ti]);
@@ -547,7 +573,7 @@ __global__ void observation_kernel(
     // --------------------------------------------------------------------
     // Pass 7 — global[24..27]: flag_revealed (observer-sorted).
     // --------------------------------------------------------------------
-    if (tid < 4) {
+    if (global_out && tid < 4) {
         global_out[24 + tid] = s_seat_flagr[s_order_vals[tid]] ? 1.0f : 0.0f;
     }
 
@@ -659,7 +685,7 @@ void build_observation_batch(
     if (n <= 0) return;
     dim3 grid(n, NUM_SEATS);
     dim3 block(128);
-    observation_kernel<<<grid, block>>>(
+    observation_kernel<<<grid, block, d_beliefs ? NUM_TRACKED_TYPES * NUM_CELLS * sizeof(float) : 0>>>(
         n, NUM_SEATS,
         d_state.d_piece_seat_arr,
         d_state.d_piece_type_arr,
@@ -711,11 +737,14 @@ void build_observation_batch(
 // ===========================================================================
 // DeviceObservationSingleBatch — single-seat variant (N, 412, 17, 17)
 // ===========================================================================
-DeviceObservationSingleBatch::DeviceObservationSingleBatch(int n) : num_envs(n) {
+DeviceObservationSingleBatch::DeviceObservationSingleBatch(int n, bool include_global)
+    : num_envs(n), global_dims(include_global ? NUM_GLOBAL_DIMS : 0) {
     CUDA_CHECK(cudaMalloc(&d_spatial,
         (size_t)n * NUM_OBS_CHANNELS * BOARD_SIZE * BOARD_SIZE * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_global,
-        (size_t)n * NUM_GLOBAL_DIMS * sizeof(float)));
+    if (include_global) {
+        CUDA_CHECK(cudaMalloc(&d_global,
+            (size_t)n * NUM_GLOBAL_DIMS * sizeof(float)));
+    }
 }
 
 DeviceObservationSingleBatch::~DeviceObservationSingleBatch() {
@@ -754,7 +783,7 @@ void build_observation_single_seat(
 
     dim3 grid(n, 1);     // 1 seat per env
     dim3 block(128);
-    observation_kernel<<<grid, block>>>(
+    observation_kernel<<<grid, block, d_beliefs ? NUM_TRACKED_TYPES * NUM_CELLS * sizeof(float) : 0>>>(
         n, /*num_seats=*/1,
         d_state.d_piece_seat_arr,
         d_state.d_piece_type_arr,

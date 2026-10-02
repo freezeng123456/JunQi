@@ -8,7 +8,7 @@ the compact 16,641-action space and a scalar (or categorical) value estimate.
 Input
 ~~~~~
 * ``obs_spatial``  : float32 tensor ``(B, OBS_CHANNELS, 17, 17)``  — 317 channels
-* ``obs_global``   : float32 tensor ``(B, OBS_GLOBAL_DIMS)``        — 28 scalars
+* ``obs_global``   : ``(B, 28)`` for legacy models; optional for spatial-only models
 * ``legal_mask``   : bool tensor    ``(B, FLAT_ACTION_DIM)``         — 16,641 bits
 
 Pipeline
@@ -21,8 +21,9 @@ Pipeline
 2. **Positional embedding** — project GraphStem output to (129, D), then add
    learnable positional embeddings (one per on-board cell).
 
-3. **Global token injection** — project ``obs_global`` (28,) → (1, D) and
-   prepend as a CLS token; sequence length becomes 130.
+3. **CLS injection** — legacy models project ``obs_global`` (28,) → (1, D).
+   Spatial-only models use a learned CLS vector, without global summaries.
+   Both prepend one token; sequence length is 130.
 
 4. **Transformer trunk** — L layers of pre-norm self-attention + FFN
    (default L=6, D=256, 8 heads).
@@ -49,7 +50,7 @@ ADR-119 (flat action encoding), ADR-102 (canonical rotation), ADR-106 (obs layou
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 import torch.nn as nn
@@ -57,8 +58,9 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Categorical
 
-from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
-from junqi_rl.networks.combat_features import CombatOutcomeHead
+from junqi_core.observation import CHANNEL_LAYOUT, OBS_CHANNELS, OBS_GLOBAL_DIMS
+from junqi_rl.feature_specs import plan_feature_channels, resolve_policy_features
+from junqi_rl.networks.feature_context import PolicyFeatureContext
 from junqi_core.board import (
     COMPACT_ACTION_DIM,
     COMPACT_RAIL_DEGREE,
@@ -121,10 +123,21 @@ class JunqiNetConfig:
     pos_emb_std: float = 0.02
     """Std for truncated-normal positional embedding initialisation."""
 
+    use_global_summary: bool = True
+    """Consume the legacy 28 scalars. False learns CLS from spatial input only.
+    True remains the default for historical configs/checkpoints that omit it.
+    New spatial-only experiments explicitly set this to False."""
+
+    identity_encoding: str = "legacy_probabilities"
+    """known_only: observed identities only; unknown identity planes are zero."""
+
     # Value head
     use_cat_vf: bool = False
     """If True, value head predicts N_VF_CAT bins (categorical RL).
     If False, predicts a single scalar (standard actor-critic)."""
+
+    policy_features: dict[str, int] = field(default_factory=dict)
+    """Optional feature IDs and exact versions; resolved once at construction."""
 
     combat_outcome_features: bool = False
     """Enable the 81-parameter observation-derived combat outcome residual."""
@@ -381,6 +394,14 @@ class JunqiNet(nn.Module):
         super().__init__()
         self.cfg = cfg or JunqiNetConfig()
         cfg = self.cfg
+        if type(cfg.use_global_summary) is not bool:
+            raise ValueError("net.use_global_summary must be a boolean")
+        self.uses_global_summary = cfg.use_global_summary
+        from junqi_core.observation import validate_identity_encoding
+        validate_identity_encoding(cfg.identity_encoding, cfg.use_global_summary)
+        self.identity_encoding = cfg.identity_encoding
+        self.observation_global_dims = OBS_GLOBAL_DIMS if self.uses_global_summary else 0
+        feature_specs = resolve_policy_features(cfg)
 
         # Counter for in-forward NaN/Inf guard hits. Incremented by forward()
         # each time a row of logits was non-finite and had to be replaced
@@ -416,7 +437,12 @@ class JunqiNet(nn.Module):
         nn.init.trunc_normal_(self.pos_emb, std=cfg.pos_emb_std)
 
         # -- Global (CLS) token projection ------------------------------------
-        self.global_proj = nn.Linear(OBS_GLOBAL_DIMS, D)
+        if self.uses_global_summary:
+            self.global_proj = nn.Linear(OBS_GLOBAL_DIMS, D)
+            self.register_parameter("cls_token", None)
+        else:
+            self.global_proj = None
+            self.cls_token = nn.Parameter(torch.zeros(1, 1, D))
 
         # -- Transformer trunk ------------------------------------------------
         self.transformer = nn.Sequential(
@@ -444,11 +470,30 @@ class JunqiNet(nn.Module):
         self._init_weights()
         # Construct AFTER baseline initialization: disabled state dict and RNG
         # consumption are unchanged; enabled base weights are identical too.
-        self.combat_head = CombatOutcomeHead() if cfg.combat_outcome_features else None
-        from junqi_rl.networks.tactical_features import TacticalFeatureHead
-        self.tactical_head = TacticalFeatureHead() if cfg.tactical_features else None
-        from junqi_rl.networks.relational_features import RelationalFeatureHead
-        self.relational_head = RelationalFeatureHead() if cfg.relational_features else None
+        self.combat_head = None
+        self.tactical_head = None
+        self.relational_head = None
+        for spec in feature_specs:
+            if getattr(self, spec.attribute, None) is not None:
+                raise ValueError(f"feature attribute conflicts with network: {spec.attribute}")
+            setattr(self, spec.attribute, spec.build())
+        # Plain tuples avoid registering the same module twice (legacy weight
+        # keys and optimizer parameter order remain unchanged). No registry
+        # lookup, module import, or feature-version parsing happens in forward.
+        self._feature_plan = tuple(
+            (spec.attribute, spec.needs_legal_mask) for spec in feature_specs
+        )
+        self._feature_versions = tuple((spec.name, spec.version) for spec in feature_specs)
+        # Static union of enabled heads' channel dependencies: one device
+        # gather per policy call, rather than a kernel for every channel group.
+        self._feature_channel_slices, indices = plan_feature_channels(
+            feature_specs, CHANNEL_LAYOUT, COMPACT_TO_FLAT.tolist(), NUM_CELLS,
+        )
+        self.register_buffer(
+            "_feature_gather_indices",
+            torch.tensor(indices, dtype=torch.long) if indices else None,
+            persistent=False,
+        )
 
     # -------------------------------------------------------------------------
     # Weight init
@@ -473,7 +518,7 @@ class JunqiNet(nn.Module):
     def _encode(
         self,
         obs_spatial: Tensor,   # (B, OBS_CHANNELS, 17, 17)
-        obs_global: Tensor,    # (B, OBS_GLOBAL_DIMS)
+        obs_global: Tensor | None,    # unused when global summaries are disabled
     ) -> tuple[Tensor, Tensor]:
         """Encode inputs → (cls_token, cell_tokens).
 
@@ -500,7 +545,12 @@ class JunqiNet(nn.Module):
         cell_tokens = self.patch_proj(feat)  # type: ignore[operator]
 
         # CLS token from global vector → (B, 1, D)
-        cls_token = self.global_proj(obs_global).unsqueeze(1)
+        if self.uses_global_summary:
+            if obs_global is None or obs_global.shape != (B, OBS_GLOBAL_DIMS):
+                raise ValueError(f"legacy policy requires obs_global shape ({B}, {OBS_GLOBAL_DIMS})")
+            cls_token = self.global_proj(obs_global).unsqueeze(1)
+        else:
+            cls_token = self.cls_token.to(dtype=cell_tokens.dtype).expand(B, -1, -1)
 
         # Concatenate → (B, 130, D)
         tokens = torch.cat([cls_token, cell_tokens], dim=1)
@@ -543,18 +593,21 @@ class JunqiNet(nn.Module):
         attn = torch.bmm(q_f, k_f.transpose(1, 2)) / math.sqrt(Kd)
         # Flatten to (B, 16641)
         logits = attn.reshape(-1, FLAT_ACTION_DIM)
-        if self.combat_head is not None:
+        if self._feature_plan:
             if obs_spatial is None:
-                raise ValueError("combat outcome features require the actor observation")
-            logits = logits + self.combat_head(obs_spatial)
-        if self.tactical_head is not None:
-            if obs_spatial is None:
-                raise ValueError("tactical features require the actor observation")
-            logits = logits + self.tactical_head(obs_spatial)
-        if self.relational_head is not None:
-            if obs_spatial is None:
-                raise ValueError("relational features require actor observations")
-            logits = logits + self.relational_head(obs_spatial, legal_mask).to(logits.dtype)
+                raise ValueError("enabled policy features require the actor observation")
+            context = PolicyFeatureContext(
+                obs_spatial, self.on_board_idx,
+                channel_slices=self._feature_channel_slices,
+                gather_indices=self._feature_gather_indices,
+            )
+            for attribute, needs_mask in self._feature_plan:
+                head = getattr(self, attribute)
+                if needs_mask:
+                    residual = head(obs_spatial, legal_mask, context=context).to(logits.dtype)
+                else:
+                    residual = head(obs_spatial, context=context)
+                logits = logits + residual
         # Retain a finite sentinel here.  Under torch.compile, exact -inf in
         # the normal action distribution makes entropy/KL terms hit 0 * -inf
         # and can poison every PPO gradient.  A direct selected-action mask
@@ -655,7 +708,7 @@ class JunqiNet(nn.Module):
     def forward(
         self,
         obs_spatial: Tensor,    # (B, OBS_CHANNELS, 17, 17)  float32
-        obs_global: Tensor,     # (B, OBS_GLOBAL_DIMS)        float32
+        obs_global: Tensor | None,     # (B, OBS_GLOBAL_DIMS)        float32
         legal_mask: Tensor,     # (B, FLAT_ACTION_DIM)        bool
         *,
         actions: Tensor | None = None,
@@ -690,7 +743,7 @@ class JunqiNet(nn.Module):
     def forward_policy_value_shared(
         self,
         obs_spatial: Tensor,
-        obs_global: Tensor,
+        obs_global: Tensor | None,
         policy_indices: Tensor,
         legal_mask: Tensor,
         *,
@@ -719,7 +772,7 @@ class JunqiNet(nn.Module):
         out = self._policy_from_encoded(
             policy_cells, legal_mask, actions=actions,
             obs_spatial=(obs_spatial.index_select(0, policy_indices)
-                         if self.combat_head is not None else None),
+                         if self._feature_plan else None),
         )
         out["value"] = self._value(cls)
         return out
@@ -727,7 +780,7 @@ class JunqiNet(nn.Module):
     def forward_value(
         self,
         obs_spatial: Tensor,
-        obs_global: Tensor,
+        obs_global: Tensor | None,
     ) -> Tensor:
         """Training-only value path that skips the large action head.
 
@@ -742,7 +795,7 @@ class JunqiNet(nn.Module):
     def act(
         self,
         obs_spatial: Tensor,    # (B, OBS_CHANNELS, 17, 17)
-        obs_global: Tensor,     # (B, OBS_GLOBAL_DIMS)
+        obs_global: Tensor | None,     # (B, OBS_GLOBAL_DIMS)
         legal_mask: Tensor,     # (B, FLAT_ACTION_DIM)
     ) -> tuple[Tensor, Tensor, Tensor]:
         """Inference-only forward using Gumbel-max sampling.
@@ -784,7 +837,7 @@ class JunqiNet(nn.Module):
     def act_greedy(
         self,
         obs_spatial: Tensor,
-        obs_global: Tensor,
+        obs_global: Tensor | None,
         legal_mask: Tensor,
     ) -> Tensor:
         """Greedy (argmax) action selection — useful for evaluation."""

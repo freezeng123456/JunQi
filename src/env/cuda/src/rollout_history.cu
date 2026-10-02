@@ -195,8 +195,8 @@ void ensure_replay_capacity(DeviceRolloutHistory& history, int batch_size) {
   }
 
   history.replay_state = new DeviceGameStateBatch(batch_size);
-  history.replay_obs = new DeviceObservationSingleBatch(batch_size);
-  CUDA_CHECK(cudaMalloc(
+  history.replay_obs = new DeviceObservationSingleBatch(batch_size, history.include_global);
+  if (history.store_beliefs) CUDA_CHECK(cudaMalloc(
       &history.d_replay_belief,
       static_cast<size_t>(batch_size) * BELIEF_STRIDE * sizeof(float)));
   history.replay_capacity = batch_size;
@@ -204,8 +204,9 @@ void ensure_replay_capacity(DeviceRolloutHistory& history, int batch_size) {
 
 }  // namespace
 
-DeviceRolloutHistory::DeviceRolloutHistory(int steps, int envs)
-    : num_steps(steps), num_envs(envs) {
+DeviceRolloutHistory::DeviceRolloutHistory(int steps, int envs, bool use_global, bool use_beliefs)
+    : num_steps(steps), num_envs(envs), include_global(use_global), store_beliefs(use_beliefs) {
+  if (!store_beliefs && include_global) throw std::invalid_argument("known_only history requires no globals");
   if (steps <= 0 || envs <= 0) {
     throw std::invalid_argument(
         "DeviceRolloutHistory requires positive num_steps and num_envs");
@@ -240,7 +241,7 @@ DeviceRolloutHistory::DeviceRolloutHistory(int steps, int envs)
   ALLOC_HISTORY(d_move_history, MOVE_HISTORY_LEN * 2, int16_t);
   ALLOC_HISTORY(d_history_write_idx, 1, int32_t);
   ALLOC_HISTORY(d_history_count, 1, int32_t);
-  ALLOC_HISTORY(d_observer_belief, OBSERVER_BELIEF_STRIDE, float);
+  if (store_beliefs) { ALLOC_HISTORY(d_observer_belief, OBSERVER_BELIEF_STRIDE, float); }
 
   ALLOC_HISTORY(d_cm_direct_lo, CM_HISTORY_STRIDE, uint64_t);
   ALLOC_HISTORY(d_cm_direct_hi, CM_HISTORY_STRIDE, uint64_t);
@@ -320,7 +321,7 @@ void DeviceRolloutHistory::snapshot(
   if (step < 0 || step >= num_steps) {
     throw std::out_of_range("history snapshot step out of range");
   }
-  if (belief == nullptr || acting_seats == nullptr) {
+  if ((store_beliefs && belief == nullptr) || acting_seats == nullptr) {
     throw std::invalid_argument("history snapshot received null device pointer");
   }
   const size_t row_offset = static_cast<size_t>(step) * num_envs;
@@ -396,7 +397,7 @@ void DeviceRolloutHistory::snapshot(
 
 #undef SNAPSHOT_ROWS
 
-  launch_snapshot_observer_slice(
+  if (store_beliefs) launch_snapshot_observer_slice(
       belief,
       acting_seats,
       d_observer_belief,
@@ -532,7 +533,7 @@ RolloutHistoryReconstruction DeviceRolloutHistory::reconstruct(
 
 #undef GATHER_ROWS
 
-  launch_gather_observer_slice(
+  if (store_beliefs) launch_gather_observer_slice(
       d_observer_belief,
       flat_indices,
       acting_seats,

@@ -42,7 +42,7 @@ Design contract (see `docs/ARCHITECTURE.md` §4 and ADR-106, ADR-118):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 
@@ -53,7 +53,10 @@ from .board import (
     is_railway,
     is_stronghold,
 )
-from .info_model import NUM_TRACKED_TYPES, TRACKED_TYPES, BeliefTensor
+from .identity import NUM_TRACKED_TYPES, TRACKED_TYPES
+
+if TYPE_CHECKING:
+    from .info_model import BeliefTensor
 from .rail_topology import CURVE_ARC_CELLS
 from .rotation import rotate_planes
 from .rules import (
@@ -230,6 +233,13 @@ def _global_slices() -> dict[str, slice]:
 GLOBAL_LAYOUT: Final[dict[str, slice]] = _global_slices()
 OBS_GLOBAL_DIMS: Final[int] = sum(s.stop - s.start for s in GLOBAL_LAYOUT.values())
 assert OBS_GLOBAL_DIMS == 28, f"Global layout must sum to 28, got {OBS_GLOBAL_DIMS}"
+
+
+def validate_identity_encoding(identity_encoding: str, include_global: bool) -> None:
+    if identity_encoding not in ("legacy_probabilities", "known_only"):
+        raise ValueError(f"unsupported identity_encoding: {identity_encoding!r}")
+    if identity_encoding == "known_only" and include_global:
+        raise ValueError("known_only observations require include_global=False")
 
 
 # ===========================================================================
@@ -418,9 +428,9 @@ class ObservationTensor:
             )
         if self.spatial.dtype != np.float32:
             raise TypeError(f"spatial must be float32; got {self.spatial.dtype}")
-        if self.global_.shape != (OBS_GLOBAL_DIMS,):
+        if self.global_.shape not in ((0,), (OBS_GLOBAL_DIMS,)):
             raise ValueError(
-                f"global_ must be ({OBS_GLOBAL_DIMS},); got {self.global_.shape}"
+                f"global_ must be (0,) or ({OBS_GLOBAL_DIMS},); got {self.global_.shape}"
             )
         if self.global_.dtype != np.float32:
             raise TypeError(f"global_ must be float32; got {self.global_.dtype}")
@@ -431,6 +441,8 @@ class ObservationTensor:
 
     def global_slice(self, name: str) -> np.ndarray:
         """Return the named global feature range (view, not copy)."""
+        if not self.global_.size:
+            raise ValueError("global summaries are disabled for this observation")
         return self.global_[GLOBAL_LAYOUT[name]]
 
     def snapshot(self) -> ObservationTensor:
@@ -469,14 +481,23 @@ class ObservationBuilder:
     Thread-safety: each thread needs its own instance.
     """
 
-    __slots__ = ("_canonical", "_global", "_world")
+    __slots__ = ("_canonical", "_global", "_world", "identity_encoding")
 
-    def __init__(self) -> None:
+    def __init__(self, *, include_global: bool = True,
+                 identity_encoding: str = "legacy_probabilities") -> None:
+        if type(include_global) is not bool:
+            raise ValueError("include_global must be a boolean")
+        validate_identity_encoding(identity_encoding, include_global)
+        self.identity_encoding = identity_encoding
         self._world = np.zeros(
             (OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE), dtype=np.float32
         )
         self._canonical = np.zeros_like(self._world)
-        self._global = np.zeros(OBS_GLOBAL_DIMS, dtype=np.float32)
+        self._global = np.zeros(OBS_GLOBAL_DIMS if include_global else 0, dtype=np.float32)
+
+    @property
+    def global_dims(self) -> int:
+        return int(self._global.size)
 
     # -----------------------------------------------------------------
     # Public entry point
@@ -485,7 +506,7 @@ class ObservationBuilder:
     def build(
         self,
         state: GameState,
-        belief: BeliefTensor,
+        belief: BeliefTensor | None,
         observer: Seat,
     ) -> ObservationTensor:
         """Build ``observer``'s canonical-frame observation.
@@ -510,7 +531,7 @@ class ObservationBuilder:
     def build_into(
         self,
         state: GameState,
-        belief: BeliefTensor,
+        belief: BeliefTensor | None,
         observer: Seat,
         out_spatial: np.ndarray,
         out_global: np.ndarray,
@@ -551,9 +572,9 @@ class ObservationBuilder:
             raise TypeError(
                 f"out_spatial must be float32, got {out_spatial.dtype}"
             )
-        if out_global.shape != (OBS_GLOBAL_DIMS,):
+        if out_global.shape != (self.global_dims,):
             raise ValueError(
-                f"out_global shape mismatch: expected ({OBS_GLOBAL_DIMS},), "
+                f"out_global shape mismatch: expected ({self.global_dims},), "
                 f"got {out_global.shape}"
             )
         if out_global.dtype != np.float32:
@@ -601,9 +622,9 @@ class ObservationBuilder:
                 f"({n}, {OBS_CHANNELS}, {BOARD_SIZE}, {BOARD_SIZE}), "
                 f"got {out_spatial.shape}"
             )
-        if out_global.shape != (n, OBS_GLOBAL_DIMS):
+        if out_global.shape != (n, self.global_dims):
             raise ValueError(
-                f"out_global shape mismatch: expected ({n}, {OBS_GLOBAL_DIMS}), "
+                f"out_global shape mismatch: expected ({n}, {self.global_dims}), "
                 f"got {out_global.shape}"
             )
         if out_spatial.dtype != np.float32 or out_global.dtype != np.float32:
@@ -621,14 +642,18 @@ class ObservationBuilder:
     def _fill_into(
         self,
         state: GameState,
-        belief: BeliefTensor,
+        belief: BeliefTensor | None,
         observer: Seat,
         world_buf: np.ndarray,        # scratch (OBS_CHANNELS, 17, 17) float32
         canonical_out: np.ndarray,    # final   (OBS_CHANNELS, 17, 17) float32
         global_out: np.ndarray,       # final   (28,)          float32
     ) -> None:
         """Core assembly logic used by every public entry point."""
-        if belief.observer is not observer:
+        if self.identity_encoding == "legacy_probabilities" and belief is None:
+            raise ValueError("legacy observations require BeliefTensor")
+        if self.identity_encoding == "known_only" and belief is not None:
+            raise ValueError("known_only observations must not receive rule probabilities")
+        if belief is not None and belief.observer is not observer:
             raise ValueError(
                 f"belief.observer={belief.observer.name} does not match "
                 f"observer={observer.name}; rebuild belief with the correct "
@@ -639,7 +664,8 @@ class ObservationBuilder:
         # now only marks the tensor mirror dirty; the refresh happens
         # here, right before the writers start reading it.  No-op when
         # the mirror is already fresh (e.g. after ``BeliefTensor.initial``).
-        belief.ensure_synced(state)
+        if belief is not None:
+            belief.ensure_synced(state)
 
         # Zero world + global scratch in-place (one C-level memset each).
         # ``canonical_out`` is always fully overwritten by the rotation
@@ -681,13 +707,14 @@ class ObservationBuilder:
         )
 
         # --- 2. prob_teammate (12 planes from BeliefTensor) ---------------
-        _write_prob_teammate(
-            out=world_buf[CHANNEL_LAYOUT["prob_teammate"]],
-            lx=lx, ly=ly, lseat=lseat,
-            live_pids=live_pids,
-            teammate_val=teammate_val,
-            belief=belief,
-        )
+        if belief is not None:
+            _write_prob_teammate(
+                out=world_buf[CHANNEL_LAYOUT["prob_teammate"]],
+                lx=lx, ly=ly, lseat=lseat,
+                live_pids=live_pids,
+                teammate_val=teammate_val,
+                belief=belief,
+            )
 
         # --- 3. dark_teammate (mask; only non-zero under DARK) ------------
         if state.show_mode is ShowMode.DARK:
@@ -709,22 +736,27 @@ class ObservationBuilder:
         )
 
         # --- 6. belief_left_side (12 planes per enemy) -------------------
-        _write_belief_side(
-            out=world_buf[CHANNEL_LAYOUT["belief_left_side"]],
-            lx=lx, ly=ly, lseat=lseat,
-            live_pids=live_pids,
-            target_seat_val=left_val,
-            belief=belief,
-        )
+        if belief is not None:
+            _write_belief_side(
+                out=world_buf[CHANNEL_LAYOUT["belief_left_side"]],
+                lx=lx, ly=ly, lseat=lseat,
+                live_pids=live_pids,
+                target_seat_val=left_val,
+                belief=belief,
+            )
 
         # --- 7. belief_right_side ----------------------------------------
-        _write_belief_side(
-            out=world_buf[CHANNEL_LAYOUT["belief_right_side"]],
-            lx=lx, ly=ly, lseat=lseat,
-            live_pids=live_pids,
-            target_seat_val=right_val,
-            belief=belief,
-        )
+        if belief is not None:
+            _write_belief_side(
+                out=world_buf[CHANNEL_LAYOUT["belief_right_side"]],
+                lx=lx, ly=ly, lseat=lseat,
+                live_pids=live_pids,
+                target_seat_val=right_val,
+                belief=belief,
+            )
+
+        if self.identity_encoding == "known_only":
+            _write_known_identities(world_buf, state, observer, live_pids, lx, ly, lseat)
 
         # --- 8. dead_flags (3 constant planes: teammate, left, right) -----
         #     me is always alive (can't observe while dead), so skipped.
@@ -845,9 +877,11 @@ class ObservationBuilder:
         )
 
         # ---- global features ----
-        _write_global_features(
-            out=global_out, state=state, belief=belief, order_vals=order_vals,
-        )
+        if global_out.size:
+            assert belief is not None  # Nonempty globals require legacy identity encoding.
+            _write_global_features(
+                out=global_out, state=state, belief=belief, order_vals=order_vals,
+            )
 
         # ---- Rotate world_buf -> canonical_out via a single np.rot90 + copy ----
         #
@@ -1080,10 +1114,46 @@ def _write_bucket_group(
                 out[base + k, sub_ys[sub], sub_xs[sub]] = 1.0
 
 
+def _write_known_identities(
+    out: np.ndarray,
+    state: GameState,
+    observer: Seat,
+    pids: np.ndarray,
+    xs: np.ndarray,
+    ys: np.ndarray,
+    seats: np.ndarray,
+) -> None:
+    """Write facts only. Unknown is zero, with occupancy in separate planes.
+
+    Public mine/engineer reveals and commander-triggered flag reveals are
+    read directly from event memory. No probability table is consulted.
+    """
+    from .combat_memory import publicly_revealed_mines
+    known = np.full(len(pids), -1, dtype=np.int8)
+    cm = state.combat_memory
+    known[cm.is_gongb[int(observer), pids]] = _TYPE_TO_IDX_MAP[PieceType.GONGB]
+    known[publicly_revealed_mines(cm)[pids]] = _TYPE_TO_IDX_MAP[PieceType.DILEI]
+    # Truth is used only at a public flag reveal or where the mode permits it.
+    revealed = state.seat_flag_revealed_arr[seats]
+    flags = revealed & (state.piece_type_arr[pids] == PieceType.JUNQI.value)
+    known[flags] = _TYPE_TO_IDX_MAP[PieceType.JUNQI]
+    visible = seats == int(observer)
+    if state.show_mode is ShowMode.BRIGHT:
+        visible = np.ones_like(visible)
+    elif state.show_mode is ShowMode.HALF_DARK:
+        visible |= seats == int(observer.teammate)
+    known[visible] = _PIECETYPE_TO_TRACKED_IDX[state.piece_type_arr[pids[visible]]]
+    for name, seat in (("prob_teammate", observer.teammate),
+                       ("belief_left_side", observer.left_side_enemy),
+                       ("belief_right_side", observer.right_side_enemy)):
+        select = (seats == int(seat)) & (known >= 0)
+        out[CHANNEL_LAYOUT[name].start + known[select], ys[select], xs[select]] = 1.0
+
+
 def _build_bucket_masks(
     live_pids: np.ndarray,
     lseat: np.ndarray,
-    belief: BeliefTensor,
+    belief: BeliefTensor | None,
     obs_team: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute (ours_mask, theirs_mask) once for all 3 bucket groups.

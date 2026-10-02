@@ -166,10 +166,11 @@ struct DeviceGameStateBatch {
 
 struct DeviceObservationBatch {
   int num_envs = 0;
+  int global_dims = NUM_GLOBAL_DIMS;
   float* d_spatial = nullptr;
   float* d_global = nullptr;
 
-  DeviceObservationBatch(int num_envs);
+  DeviceObservationBatch(int num_envs, bool include_global = true);
   ~DeviceObservationBatch();
   DeviceObservationBatch(const DeviceObservationBatch&) = delete;
   DeviceObservationBatch& operator=(const DeviceObservationBatch&) = delete;
@@ -181,10 +182,11 @@ struct DeviceObservationBatch {
 // Used in the PPO collect hot-path where only the acting seat's observation is needed.
 struct DeviceObservationSingleBatch {
   int num_envs = 0;
+  int global_dims = NUM_GLOBAL_DIMS;
   float* d_spatial = nullptr;  // (N, NUM_OBS_CHANNELS, 17, 17)
   float* d_global = nullptr;   // (N, 28)
 
-  DeviceObservationSingleBatch(int num_envs);
+  DeviceObservationSingleBatch(int num_envs, bool include_global = true);
   ~DeviceObservationSingleBatch();
   DeviceObservationSingleBatch(const DeviceObservationSingleBatch&) = delete;
   DeviceObservationSingleBatch& operator=(const DeviceObservationSingleBatch&) = delete;
@@ -209,6 +211,8 @@ struct RolloutHistoryReconstruction {
 struct DeviceRolloutHistory {
   int num_steps = 0;
   int num_envs = 0;
+  bool include_global = true;
+  bool store_beliefs = true;
   int replay_capacity = 0;
   uint64_t history_bytes = 0;
 
@@ -261,7 +265,7 @@ struct DeviceRolloutHistory {
   DeviceObservationSingleBatch* replay_obs = nullptr;
   float* d_replay_belief = nullptr;
 
-  DeviceRolloutHistory(int num_steps, int num_envs);
+  DeviceRolloutHistory(int num_steps, int num_envs, bool include_global = true, bool store_beliefs = true);
   ~DeviceRolloutHistory();
   DeviceRolloutHistory(const DeviceRolloutHistory&) = delete;
   DeviceRolloutHistory& operator=(const DeviceRolloutHistory&) = delete;

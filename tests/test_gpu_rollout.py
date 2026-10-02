@@ -249,11 +249,15 @@ def test_gpu_evaluation_honors_move_limit_and_cache():
     from junqi_rl.analysis.random_eval import evaluate_vs_random_gpu, evaluate_head_to_head_gpu
 
     class Policy:
+        identity_encoding = "legacy_probabilities"
+        uses_global_summary = True
+
         def eval(self):
             return self
 
-        def act_greedy(self, sp, gl, mask):
-            return mask.long().argmax(-1)
+        def __call__(self, sp, gl, mask, *, actions):
+            logits = torch.zeros_like(mask, dtype=torch.float32).masked_fill(~mask, -torch.inf)
+            return {"log_probs": logits.log_softmax(dim=-1)}
 
     for limit in (1, 3, 1):
         for evaluator, args in [

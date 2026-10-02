@@ -27,6 +27,7 @@ from junqi_core.rules import ALL_SEATS, Seat, ShowMode
 from junqi_core.setup import generate_random_setup
 from junqi_core.state import Action, GameState
 from junqi_rl.action_lut import ROTATE_LUT, UNROTATE_LUT
+from junqi_rl.input_contract import policy_input_contract
 from junqi_rl.training.rollout import FLAT_ACTION_DIM
 
 if TYPE_CHECKING:
@@ -82,7 +83,7 @@ def record_game_with_policy(
 
     Uses the **CPU** engine (:class:`GameState`) for simplicity — one game
     at a time, no batching.  Observations are built per step via
-    :func:`build_observation_for_seat` and rotated to canonical frame so
+    :class:`ObservationBuilder` with the policy's input contract so
     the network sees the correct orientation.
 
     Parameters
@@ -106,9 +107,13 @@ def record_game_with_policy(
         ``iteration``, ``checkpoint``, ``win_rate``).  It is persisted with
         the replay so progress dashboards can group games by run.
     """
-    from junqi_core.observation import (
-        build_observation,
-    )
+    from junqi_core.observation import ObservationBuilder
+
+    inputs = policy_input_contract(policy)
+    identity_encoding = inputs.identity_encoding
+    builder = ObservationBuilder(**inputs.observation_kwargs())
+    if record_beliefs and identity_encoding == "known_only":
+        raise ValueError("known_only cannot record legacy rule probabilities")
 
     rng = random.Random(rng_seed)
     recorded_seed = -1 if rng_seed is None else int(rng_seed)
@@ -123,12 +128,11 @@ def record_game_with_policy(
     )
     dev = torch.device(device)
 
-    # Build initial belief tensors for every seat; updated after each move.
-    from junqi_core.info_model import BeliefTensor
-    beliefs = {
-        s: BeliefTensor.initial(state, s, show_mode=show_mode)
-        for s in ALL_SEATS
-    }
+    if identity_encoding == "legacy_probabilities":
+        from junqi_core.info_model import BeliefTensor
+        beliefs = {s: BeliefTensor.initial(state, s, show_mode=show_mode) for s in ALL_SEATS}
+    else:
+        beliefs = {s: None for s in ALL_SEATS}
 
     # Accumulators
     actions_rows: list[tuple[int, int, int, int, int]] = []
@@ -150,7 +154,7 @@ def record_game_with_policy(
             break  # Engine will normally handle this via Q12 on next call.
 
         # Build canonical-frame obs for this seat.
-        obs = build_observation(state, beliefs[seat], observer=seat)
+        obs = builder.build(state, beliefs[seat], observer=seat)
         sp_np = obs.spatial.astype(np.float32, copy=False)
         gl_np = obs.global_.astype(np.float32, copy=False)
 
@@ -213,12 +217,13 @@ def record_game_with_policy(
 
         # Apply action.
         action = Action(seat=seat, src=(sx, sy), dst=(dx, dy))
-        prev_state = state.clone()
+        prev_state = state.clone() if identity_encoding == "legacy_probabilities" else None
         result = state.step_inplace(action)
 
         # Propagate beliefs for all seats.
-        for s in ALL_SEATS:
-            beliefs[s].update(prev_state, state, result)
+        for belief in beliefs.values():
+            if belief is not None:
+                belief.update(prev_state, state, result)
 
         # Record (top-K in canonical frame first — un-rotate to world for
         # visualisation so users see moves in world coords).
@@ -266,6 +271,8 @@ def record_game_with_policy(
         "policy_team": int(policy_team),
         "top_k": int(top_k),
         "record_beliefs": bool(record_beliefs),
+        "identity_encoding": identity_encoding,
+        "global_dims": builder.global_dims,
     })
 
     traj = TrajectoryWithPolicy(

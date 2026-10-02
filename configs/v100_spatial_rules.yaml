@@ -1,0 +1,5 @@
+# Matched spatial-only control: no learned BeliefNet; deductive probabilities.
+extends: v100_spatial_belief.yaml
+save_dir: exps/v100_spatial_rules
+belief:
+  enabled: false

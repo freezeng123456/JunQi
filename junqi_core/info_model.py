@@ -29,18 +29,26 @@ Reference: docs/INFERENCE.md v0.1.0; tied to RULES_VERSION 1.1.0.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Final
 
 import numpy as np
 
 from .board import BOARD_SIZE, index_to_pos
 from .combat_memory import is_publicly_revealed_mine, publicly_revealed_mines
+
+# Compatibility exports: the facts path imports this vocabulary directly.
+from .identity import (
+    ADMISSIBLE_BY_INDEX as ADMISSIBLE_BY_INDEX,
+)
+from .identity import (
+    NUM_TRACKED_TYPES as NUM_TRACKED_TYPES,
+)
+from .identity import (
+    TRACKED_TYPES as TRACKED_TYPES,
+)
 from .rules import (
-    ALL_PLACEABLE_PIECES,
     ALL_SEATS,
-    BACK_TWO_ROWS_INDICES,
-    CAMP_INDICES,
-    FRONT_ROW_INDICES,
     PIECE_COUNTS,
     STRONGHOLD_INDICES,
     Event,
@@ -57,56 +65,7 @@ INFERENCE_VERSION: Final[str] = "0.1.0"
 # Type / constant tables
 # ===========================================================================
 
-# All 12 concrete piece types (indexing order used for probability vectors).
-TRACKED_TYPES: Final[tuple[PieceType, ...]] = tuple(
-    t for t in ALL_PLACEABLE_PIECES if t not in (PieceType.NONE, PieceType.DARK)
-)
-NUM_TRACKED_TYPES: Final[int] = len(TRACKED_TYPES)
 _TYPE_TO_IDX: Final[dict[PieceType, int]] = {t: i for i, t in enumerate(TRACKED_TYPES)}
-
-# Per-index admissible types (derived from C1–C4 in RULES §1.3 + camp rule).
-# Index `i ∈ [0, 30)` → tuple of PieceType that MAY appear at slot `i`.
-# Camp indices have no piece ever (not represented in belief map).
-_ADMISSIBLE_BY_INDEX: list[tuple[PieceType, ...]] = []
-for _i in range(30):
-    if _i in CAMP_INDICES:
-        _ADMISSIBLE_BY_INDEX.append(())
-    elif _i in STRONGHOLD_INDICES:
-        # Stronghold hosts either JUNQI or any non-special movable piece.
-        # Constraint: exactly one of the two strongholds holds JUNQI; the
-        # other holds some other piece (which cannot be DILEI or ZHADAN
-        # because both are restricted to back-two-rows AND stronghold is
-        # in back row BUT the flag-must-be-in-one-stronghold rule allows
-        # the other stronghold slot to hold any non-flag piece).
-        # Simplification for the per-slot prior: all non-flag types allowed,
-        # plus JUNQI. A more refined joint prior would enforce exactly-one
-        # flag, but the per-slot approximation is sufficient here.
-        types: list[PieceType] = [PieceType.JUNQI]
-        for t in TRACKED_TYPES:
-            if t is PieceType.JUNQI:
-                continue
-            # Stronghold is in back-row (index 26 or 28 → row 5), so DILEI
-            # is allowed. ZHADAN is allowed (not front row).
-            types.append(t)
-        _ADMISSIBLE_BY_INDEX.append(tuple(types))
-    else:
-        # Non-camp, non-stronghold: piece-type specific constraints
-        is_front = _i in FRONT_ROW_INDICES
-        is_back_two = _i in BACK_TWO_ROWS_INDICES
-        types = []
-        for t in TRACKED_TYPES:
-            if t is PieceType.JUNQI:
-                continue  # JUNQI only on strongholds
-            if t is PieceType.DILEI and not is_back_two:
-                continue  # DILEI only back two rows
-            if t is PieceType.ZHADAN and is_front:
-                continue  # ZHADAN never on front row
-            types.append(t)
-        _ADMISSIBLE_BY_INDEX.append(tuple(types))
-
-ADMISSIBLE_BY_INDEX: Final[tuple[tuple[PieceType, ...], ...]] = tuple(
-    _ADMISSIBLE_BY_INDEX
-)
 
 # ===========================================================================
 # Prior construction
@@ -134,9 +93,10 @@ def _per_slot_prior_vector(index_local: int) -> np.ndarray:
 
 
 # Precomputed 30×12 initial-prior table (seat-local slot → distribution).
-_INITIAL_PRIOR_TABLE: Final[np.ndarray] = np.stack(
-    [_per_slot_prior_vector(i) for i in range(30)], axis=0
-)
+@lru_cache(maxsize=1)
+def _initial_prior_table() -> np.ndarray:
+    """Created only by the legacy probability adapter."""
+    return np.stack([_per_slot_prior_vector(i) for i in range(30)], axis=0)
 
 
 def one_hot(piece_type: PieceType) -> np.ndarray:
@@ -250,7 +210,7 @@ class BeliefTensor:
                         NUM_TRACKED_TYPES, 1.0 / NUM_TRACKED_TYPES, dtype=np.float32
                     )
                 else:
-                    b.probs[pos] = _INITIAL_PRIOR_TABLE[local].copy()
+                    b.probs[pos] = _initial_prior_table()[local].copy()
 
         # Initialize remaining-inventory for each enemy seat.
         for s in ALL_SEATS:

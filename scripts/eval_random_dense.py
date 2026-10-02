@@ -24,7 +24,6 @@ import sys
 from pathlib import Path
 
 import torch
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 _JUNQI_RL = ROOT / "junqi_rl"
@@ -78,16 +77,14 @@ def main() -> None:
         evaluate_vs_random_gpu,
     )
     from junqi_rl.analysis.protocol import write_game_records
-    from junqi_rl.networks.junqi_net import JunqiNet, JunqiNetConfig
+    from junqi_rl.training.checkpoint import load_evaluation_policy
+    from junqi_rl.training.config import load_yaml_config
 
-    with open(args.config, encoding="utf-8") as f:
-        cfg_yaml = yaml.safe_load(f)
+    cfg_yaml = load_yaml_config(args.config)
     net_cfg = cfg_yaml.get("net") or cfg_yaml.get("ppo", {}).get("net")
     if net_cfg is None:
         raise SystemExit(f"No net section in {args.config}")
-
-    ppo_cfg = cfg_yaml.get("ppo") or {}
-    dtype_name = str(ppo_cfg.get("dtype", "bfloat16"))
+    dtype_name = str((cfg_yaml.get("ppo") or {}).get("dtype", "bfloat16"))
     autocast_dtype = {
         "bfloat16": torch.bfloat16,
         "float16": torch.float16,
@@ -96,16 +93,9 @@ def main() -> None:
     if autocast_dtype is None:
         raise SystemExit(f"Unsupported ppo.dtype {dtype_name!r}")
 
-    policy = JunqiNet(JunqiNetConfig(**net_cfg)).to(args.device)
-    sd = torch.load(args.ckpt, map_location=args.device, weights_only=False)
-    if isinstance(sd, dict) and "policy" in sd:
-        weights = sd["policy"]
-    elif isinstance(sd, dict) and "net" in sd:
-        weights = sd["net"]
-    else:
-        weights = sd
-    policy.load_state_dict(weights)
-    policy.eval()
+    policy = load_evaluation_policy(
+        args.ckpt, device=args.device, net_config=net_cfg,
+    )
 
     records: list[dict] = []
 

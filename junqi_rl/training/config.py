@@ -12,6 +12,7 @@ from typing import Any, get_args, get_type_hints
 import torch
 import yaml
 
+from junqi_rl.feature_specs import resolve_policy_features
 from junqi_rl.networks.arrangement_net import ArrangementNetConfig
 from junqi_rl.networks.belief_net import BeliefNetConfig
 from junqi_rl.networks.junqi_net import JunqiNetConfig
@@ -96,6 +97,11 @@ class TrainConfig:
 
     save_dir: str = "exps/default"
     total_rollouts: int = 10_000
+    # Nonzero selects a cumulative completed-game budget within this lineage.
+    # total_rollouts remains a safety ceiling, never a successful game target.
+    target_completed_games: int = 0
+    save_every_games: int = 500
+    eval_every_games: int = 2000
     save_every: int = 100
     eval_every: int = 50
     eval_num_games: int = 128
@@ -117,6 +123,8 @@ class TrainConfig:
     early_stop_min_rollout: int = 100
 
     resume: str = ""
+    init_policy: str = ""
+    """Optional matching policy-only checkpoint; starts a fresh optimizer/run."""
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     use_wandb: bool = False
     wandb_project: str = "junqi-rl"
@@ -302,6 +310,20 @@ _NON_CONFIG_ARGS = {"config", "extra", "resume_cli", "validate_only"}
 
 def validate_config(cfg: TrainConfig) -> None:
     """Fail before allocating models when a configuration is inconsistent."""
+    if type(cfg.net.use_global_summary) is not bool:
+        raise ValueError("net.use_global_summary must be a boolean")
+    if cfg.resume and cfg.init_policy:
+        raise ValueError("resume and init_policy are mutually exclusive")
+    if cfg.target_completed_games < 0 or min(cfg.save_every_games, cfg.eval_every_games) <= 0:
+        raise ValueError("game budget must be nonnegative and game cadences positive")
+    if cfg.target_completed_games and (not cfg.env.use_gpu_rollout or
+            cfg.net.identity_encoding != "known_only" or cfg.arr.enabled or cfg.belief.enabled):
+        raise ValueError("completed-game training currently requires the GPU facts-only move baseline")
+    resolve_policy_features(cfg.net)
+    from junqi_core.observation import validate_identity_encoding
+    validate_identity_encoding(cfg.net.identity_encoding, cfg.net.use_global_summary)
+    if cfg.net.identity_encoding == "known_only" and cfg.belief.enabled:
+        raise ValueError("known_only uses staged belief training; legacy probability publication must be disabled")
     if cfg.env.show_mode != "DARK":
         raise ValueError("training and evaluation currently support env.show_mode=DARK only")
 

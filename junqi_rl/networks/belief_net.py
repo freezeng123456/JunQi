@@ -7,7 +7,7 @@ distribution over the 12 tracked piece types for every enemy-occupied cell.
 Architecture (P1 first cut — "BeliefTransformer" variant from Ataraxos,
 see docs/P1_BELIEF_NET_PLAN.md)
 ---------------------------------------------------------------------------
-* CNN stem (reused from :mod:`.junqi_net`) consumes the 256-ch observation.
+* CNN stem (reused from :mod:`.junqi_net`) consumes the 317-ch observation.
 * Board features flatten to 289 tokens.
 * Per-cell learned positional embedding.
 * ``n_encoder_layer`` non-causal self-attention layers (no look-ahead mask:
@@ -17,25 +17,19 @@ see docs/P1_BELIEF_NET_PLAN.md)
   applied in :func:`compute_belief_loss` and callers (not inside forward,
   so the raw logits tensor remains differentiable).
 
-Key choices relative to Ataraxos
---------------------------------
-* **Non-autoregressive decoder**: P1 drops the causal AR decoder over
-  pieces and decodes per-cell in one shot. Ataraxos's ablation claims
-  ~+5% belief-accuracy from AR; we skip to save ~50 LOC and a sampling
-  loop. If win-rate gains stall we promote in P1.5.
-* **No temporal attention**: Ataraxos interleaves spatial + temporal
-  attention (their ``TemporalBeliefTransformer`` variant). JunQi's
-  observation already encodes 32-step move history + 12-ch death reasons,
-  so we get history via features (the same trick Ataraxos's stateless
-  variant uses). Promotion path is documented in the plan.
-* **Seat-shared**: one network handles all 4 seats via a seat-id
-  embedding, matching :class:`ArrangementNet`.
+Implementation choices
+----------------------
+* Parallel marginal predictions use non-causal board attention.
+* Public history is supplied through observation channels.
+* One shared network uses a seat embedding for all four observers.
+* The optional autoregressive model in ``joint_belief_net`` reuses this
+  encoder and adds a causal decoder for complete hidden-army assignments.
 
 Forward contract
 ----------------
 Input
 ~~~~~
-* ``obs_spatial : (B, 256, 17, 17)``   — same tensor fed to JunqiNet.
+* ``obs_spatial : (B, OBS_CHANNELS, 17, 17)``   — same tensor fed to JunqiNet.
 * ``obs_global : (B, 28)``             — ignored by P1.1 (fed for API
                                          consistency; may be used by a
                                          future global-feature head).
@@ -75,7 +69,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from junqi_core.info_model import NUM_TRACKED_TYPES
+from junqi_core.identity import NUM_TRACKED_TYPES
 from junqi_core.observation import OBS_CHANNELS, OBS_GLOBAL_DIMS
 from junqi_rl.networks.junqi_net import CNNStem, BOARD_SIZE, NUM_CELLS
 
@@ -263,7 +257,7 @@ class BeliefNet(nn.Module):
         cfg = self.cfg
         D = cfg.embed_dim
 
-        # -- CNN stem: 256-ch obs → D-ch feature map ---------------------
+        # -- CNN stem: OBS_CHANNELS → cnn_channels feature map ---------------------
         self.cnn = CNNStem(OBS_CHANNELS, cfg.cnn_channels, cfg.cnn_layers)
 
         # Project CNN output channels to embed_dim if mismatched.
@@ -305,18 +299,19 @@ class BeliefNet(nn.Module):
     # Forward
     # ------------------------------------------------------------------
 
-    def forward(
+    def encode(
         self,
         obs_spatial: Tensor,          # (B, OBS_CHANNELS, 17, 17)
         seat_idx: Tensor | None = None,  # (B,) int64 — required iff use_seat_embedding
         obs_global: Tensor | None = None,  # (B, OBS_GLOBAL_DIMS) — ignored by P1.1
-    ) -> dict[str, Tensor]:
-        """Compute per-cell belief logits for enemy pieces.
+        *, cell_indices: Tensor | None = None,
+    ) -> Tensor:
+        """Encode board tokens for marginal heads or joint decoders.
 
         Parameters
         ----------
         obs_spatial
-            Float tensor of shape ``(B, 256, 17, 17)``. The same tensor
+            Float tensor of shape ``(B, OBS_CHANNELS, 17, 17)``. The same tensor
             you feed to :class:`JunqiNet.forward`.
         seat_idx
             Long tensor of shape ``(B,)`` with values in ``{0, 1, 2, 3}``,
@@ -327,9 +322,8 @@ class BeliefNet(nn.Module):
 
         Returns
         -------
-        dict with keys:
-        * ``logits`` — ``(B, 289, 12)`` raw per-cell logits.
-        * ``log_probs`` — ``(B, 289, 12)`` log-softmax over the last axis.
+        Tensor of shape ``(B, selected_cells, embed_dim)``. Without
+        ``cell_indices``, all 289 board-grid cells are encoded.
         """
         del obs_global  # Reserved; unused in P1.1
 
@@ -353,7 +347,11 @@ class BeliefNet(nn.Module):
         x = self.patch_proj(x)                           # (B, 289, D)
 
         # --- Add positional + seat embeddings --------------------------
-        x = x + self.pos_emb                             # broadcast (1, 289, D)
+        positions = self.pos_emb
+        if cell_indices is not None:
+            x = x.index_select(1, cell_indices)
+            positions = positions.index_select(1, cell_indices)
+        x = x + positions
         if self.cfg.use_seat_embedding:
             if seat_idx is None:
                 raise ValueError(
@@ -376,7 +374,12 @@ class BeliefNet(nn.Module):
             x = blk(x)
         x = self.ln_final(x)                             # (B, 289, D)
 
-        # --- Belief head -----------------------------------------------
+        return x
+
+    def forward(self, obs_spatial: Tensor, seat_idx: Tensor | None = None,
+                obs_global: Tensor | None = None) -> dict[str, Tensor]:
+        """Parallel marginal predictions; encoder also serves joint generators."""
+        x = self.encode(obs_spatial, seat_idx, obs_global)
         logits = self.head(x)                            # (B, 289, 12)
         log_probs = F.log_softmax(logits, dim=-1)
 

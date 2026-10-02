@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from junqi_core.info_model import TRACKED_TYPES
+from junqi_core.identity import TRACKED_TYPES
 from junqi_rl.belief.buffer import BeliefBuffer
 from junqi_rl.belief.inference import rule_only_belief_observations
 
@@ -55,6 +55,8 @@ class MidgameBeliefSampler:
         self.steps = self.inserted = self.valid_labels = self.empty_rows = 0
 
     def __call__(self, *, rollout_world, **_):
+        if getattr(rollout_world, "identity_encoding", "legacy_probabilities") != "legacy_probabilities":
+            raise ValueError("Legacy probability sampler cannot consume known_only; use observer facts")
         sample = self.steps % self.every_steps == 0
         self.steps += 1
         if not sample:

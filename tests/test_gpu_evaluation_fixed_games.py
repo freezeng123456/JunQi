@@ -14,11 +14,18 @@ from junqi_rl.analysis import random_eval
 
 
 class Policy:
+    identity_encoding = "legacy_probabilities"
+    uses_global_summary = True
+
     def eval(self):
         return self
 
     def act_greedy(self, spatial, global_, legal):
         return legal.long().argmax(-1)
+
+    def __call__(self, spatial, global_, legal, *, actions):
+        # Equal legal scores retain act_greedy's first-legal tie break.
+        return {"log_probs": legal.float().log().log_softmax(dim=-1)}
 
 
 class FixedGames:
@@ -127,6 +134,40 @@ def test_timeout_records_pending_game_instead_of_replacing_it():
     assert len(pending) == 1 and pending[0]["game_id"] == 1
     assert pending[0]["termination_reason"] == "evaluation_step_cap"
     assert len({r["setup_sha256"] for r in records}) == 4
+
+
+@pytest.mark.parametrize('team', [0, 1])
+def test_evaluation_runs_the_supplied_belief_net_for_the_correct_team(team, monkeypatch):
+    calls = []
+    belief = object()
+    options = {'neural_weight': .25}
+    def refresh(rollout, policy, belief_net, *, team, options):
+        assert belief_net is belief
+        calls.append((team, options))
+    monkeypatch.setattr(random_eval, '_refresh_evaluation_belief', refresh)
+    records = []
+    metrics = random_eval.evaluate_head_to_head_gpu(
+        Policy(), Policy(), num_envs=2, num_games=2, device='cpu', seed=0,
+        max_moves=3, first_team=team, belief_net=belief, belief_refresh_steps=2,
+        belief_options=options, game_records=records,
+    )
+    assert calls == [(team, options), (team, options)]
+    assert metrics['h2h/neural_belief_enabled'] == 1
+    assert all(record['first_policy_neural_belief'] for record in records)
+
+
+@pytest.mark.parametrize('team,observers', [(0, (0, 2)), (1, (1, 3))])
+def test_belief_evaluation_adapter_selects_only_own_observers(team, observers, monkeypatch):
+    from junqi_rl.belief import inference
+    calls = []
+    def refresh(*args, **kwargs):
+        calls.append(kwargs)
+        return {}
+    monkeypatch.setattr(inference, 'refresh_beliefs_neural', refresh)
+    random_eval._refresh_evaluation_belief(object(), object(), object(), team=team,
+                                          options={'rule_only_input': True})
+    assert calls[0]['observer_seats'] == observers
+    assert calls[0]['rule_only_input']
 
 
 def test_random_stream_for_each_game_does_not_depend_on_concurrency():

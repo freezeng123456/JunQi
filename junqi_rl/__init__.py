@@ -41,12 +41,23 @@ from .env import (
     unrotate_action_id,
 )
 
-# GPU-accelerated env — imported lazily so that missing junqi_cuda does NOT
-# prevent the rest of the package from loading.  The import will raise
-# ImportError at instantiation time if the CUDA extension is absent.
-from .env_gpu import VectorJunqiEnvGPU  # noqa: E402
-from .gpu_rollout import GpuRollout, GpuRolloutHistory  # noqa: E402
-from .gpu_world import GpuWorld  # noqa: E402
+# CPU facts and metadata consumers do not need to load a CUDA backend.
+_GPU_EXPORTS = {
+    "VectorJunqiEnvGPU": "env_gpu",
+    "GpuRollout": "gpu_rollout",
+    "GpuRolloutHistory": "gpu_rollout",
+    "GpuWorld": "gpu_world",
+}
+
+
+def __getattr__(name):
+    if name not in _GPU_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+
+    value = getattr(import_module(f"{__name__}.{_GPU_EXPORTS[name]}"), name)
+    globals()[name] = value
+    return value
 
 __all__ = [
     # action LUT (fast batch rotation)

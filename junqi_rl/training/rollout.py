@@ -214,9 +214,13 @@ class RolloutBuffer:
         value_sample_scope: str = "policy",
         device: str | torch.device = "cpu",
         minibatch_group: str = "global",
+        obs_global_dims: int = OBS_GLOBAL_DIMS,
     ) -> None:
         self.num_envs = num_envs
         self.steps_per_env = steps_per_env
+        if obs_global_dims not in (0, OBS_GLOBAL_DIMS):
+            raise ValueError("obs_global_dims must be 0 or 28")
+        self.obs_global_dims = int(obs_global_dims)
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.td_lambda = td_lambda
@@ -254,7 +258,7 @@ class RolloutBuffer:
         self.obs_spatial = np.zeros(
             (T, N, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE), dtype=np.float32
         )
-        self.obs_global = np.zeros((T, N, OBS_GLOBAL_DIMS), dtype=np.float32)
+        self.obs_global = np.zeros((T, N, self.obs_global_dims), dtype=np.float32)
 
         # Actions (canonical frame)
         self.actions = np.zeros((T, N), dtype=np.int32)
@@ -411,7 +415,7 @@ class RolloutBuffer:
 
         # Flatten (T, N) → (T*N,)
         obs_sp = self.obs_spatial.reshape(T * N, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE)
-        obs_gl = self.obs_global.reshape(T * N, OBS_GLOBAL_DIMS)
+        obs_gl = self.obs_global.reshape(T * N, self.obs_global_dims)
         lm = self.legal_mask.reshape(T * N, FLAT_ACTION_DIM)
         act = self.actions.reshape(T * N)
         lp = self.log_probs.reshape(T * N)

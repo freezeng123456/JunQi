@@ -1583,6 +1583,9 @@ class PPOTrainer:
             "num_rollout": self.num_rollout,
             "cfg": self.cfg,
             "world_size_at_save": _world_size(),
+            "nan_skip_count": self._nan_skip_count,
+            "grad_skip_count": self._grad_nan_skip_count,
+            "grad_scaler": self._scaler.state_dict() if self._scaler is not None else None,
             "checkpoint_meta": current_checkpoint_metadata(self._policy_unwrapped),
         }
 
@@ -1596,6 +1599,10 @@ class PPOTrainer:
         self.optimizer.load_state_dict(sd["optimizer"])
         self.num_train_step = sd["num_train_step"]
         self.num_rollout = sd["num_rollout"]
+        self._nan_skip_count = sd.get("nan_skip_count", 0)
+        self._grad_nan_skip_count = sd.get("grad_skip_count", 0)
+        if self._scaler is not None and sd.get("grad_scaler") is not None:
+            self._scaler.load_state_dict(sd["grad_scaler"])
 
     def save(self, path: str) -> None:
         """Save checkpoint to ``path``."""

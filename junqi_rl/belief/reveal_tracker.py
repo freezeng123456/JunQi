@@ -60,7 +60,7 @@ from junqi_rl.networks.arrangement_net import (
     VOCAB_IDX_TO_PIECE_TYPE_VALUE,
 )
 from junqi_rl.networks.belief_net import N_BELIEF_TYPES
-from junqi_core.info_model import TRACKED_TYPES
+from junqi_core.identity import TRACKED_TYPES
 
 if TYPE_CHECKING:
     from junqi_rl.belief.buffer import BeliefBuffer
@@ -330,7 +330,7 @@ class RevealTracker:
         # Build a small LUT once and reuse:
         if not hasattr(self, "_pt_value_to_belief"):
             from junqi_core.rules import PieceType
-            from junqi_core.info_model import TRACKED_TYPES
+            from junqi_core.identity import TRACKED_TYPES
             lut = np.full(16, -1, dtype=np.int64)
             for i, tracked_pt in enumerate(TRACKED_TYPES):
                 lut[int(tracked_pt.value)] = i

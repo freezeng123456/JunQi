@@ -191,11 +191,12 @@ def test_compact_history_is_independent_across_two_ddp_ranks() -> None:
     )
 
 
-def test_compressed_history_retains_all_features_through_long_play_and_reuse():
+@pytest.mark.parametrize("include_global", [False, True])
+def test_compressed_history_retains_all_features_through_long_play_and_reuse(include_global):
     """Full input equivalence, including the derived reverse capture channels."""
     from junqi_rl.networks.combat_features import CombatOutcomeHead
     num_envs, num_steps = 4, 128
-    world = GpuRollout(num_envs=num_envs)
+    world = GpuRollout(num_envs=num_envs, include_global=include_global)
     world.reset(seed_base=800)
     history = world.create_rollout_history(num_steps)
     head = CombatOutcomeHead().cuda()
@@ -225,8 +226,13 @@ def test_compressed_history_retains_all_features_through_long_play_and_reuse():
     # Grow, shrink, duplicate and revisit samples to catch stale replay rows.
     for indices in (order[:32], order[:5], order[:64], order[:1].expand(9), order[-31:]):
         sp, gl, legal = history.reconstruct(indices, all_seats[indices], dtype=torch.float32)
-        for actual, reference in zip((sp, gl, legal), expected):
-            torch.testing.assert_close(actual, reference[indices], rtol=0, atol=0)
+        torch.testing.assert_close(sp, expected[0][indices], rtol=0, atol=0)
+        torch.testing.assert_close(legal, expected[2][indices], rtol=0, atol=0)
+        # Legacy global counts use atomicAdd: summation order is not stable.
+        # Spatial observations and public boolean flags remain exact.
+        torch.testing.assert_close(gl, expected[1][indices], rtol=1e-6, atol=1e-6)
+        if include_global:
+            torch.testing.assert_close(gl[:,24:], expected[1][indices,24:], rtol=0, atol=0)
         torch.testing.assert_close(head.for_actions(sp, actions[indices], legal),
                                    expected_features[indices], rtol=0, atol=0)
     assert history.history_bytes == num_envs * num_steps * COMPACT_HISTORY_BYTES_PER_TRANSITION

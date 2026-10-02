@@ -103,28 +103,13 @@ from typing import Final
 
 import numpy as np
 
+from .identity import NUM_TRACKED_TYPES as NUM_TRACKED_TYPES
+from .identity import TRACKED_TYPES as TRACKED_TYPES
 from .rules import PieceType, Seat
 
 # ===========================================================================
 # Vocabulary
 # ===========================================================================
-
-# 12 tracked piece types in fixed order (must match observation.TRACKED_TYPES).
-TRACKED_TYPES: Final[tuple[PieceType, ...]] = (
-    PieceType.JUNQI,    # 0
-    PieceType.DILEI,    # 1
-    PieceType.ZHADAN,   # 2
-    PieceType.SILING,   # 3
-    PieceType.JUNZH,    # 4
-    PieceType.SHIZH,    # 5
-    PieceType.LVZH,     # 6
-    PieceType.TUANZH,   # 7
-    PieceType.YINGZH,   # 8
-    PieceType.LIANZH,   # 9
-    PieceType.PAIZH,    # 10
-    PieceType.GONGB,    # 11
-)
-NUM_TRACKED_TYPES: Final[int] = 12
 
 _PIECETYPE_TO_TRACKED_IDX: Final[np.ndarray] = (
     lambda: (

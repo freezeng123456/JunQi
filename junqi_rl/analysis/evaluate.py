@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
+from junqi_rl.input_contract import policy_input_contract
 from junqi_rl.analysis.random_eval import (
+    _policy_actions,
     evaluate_paired_vs_random,
     evaluate_vs_random_cpu,
     evaluate_vs_random_gpu,
@@ -29,7 +31,8 @@ def eval_vs_random(
 ) -> dict:
     """Compatibility wrapper around the shared bounded-batch evaluator."""
 
-    metrics = evaluate_vs_random_gpu(
+    evaluator = evaluate_vs_random_gpu if torch.device(device).type == "cuda" else evaluate_vs_random_cpu
+    metrics = evaluator(
         policy,
         num_envs=min(64, num_games),
         num_games=num_games,
@@ -75,19 +78,22 @@ def eval_head_to_head(
 
     if first_team not in (0, 1):
         raise ValueError(f"first_team must be 0 or 1, got {first_team}")
-    if num_games <= 0:
-        raise ValueError("num_games must be positive")
+    if num_games <= 0 or max_steps <= 0:
+        raise ValueError("num_games and max_steps must be positive")
 
+    inputs = policy_input_contract(first_policy, second_policy)
     dev = torch.device(device)
     first_policy.eval()
     second_policy.eval()
     n = min(16, num_games)
     from junqi_core.rules import ShowMode
-    env = VectorJunqiEnv(num_envs=n, max_num_moves=max_steps, show_mode=ShowMode.DARK)
+    env = VectorJunqiEnv(num_envs=n, max_num_moves=max_steps, show_mode=ShowMode.DARK,
+                        **inputs.observation_kwargs())
     obs_sp, obs_gl = env.reset(seed_base=seed_base)
     next_game_id = n
     active = np.ones(n, dtype=bool)
     game_moves = np.zeros(n, dtype=np.int32)
+    game_seeds = np.arange(seed_base, seed_base + n, dtype=np.int64)
     wins = losses = draws = total_games = total_moves = 0
 
     while total_games < num_games:
@@ -108,10 +114,11 @@ def eval_head_to_head(
             sp_t = torch.from_numpy(acting_sp[i : i + 1]).to(dev)
             gl_t = torch.from_numpy(acting_gl[i : i + 1]).to(dev)
             mask_t = torch.from_numpy(legal_mask[i : i + 1]).to(dev)
-            if greedy:
-                action = model.act_greedy(sp_t, gl_t, mask_t)
-            else:
-                action, _, _ = model.act(sp_t, gl_t, mask_t)
+            action = _policy_actions(
+                model, sp_t, gl_t, mask_t,
+                torch.as_tensor(game_seeds[i : i + 1], device=dev),
+                int(game_moves[i]), greedy,
+            )
             world_actions[i] = unrotate_compact_action_id(
                 int(action[0].cpu()), seat
             )
@@ -138,6 +145,7 @@ def eval_head_to_head(
                 active[i] = False
                 continue
             env.envs[i].reset(seed=seed_base + next_game_id)
+            game_seeds[i] = seed_base + next_game_id
             next_game_id += 1
             env._done[i] = False
             env._fill_all_obs()

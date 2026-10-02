@@ -40,12 +40,11 @@ from __future__ import annotations
 import random
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import numpy as np
 
 from junqi_core.board import BOARD_SIZE, NUM_CELLS
-from junqi_core.info_model import BeliefTensor
 from junqi_core.observation import (
     OBS_CHANNELS,
     OBS_GLOBAL_DIMS,
@@ -66,6 +65,9 @@ from junqi_core.board import (
     COMPACT_TO_FLAT,
     FLAT_TO_COMPACT,
 )
+
+if TYPE_CHECKING:
+    from junqi_core.info_model import BeliefTensor
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +202,9 @@ class JunqiEnv:
 
     The env owns:
       * one :class:`GameState` (the authoritative game);
-      * four :class:`BeliefTensor` instances (one per seat);
+      * four :class:`BeliefTensor` instances only for legacy observations;
       * one :class:`ObservationBuilder` (shared across seats).
+      * optional facts/history records for consumers that request them.
 
     Observations returned by :meth:`reset` / :meth:`step` are a
     ``dict[Seat, ObservationTensor]`` with one entry per seat.  Each
@@ -221,6 +224,9 @@ class JunqiEnv:
         ``max_num_moves < 4000``, episodes are cut short early; the draw
         reward ``(0, 0, 0, 0)`` is returned.  Setting this to ``None``
         uses the global constant.
+    record_public_history
+        Enable persistent observer facts and public events for future identity
+        learning. Requires ``known_only``; disabled for ordinary policy runs.
     """
 
     def __init__(
@@ -229,13 +235,20 @@ class JunqiEnv:
         show_mode: ShowMode = ShowMode.HALF_DARK,
         builder: ObservationBuilder | None = None,
         max_num_moves: int | None = None,
+        include_global: bool = True,
+        identity_encoding: str = "legacy_probabilities",
+        record_public_history: bool = False,
     ) -> None:
         from junqi_core.rules import MAX_NUM_MOVES as _DEFAULT_MAX
         self.show_mode: ShowMode = show_mode
         self.max_num_moves: int = max_num_moves if max_num_moves is not None else _DEFAULT_MAX
         self._state: GameState | None = None
-        self._beliefs: dict[Seat, BeliefTensor] = {}
-        self._builder: ObservationBuilder = builder or ObservationBuilder()
+        self._beliefs: dict[Seat, BeliefTensor | None] = {}
+        self._builder: ObservationBuilder = builder or ObservationBuilder(include_global=include_global, identity_encoding=identity_encoding)
+        if record_public_history and self._builder.identity_encoding != "known_only":
+            raise ValueError("Public knowledge recording requires known_only observations")
+        self._record_public_history = record_public_history
+        self._knowledge = None
 
     # ------------------------------------------------------------------
     # Gym-ish API
@@ -246,9 +259,14 @@ class JunqiEnv:
         rng = random.Random(seed)
         setup = generate_random_setup(rng)
         self._state = GameState.new_game(setup, show_mode=self.show_mode)
-        self._beliefs = {
-            s: BeliefTensor.initial(self._state, s) for s in ALL_SEATS
-        }
+        if self._builder.identity_encoding == "legacy_probabilities":
+            from junqi_core.info_model import BeliefTensor
+            self._beliefs = {s: BeliefTensor.initial(self._state, s) for s in ALL_SEATS}
+        else:
+            self._beliefs = {s: None for s in ALL_SEATS}
+        if self._record_public_history:
+            from junqi_core.knowledge import ObserverKnowledge
+            self._knowledge = {s: ObserverKnowledge(self._state, s) for s in ALL_SEATS}
         return self._build_all_observations()
 
     def step(
@@ -282,11 +300,13 @@ class JunqiEnv:
         action = Action(seat=acting_seat, src=src, dst=dst)
 
         new_state, result = state.step(action)
+        self._record_public_event(state, new_state, result)
         # Update each seat's belief with the pre/post-state pair.  The
         # BeliefTensor contract is independent across seats (each seat
         # only incorporates its own visibility rules).
         for seat, belief in self._beliefs.items():
-            belief.update(state, new_state, result)
+            if belief is not None:
+                belief.update(state, new_state, result)
         self._state = new_state
 
         obs = self._build_all_observations()
@@ -349,8 +369,10 @@ class JunqiEnv:
         action = Action(seat=acting_seat, src=src, dst=dst)
 
         new_state, result = state.step(action)
+        self._record_public_event(state, new_state, result)
         for seat, belief in self._beliefs.items():
-            belief.update(state, new_state, result)
+            if belief is not None:
+                belief.update(state, new_state, result)
         self._state = new_state
 
         done = new_state.terminated
@@ -399,9 +421,21 @@ class JunqiEnv:
         return self._assert_reset()
 
     @property
-    def beliefs(self) -> dict[Seat, BeliefTensor]:
-        """Read-only access to the four :class:`BeliefTensor`s."""
+    def beliefs(self) -> dict[Seat, BeliefTensor | None]:
+        """Legacy belief objects; every value is ``None`` in facts mode."""
         return self._beliefs
+
+    def _record_public_event(self, previous, current, result):
+        if self._knowledge is not None:
+            for knowledge in self._knowledge.values():
+                knowledge.observe(previous, current, result)
+
+    def knowledge_snapshot(self, observer: Seat):
+        """Get fact/constraint input only when this consumer enabled recording."""
+        self._assert_reset()
+        if self._knowledge is None:
+            raise RuntimeError("Public history recording was not enabled at reset")
+        return self._knowledge[Seat(observer)].snapshot()
 
     @property
     def builder(self) -> ObservationBuilder:
@@ -470,6 +504,9 @@ class VectorJunqiEnv:
         show_mode: ShowMode = ShowMode.HALF_DARK,
         max_num_moves: int | None = None,
         num_workers: int = 1,
+        include_global: bool = True,
+        identity_encoding: str = "legacy_probabilities",
+        record_public_history: bool = False,
     ) -> None:
         """Initialise the vector env.
 
@@ -492,9 +529,11 @@ class VectorJunqiEnv:
             raise ValueError(f"num_envs must be positive, got {num_envs}")
         self.num_envs = int(num_envs)
         self.show_mode = show_mode
-        self._builder = ObservationBuilder()
+        self._builder = ObservationBuilder(include_global=include_global, identity_encoding=identity_encoding)
+        self.global_dims = self._builder.global_dims
         self._envs: list[JunqiEnv] = [
-            JunqiEnv(show_mode=show_mode, builder=self._builder, max_num_moves=max_num_moves)
+            JunqiEnv(show_mode=show_mode, builder=self._builder, max_num_moves=max_num_moves,
+                     record_public_history=record_public_history)
             for _ in range(self.num_envs)
         ]
         # Slabs: shape (N, 4 seats, C, H, W) and (N, 4, G).
@@ -503,7 +542,7 @@ class VectorJunqiEnv:
             dtype=np.float32,
         )
         self.obs_global = np.zeros(
-            (self.num_envs, 4, OBS_GLOBAL_DIMS), dtype=np.float32,
+            (self.num_envs, 4, self.global_dims), dtype=np.float32,
         )
         # Per-env bookkeeping.
         self._done = np.zeros(self.num_envs, dtype=bool)
@@ -612,10 +651,10 @@ class VectorJunqiEnv:
         sp_flat = self.obs_spatial.reshape(
             self.num_envs * 4, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE,
         )
-        gl_flat = self.obs_global.reshape(self.num_envs * 4, OBS_GLOBAL_DIMS)
+        gl_flat = self.obs_global.reshape(self.num_envs * 4, self.global_dims)
 
         flat_states: list[GameState] = []
-        flat_beliefs: list[BeliefTensor] = []
+        flat_beliefs: list[BeliefTensor | None] = []
         flat_observers: list[Seat] = []
         active_indices: list[int] = []
         for i, env in enumerate(self._envs):
@@ -646,7 +685,7 @@ class VectorJunqiEnv:
         sp_scratch = np.empty(
             (k, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE), dtype=np.float32,
         )
-        gl_scratch = np.empty((k, OBS_GLOBAL_DIMS), dtype=np.float32)
+        gl_scratch = np.empty((k, self.global_dims), dtype=np.float32)
         self._builder.build_observations_batch(
             flat_states, flat_beliefs, flat_observers, sp_scratch, gl_scratch,
         )

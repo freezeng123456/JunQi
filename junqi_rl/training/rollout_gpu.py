@@ -229,9 +229,13 @@ class RolloutBufferGPU:
         obs_storage_dtype: torch.dtype = torch.float16,
         storage_mode: str = "full_obs",
         history=None,
+        obs_global_dims: int = OBS_GLOBAL_DIMS,
     ) -> None:
         self.num_envs = num_envs
         self.steps_per_env = steps_per_env
+        if obs_global_dims not in (0, OBS_GLOBAL_DIMS):
+            raise ValueError("obs_global_dims must be 0 or 28")
+        self.obs_global_dims = int(obs_global_dims)
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.td_lambda = td_lambda
@@ -323,7 +327,7 @@ class RolloutBufferGPU:
                 device=dev,
             )
             self.obs_global = torch.zeros(
-                (T, N, OBS_GLOBAL_DIMS),
+                (T, N, self.obs_global_dims),
                 dtype=self.obs_storage_dtype,
                 device=dev,
             )
@@ -642,7 +646,7 @@ class RolloutBufferGPU:
                 BOARD_SIZE,
                 BOARD_SIZE,
             )
-            obs_gl = self.obs_global.view(total, OBS_GLOBAL_DIMS)
+            obs_gl = self.obs_global.view(total, self.obs_global_dims)
         act    = self.actions.view(total)
         lp     = self.log_probs.view(total)
         adv    = self.advantages_.view(total)

@@ -1,0 +1,46 @@
+# Facts policy contract and optimizer. Independent of historical experiments.
+# Runtime/GPU budgets live in the v100_facts profiles.
+net:
+  combat_outcome_features: false
+  cnn_channels: 64
+  cnn_layers: 2
+  depth: 4
+  embed_dim: 128
+  n_head: 4
+  ff_factor: 4
+  dropout: 0.0
+  use_cat_vf: true
+  action_key_dim: 32
+  pos_emb_std: 0.02
+  use_global_summary: false
+  identity_encoding: known_only
+  policy_features: {}
+  tactical_features: false
+  relational_features: false
+ppo:
+  num_epochs_per_rollout: 1
+  minibatch_size: 128
+  dtype: float32
+  torch_compile: false
+  lr_schedule_unit: rollout
+  max_grad_norm: 0.267
+  adv_filt_rate: 0.75
+  lr_coef: 0.0001
+  lr_ceil: 0.0001
+  lr_floor: 0.0001
+  lr_decay: 0.0
+  temperature_coef: 0.03
+  temperature_floor: 0.03
+  temperature_ceil: 0.03
+  temperature_decay: 0.0
+  temperature_schedule_unit: rollout
+arr:
+  enabled: false
+belief:
+  enabled: false
+disable_arr_train: true
+disable_belief_train: true
+random_opponent: false
+reward_shaping: false
+train_value_on_random_seats: false
+mixed_setup: false
