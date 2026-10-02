@@ -1,6 +1,6 @@
 # Joint BeliefNet versus frozen policy: Beijing V100 pilot
 
-Status after the user's 2026-10-01 design correction: this document records the completed **legacy rule-input pilot**. The next experiment removes heuristic rule probabilities from both policy and belief inputs, trains a new fact-input policy, and freezes that policy for direct, marginal-search and joint-search comparisons. See the updated [review and replacement design](JOINT_BELIEF_REVIEW_20261001.md). The facts-only policy path was implemented on 2026-10-02; the new joint-belief/search migration remains pending. See [the new baseline run](FACTS_ONLY_TRAINING_20261002.md). The results below remain historical evidence.
+This document records the completed **legacy rule-input pilot**. The replacement facts policy, joint-belief network and search have since been implemented; current model and verification status is recorded in the [model registry](models/README.md). See the [review and replacement design](JOINT_BELIEF_REVIEW_20261001.md) and [facts baseline run](FACTS_ONLY_TRAINING_20261002.md). The results below remain historical evidence.
 
 ## Experiment definition
 
@@ -52,7 +52,7 @@ The launcher's working directory is `SLURM_SUBMIT_DIR`, because Slurm executes a
 
 The historical 28-dimensional count reduction uses `atomicAdd`, so its float32 result can differ by a few last bits. Its long-history regression uses rtol/atol 1e-6 only for global floats. Spatial channels, legal masks and boolean flags retain exact comparisons; the long-history test covers both zero-global and legacy modes.
 
-Evaluation atomically saves after every match. `legacy_compare_joint_search.py --resume` verifies protocol and checkpoint hashes, preserves completed matches and deterministically reruns unfinished ones. The original command is a compatibility shim. Training/evaluation completion requires actual logs and checkpoint audits; source tests and job submission alone do not establish it.
+Evaluation atomically saves after every match. `legacy_compare_joint_search.py --resume` verifies protocol and checkpoint hashes, preserves completed matches and deterministically reruns unfinished ones. Historical reproduction requires the explicit `legacy_` entry points; the generic training/comparison commands now run the facts implementation. Training/evaluation completion requires actual logs and checkpoint audits; source tests and job submission alone do not establish it.
 
 ## Observed result: 2026-10-01, job 2347635
 
