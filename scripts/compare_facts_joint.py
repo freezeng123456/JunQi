@@ -251,6 +251,9 @@ def main(argv=None):
             except Exception as exc:
                 write_json(out / f'failure-worker-{args.worker_index}.json',
                            dict(pair=pair, candidate_team=team, plies=len(history),
+                                protocol_sha256=digest, setup_seed=args.seed + pair,
+                                setup_sha256=setup_hash, observer=int(env.state.turn),
+                                public_history=history,
                                 error=f'{type(exc).__name__}: {exc}', search_metrics=search.report()))
                 raise
             outcome = 'draw' if env.state.draw else ('win' if env.state.winner_team == team else 'loss')

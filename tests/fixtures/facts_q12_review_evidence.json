@@ -1,0 +1,90 @@
+{
+  "schema": "junqi.q12-reconstruction-review.v1",
+  "date": "2026-10-03",
+  "scope": "Local CPU mechanism and reconstruction checks; no trained BeliefNet win-rate conclusion",
+  "constraint_schema": "junqi.identity-domain-inventory-combat-q12.v2",
+  "source_sha256": {
+    "junqi_rl/belief/constraints.py": "2dc3cdbd0d767cf707a071b56e97b4fb8bcf6bbfcf666d38c6c33f05c9e5d151",
+    "junqi_rl/analysis/facts_joint_search.py": "069fdb06bd7450a439a2b13dd33d221383cda391f976486744bab8d206bd7e94",
+    "tests/fixtures/facts_q12_public_trace.json": "eab418b5dfbee207f802b561d3a2b7c9370432d1442da58d8da01a58f2443a9d"
+  },
+  "frozen_policy_sha256": "ef60cd5f21086e77a61a4744b57b267d51590fae3df1d659fc87b09458661aa1",
+  "trace": {
+    "setup_seed": 93001001,
+    "action_seed": 441,
+    "completed_plies": 209,
+    "termination": "team_kill",
+    "winner_team": 1,
+    "selfplay_seconds": 0.9747437516925856
+  },
+  "diagnosed_failure": {
+    "broadcast_step": 161,
+    "differing_field": "seats_died_this_step",
+    "expected": [
+      0
+    ],
+    "sampled": [],
+    "flag_capture": false,
+    "cause": "Public no-legal-move elimination did not previously restrict sampled remaining identities"
+  },
+  "before": {
+    "constraint_schema": "junqi.identity-domain-inventory-combat.v1",
+    "probes": [
+      {
+        "step": 161,
+        "proposals": 2,
+        "accepted": 0
+      },
+      {
+        "step": 200,
+        "proposals": 2,
+        "accepted": 0
+      }
+    ]
+  },
+  "after": {
+    "neural_model_status": "untrained; weights used only to exercise actual proposal and reconstruction path",
+    "neural_seed": 903,
+    "config": {
+      "cnn_channels": 32,
+      "cnn_layers": 2,
+      "embed_dim": 64,
+      "n_head": 4,
+      "ff_factor": 2,
+      "n_encoder_layer": 2,
+      "n_decoder_layer": 2
+    },
+    "samples": [
+      {
+        "step": 161,
+        "generator_seed": 892,
+        "proposals": 16,
+        "accepted": 16,
+        "unique": 16,
+        "rejected": 0,
+        "public_replay_steps": 2576,
+        "seconds": 3.413656875025481,
+        "constraint_seconds": 3.1997470853384584,
+        "materialization_seconds": 0.13228695787256584
+      },
+      {
+        "step": 200,
+        "generator_seed": 931,
+        "proposals": 16,
+        "accepted": 16,
+        "unique": 16,
+        "rejected": 0,
+        "public_replay_steps": 3200,
+        "seconds": 2.6578401250299066,
+        "constraint_seconds": 2.4373420845367946,
+        "materialization_seconds": 0.14010316715575755
+      }
+    ],
+    "checks": [
+      "exact compiled identity constraints",
+      "full public history broadcast equality",
+      "root facts317 observation equality",
+      "root legal action set equality"
+    ]
+  }
+}
