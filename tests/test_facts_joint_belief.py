@@ -176,9 +176,12 @@ def test_cuda_teacher_parity_gradients_and_feasible_sampling():
     masks = prepare_teacher_masks(inputs, targets, constraints=constraints)
     with torch.no_grad():
         reference = cpu.teacher_logits(obs, inputs=inputs, targets=targets, teacher_masks=masks)
+        logits = gpu.teacher_logits(obs.cuda(), inputs=inputs, targets=targets.cuda(), teacher_masks=masks.cuda())
+    torch.testing.assert_close(reference, logits.detach().cpu(), atol=2e-5, rtol=2e-5)
+    # Both parity models use inference BatchNorm statistics. Exercise training
+    # and backward separately; training BN is a different mathematical map.
     gpu.train()
     logits = gpu.teacher_logits(obs.cuda(), inputs=inputs, targets=targets.cuda(), teacher_masks=masks.cuda())
-    torch.testing.assert_close(reference, logits.detach().cpu(), atol=2e-5, rtol=2e-5)
     loss = -logits.log_softmax(-1).gather(-1, targets.cuda()[..., None]).mean()
     loss.backward()
     assert torch.isfinite(loss)
