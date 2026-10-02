@@ -1,0 +1,956 @@
+{
+  "schema_version": 1,
+  "updated_on": "2026-10-03",
+  "default_model_id": "facts-counted-g10017",
+  "artifact_roots": {
+    "beijing-v100-preflight": "Recovered Beijing V100 experiments (workspace work/beijing-v100-preflight)",
+    "model-audit": "Historical N/M/R archive (workspace outputs/junqi-model-audit-20260928)"
+  },
+  "counting_contract": {
+    "unit": "one completed four-player match",
+    "original_r512_completed_games": null,
+    "later_counts": "cumulative new games after facts-original-r512; not lifetime totals",
+    "rollout_numbers_are_not_game_counts": true
+  },
+  "config_hash_contract": "SHA-256 of embedded train_cfg serialized as JSON with sort_keys=True, separators=(comma,colon), ensure_ascii=True; original path strings retained only inside the hashed checkpoint.",
+  "evidence_scope": "Recovered files are hashed and strictly loaded on CPU on 2026-10-03. Historical GPU evidence is referenced, not rerun. Current repository cleanup is not relabeled as historical training source.",
+  "models": [
+    {
+      "id": "facts-original-r512",
+      "kind": "policy",
+      "status": "historical_reference",
+      "parent_model_id": null,
+      "checkpoint_metadata": {
+        "format_version": 2,
+        "observation_semantics_version": 5,
+        "identity_encoding": "known_only",
+        "observation_channels": 317,
+        "observation_global_dims": 0,
+        "global_summary_enabled": false,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "architecture_id": "junqi.graph317.facts.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {},
+        "combat_feature_version": 0,
+        "tactical_feature_version": 0,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "validated_runtime_contract": {
+        "format_version": 2,
+        "observation_semantics_version": 5,
+        "identity_encoding": "known_only",
+        "observation_channels": 317,
+        "observation_global_dims": 0,
+        "global_summary_enabled": false,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "architecture_id": "junqi.graph317.facts.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {},
+        "combat_feature_version": 0,
+        "tactical_feature_version": 0,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "parameter_count": 938627,
+      "training": {
+        "rollout_batches": 512,
+        "optimizer_updates": 12272,
+        "counted_completed_games": null,
+        "lifetime_completed_games": null,
+        "counted_environment_steps": null,
+        "uncounted_legacy_environment_steps": 2097152,
+        "game_count_lineage_id": null,
+        "seed": 20261002,
+        "embedded_config_sha256": "3d8c6f9b9576c68887fbc1915b95a757f5c5d09d589da60bd6c401b89acac681"
+      },
+      "verification": {
+        "strict_policy_load_cpu": true,
+        "finite_policy_weights": true,
+        "checked_on": "2026-10-03"
+      },
+      "artifacts": [
+        {
+          "role": "training_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-20261002-v1/recovered-final/baseline/ckpt_000512.pt",
+          "sha256": "e3086509ffdb27d8e0ccd3e9e90b19b4952f8574c10ab9da691aaacd1c41a59c"
+        },
+        {
+          "role": "training_source_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-20261002-v1/source-sha256.json",
+          "sha256": "33e8fed1049a05a3fded447ccd2d4e1b54634b854a7e6a3fa1be6760b36cc064"
+        },
+        {
+          "role": "training_upload_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-20261002-v1/facts-upload.tar.gz",
+          "sha256": "c194bc2676745a41e6e77aacb4af614a7968f36d3957cc35b1253d0ddad01ac3"
+        },
+        {
+          "role": "recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-20261002-v1/recovered-final/evidence/baseline-local-audit.json",
+          "sha256": "66808b3757719344b512ab883798582a130c041bb221bf587910ed45ce679143"
+        },
+        {
+          "role": "inference_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-20261002-v1/recovered-final/baseline/policy-inference.pt",
+          "sha256": "e353da1c51a667070f9c62da41787bc19424e8030be01633eb2c47e8bd6f2f86"
+        },
+        {
+          "role": "selection_evaluation_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/protocol.json",
+          "sha256": "c5787033770f7577f5c25ead29ec11dcfb6fcaa44a19deb1db906e8275559050"
+        },
+        {
+          "role": "selection_evaluation_audit",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/local-audit.json",
+          "sha256": "535460ef1bad19f2623a303d625a467449b209b8116fa4859c5219fa40b461bc"
+        }
+      ],
+      "notes": [
+        "Counted games begin after the original 512 rollout batches; lifetime game count is unknown.",
+        "No neural belief model is attached."
+      ]
+    },
+    {
+      "id": "facts-counted-g2013",
+      "kind": "policy",
+      "status": "training_milestone",
+      "parent_model_id": "facts-original-r512",
+      "checkpoint_metadata": {
+        "format_version": 2,
+        "observation_semantics_version": 5,
+        "identity_encoding": "known_only",
+        "observation_channels": 317,
+        "observation_global_dims": 0,
+        "global_summary_enabled": false,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "architecture_id": "junqi.graph317.facts.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {},
+        "combat_feature_version": 0,
+        "tactical_feature_version": 0,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "validated_runtime_contract": {
+        "format_version": 2,
+        "observation_semantics_version": 5,
+        "identity_encoding": "known_only",
+        "observation_channels": 317,
+        "observation_global_dims": 0,
+        "global_summary_enabled": false,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "architecture_id": "junqi.graph317.facts.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {},
+        "combat_feature_version": 0,
+        "tactical_feature_version": 0,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "parameter_count": 938627,
+      "training": {
+        "rollout_batches": 612,
+        "optimizer_updates": 14672,
+        "counted_completed_games": 2013,
+        "lifetime_completed_games": null,
+        "counted_environment_steps": 409600,
+        "uncounted_legacy_environment_steps": 2097152,
+        "game_count_lineage_id": "1da3ae08bcc444cb898a2179de28aa5c",
+        "seed": 20261002,
+        "embedded_config_sha256": "c6ff95f3694dce15b5649d1773cb8a4fefb42151d35a94e3efda4c235d1e5d39"
+      },
+      "verification": {
+        "strict_policy_load_cpu": true,
+        "finite_policy_weights": true,
+        "checked_on": "2026-10-03"
+      },
+      "artifacts": [
+        {
+          "role": "training_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "games-20261002-v4/recovered-final/counted_2000/ckpt_000612.pt",
+          "sha256": "8012ad3500e0c00b89d84230d4bc7a43bd2863f8cdd42993360d029f8e4dfebf"
+        },
+        {
+          "role": "training_source_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "games-20261002-v4/source-sha256.json",
+          "sha256": "71e1086904252fcce4eea9d6e8722a3e437b829bfd4f5bb72469067219a2a76e"
+        },
+        {
+          "role": "training_upload_archive",
+          "root": "beijing-v100-preflight",
+          "path": "games-20261002-v4/games-upload-20261002-v4.tar.gz",
+          "sha256": "baa0804717222cc2ac0d7e94f10517d255a2192dadd8ae5e9b01b18b65386a90"
+        },
+        {
+          "role": "recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "games-20261002-v4/recovered-final/counted_2000/audit.json",
+          "sha256": "078b6ec51c7af6337407283e4850a17a381e10f0b8a29075236ace484fcf90c8"
+        },
+        {
+          "role": "runtime_config",
+          "root": "beijing-v100-preflight",
+          "path": "games-20261002-v4/recovered-final/counted_2000/cfg.runtime.yaml",
+          "sha256": "a1a9fa8a692ac1d5c2d428b29adf7f34cdd9fa15153eb9324b0d34ae88e14cc8"
+        },
+        {
+          "role": "inference_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "games-20261002-v4/recovered-final/counted_2000/policy-inference.pt",
+          "sha256": "a74e07d1579bc3f609d4098167afb0a9f879bf105a7d94ed416635f8449b003b"
+        }
+      ],
+      "notes": [
+        "Counted games begin after the original 512 rollout batches; lifetime game count is unknown.",
+        "No neural belief model is attached."
+      ]
+    },
+    {
+      "id": "facts-counted-g8010",
+      "kind": "policy",
+      "status": "development_selected_reference",
+      "parent_model_id": "facts-counted-g2013",
+      "checkpoint_metadata": {
+        "format_version": 2,
+        "observation_semantics_version": 5,
+        "identity_encoding": "known_only",
+        "observation_channels": 317,
+        "observation_global_dims": 0,
+        "global_summary_enabled": false,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "architecture_id": "junqi.graph317.facts.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {},
+        "combat_feature_version": 0,
+        "tactical_feature_version": 0,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "validated_runtime_contract": {
+        "format_version": 2,
+        "observation_semantics_version": 5,
+        "identity_encoding": "known_only",
+        "observation_channels": 317,
+        "observation_global_dims": 0,
+        "global_summary_enabled": false,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "architecture_id": "junqi.graph317.facts.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {},
+        "combat_feature_version": 0,
+        "tactical_feature_version": 0,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "parameter_count": 938627,
+      "training": {
+        "rollout_batches": 821,
+        "optimizer_updates": 19688,
+        "counted_completed_games": 8010,
+        "lifetime_completed_games": null,
+        "counted_environment_steps": 1265664,
+        "uncounted_legacy_environment_steps": 2097152,
+        "game_count_lineage_id": "1da3ae08bcc444cb898a2179de28aa5c",
+        "seed": 20261002,
+        "embedded_config_sha256": "f99eceeea2d1e562d217d90e57e649c26a78093399ef8a82c98db1efa4fc408c"
+      },
+      "verification": {
+        "strict_policy_load_cpu": true,
+        "finite_policy_weights": true,
+        "checked_on": "2026-10-03"
+      },
+      "artifacts": [
+        {
+          "role": "training_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/recovered-final/counted_10000/ckpt_000821.pt",
+          "sha256": "836e7fc9f188a1dc6986f6e54981ecbba4e2f4b356832d5e176c584ac2b46d17"
+        },
+        {
+          "role": "training_source_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/source-sha256.json",
+          "sha256": "71e1086904252fcce4eea9d6e8722a3e437b829bfd4f5bb72469067219a2a76e"
+        },
+        {
+          "role": "training_upload_archive",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/games-10000-upload-v1.tar.gz",
+          "sha256": "ac111e7d67dd126c7130c2c67cc66051cfb823889d0bb9cab4e5647d566f76b1"
+        },
+        {
+          "role": "recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/recovered-final/recovery-audit.json",
+          "sha256": "279b7b996657cd956375063684eef417a808448a305f2def06d8f77125446b7f"
+        },
+        {
+          "role": "runtime_config",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/recovered-final/counted_10000/cfg.runtime.yaml",
+          "sha256": "fabc82edadf1980e7435f0aa92c42a7450b1b58ea7698d855d863ea7cf9ac2e3"
+        },
+        {
+          "role": "selection_evaluation_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/protocol.json",
+          "sha256": "c5787033770f7577f5c25ead29ec11dcfb6fcaa44a19deb1db906e8275559050"
+        },
+        {
+          "role": "selection_evaluation_audit",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/local-audit.json",
+          "sha256": "535460ef1bad19f2623a303d625a467449b209b8116fa4859c5219fa40b461bc"
+        },
+        {
+          "role": "evaluation_summary",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/best8010_vs_original512.json",
+          "sha256": "c767c761c3c2de52dc7682fdd5b35493c95a86d8510f8438336318caeb6e8011"
+        },
+        {
+          "role": "per_game_evaluation_records",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/best8010_vs_original512.jsonl",
+          "sha256": "e174a00d35fd013a5f6d757b1455ca866a61954d84a0b6ab3e947ed02b79aee1"
+        },
+        {
+          "role": "evaluation_summary",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/best8010_vs_final10017.json",
+          "sha256": "5925c7710daeaac10657660551132315b6518c239bb76337dcea852fbed3b3be"
+        },
+        {
+          "role": "per_game_evaluation_records",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/best8010_vs_final10017.jsonl",
+          "sha256": "16f16f001ee4054bdd70be9a18efbc507413f4ca084d3fdae0b57388156ad1e7"
+        }
+      ],
+      "notes": [
+        "Counted games begin after the original 512 rollout batches; lifetime game count is unknown.",
+        "No neural belief model is attached."
+      ]
+    },
+    {
+      "id": "facts-counted-g10017",
+      "kind": "policy",
+      "status": "frozen_pi0",
+      "parent_model_id": "facts-counted-g2013",
+      "checkpoint_metadata": {
+        "format_version": 2,
+        "observation_semantics_version": 5,
+        "identity_encoding": "known_only",
+        "observation_channels": 317,
+        "observation_global_dims": 0,
+        "global_summary_enabled": false,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "architecture_id": "junqi.graph317.facts.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {},
+        "combat_feature_version": 0,
+        "tactical_feature_version": 0,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "validated_runtime_contract": {
+        "format_version": 2,
+        "observation_semantics_version": 5,
+        "identity_encoding": "known_only",
+        "observation_channels": 317,
+        "observation_global_dims": 0,
+        "global_summary_enabled": false,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "architecture_id": "junqi.graph317.facts.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {},
+        "combat_feature_version": 0,
+        "tactical_feature_version": 0,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "parameter_count": 938627,
+      "training": {
+        "rollout_batches": 890,
+        "optimizer_updates": 21344,
+        "counted_completed_games": 10017,
+        "lifetime_completed_games": null,
+        "counted_environment_steps": 1548288,
+        "uncounted_legacy_environment_steps": 2097152,
+        "game_count_lineage_id": "1da3ae08bcc444cb898a2179de28aa5c",
+        "seed": 20261002,
+        "embedded_config_sha256": "f99eceeea2d1e562d217d90e57e649c26a78093399ef8a82c98db1efa4fc408c",
+        "preceding_milestone_id": "facts-counted-g8010",
+        "unique_counted_training_layouts": 6334
+      },
+      "verification": {
+        "strict_policy_load_cpu": true,
+        "finite_policy_weights": true,
+        "checked_on": "2026-10-03"
+      },
+      "artifacts": [
+        {
+          "role": "training_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/recovered-final/counted_10000/ckpt_000890.pt",
+          "sha256": "ef60cd5f21086e77a61a4744b57b267d51590fae3df1d659fc87b09458661aa1"
+        },
+        {
+          "role": "training_source_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/source-sha256.json",
+          "sha256": "71e1086904252fcce4eea9d6e8722a3e437b829bfd4f5bb72469067219a2a76e"
+        },
+        {
+          "role": "training_upload_archive",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/games-10000-upload-v1.tar.gz",
+          "sha256": "ac111e7d67dd126c7130c2c67cc66051cfb823889d0bb9cab4e5647d566f76b1"
+        },
+        {
+          "role": "recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/recovered-final/recovery-audit.json",
+          "sha256": "279b7b996657cd956375063684eef417a808448a305f2def06d8f77125446b7f"
+        },
+        {
+          "role": "runtime_config",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/recovered-final/counted_10000/cfg.runtime.yaml",
+          "sha256": "fabc82edadf1980e7435f0aa92c42a7450b1b58ea7698d855d863ea7cf9ac2e3"
+        },
+        {
+          "role": "inference_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/recovered-final/counted_10000/policy-inference.pt",
+          "sha256": "9e7bc70b55004eeee0111b7438911367fa97ab095e733164a2d02a062ee4d80d"
+        },
+        {
+          "role": "selection_evaluation_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/protocol.json",
+          "sha256": "c5787033770f7577f5c25ead29ec11dcfb6fcaa44a19deb1db906e8275559050"
+        },
+        {
+          "role": "selection_evaluation_audit",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/local-audit.json",
+          "sha256": "535460ef1bad19f2623a303d625a467449b209b8116fa4859c5219fa40b461bc"
+        },
+        {
+          "role": "baseline_selection",
+          "root": "beijing-v100-preflight",
+          "path": "games-10000-20261002-v1/recovered-final/frozen-baseline.json",
+          "sha256": "37140d503e4e8db603c9c81706cd468a18b4dfbd36a0cfc8e5e75782bbbbcc85"
+        },
+        {
+          "role": "evaluation_summary",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/final10017_vs_original512.json",
+          "sha256": "ddcc5ea9947bb6e8debdf93711cf9f74fd9cd7fb550fa2d004ab037f5e8389c5"
+        },
+        {
+          "role": "per_game_evaluation_records",
+          "root": "beijing-v100-preflight",
+          "path": "heldout-20261002-v1/recovered-final/final10017_vs_original512.jsonl",
+          "sha256": "abe04e2af93cac4226ff84e8fc891acd4feb93df2d744af69a40f91ceb72a5e3"
+        }
+      ],
+      "notes": [
+        "Counted games begin after the original 512 rollout batches; lifetime game count is unknown.",
+        "No neural belief model is attached."
+      ]
+    },
+    {
+      "id": "legacy-n-r36384",
+      "kind": "policy",
+      "status": "historical_reference",
+      "parent_model_id": null,
+      "checkpoint_metadata": {
+        "format_version": 2,
+        "observation_semantics_version": 4,
+        "observation_channels": 317,
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "combat_feature_version": 1,
+        "tactical_feature_version": 0,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "validated_runtime_contract": {
+        "format_version": 2,
+        "observation_semantics_version": 4,
+        "identity_encoding": "legacy_probabilities",
+        "observation_channels": 317,
+        "observation_global_dims": 28,
+        "global_summary_enabled": true,
+        "input_layout_sha256": "e8116bb0243ff8e9ed6cb3605e60e2bd0b8915e279a7bdb64ece022c513ccfd8",
+        "architecture_id": "junqi.graph317.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {
+          "combat": 1
+        },
+        "combat_feature_version": 1,
+        "tactical_feature_version": 0,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "parameter_count": 942292,
+      "training": {
+        "rollout_batches": 36384,
+        "optimizer_updates": 3492927,
+        "counted_completed_games": null,
+        "lifetime_completed_games": null,
+        "counted_environment_steps": null,
+        "uncounted_legacy_environment_steps": null,
+        "game_count_lineage_id": null,
+        "seed": 9212,
+        "embedded_config_sha256": "1c218a59a288d7698c953998b0e52d96eb6ee5da56d253e7032c6db0ed1534db"
+      },
+      "verification": {
+        "strict_policy_load_cpu": true,
+        "finite_policy_weights": true,
+        "checked_on": "2026-10-03"
+      },
+      "artifacts": [
+        {
+          "role": "training_checkpoint",
+          "root": "model-audit",
+          "path": "recovered-hf-20260930/N-ckpt_036384.pt",
+          "sha256": "a86939d757022f9a3627841973cd47d0e816ca50087adb004b4b0f64ea8bcec4"
+        },
+        {
+          "role": "recovery_manifest",
+          "root": "model-audit",
+          "path": "recovered-hf-20260930/recovery-manifest.json",
+          "sha256": "d5571125533513ea93c5587e761ddfaf858f5279d52908769324f479765eb89e"
+        },
+        {
+          "role": "compatibility_audit",
+          "root": "model-audit",
+          "path": "recovered-hf-20260930/cpu-checkpoint-audit.json",
+          "sha256": "687185f366f3ffaf788a4500dfae9664606c480fb1bc131f47d96fea0d0e1b3d"
+        }
+      ],
+      "provenance": {
+        "recovered_hf_revision": "d67e2677b8e212249f072f68ac0a32576b19f225",
+        "compatibility_reference_source_commit": "741527582ae01c297f59f247a723f69f09afddfe",
+        "original_training_source_commit": null
+      },
+      "notes": [
+        "Compatibility reference source is not proof of the original training source.",
+        "Uses historical probability inputs and handcrafted feature modules."
+      ]
+    },
+    {
+      "id": "legacy-m-r36384",
+      "kind": "policy",
+      "status": "historical_reference",
+      "parent_model_id": null,
+      "checkpoint_metadata": {
+        "format_version": 2,
+        "observation_semantics_version": 4,
+        "observation_channels": 317,
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "combat_feature_version": 1,
+        "tactical_feature_version": 2,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "validated_runtime_contract": {
+        "format_version": 2,
+        "observation_semantics_version": 4,
+        "identity_encoding": "legacy_probabilities",
+        "observation_channels": 317,
+        "observation_global_dims": 28,
+        "global_summary_enabled": true,
+        "input_layout_sha256": "e8116bb0243ff8e9ed6cb3605e60e2bd0b8915e279a7bdb64ece022c513ccfd8",
+        "architecture_id": "junqi.graph317.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {
+          "combat": 1,
+          "tactical": 2
+        },
+        "combat_feature_version": 1,
+        "tactical_feature_version": 2,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "parameter_count": 942645,
+      "training": {
+        "rollout_batches": 36384,
+        "optimizer_updates": 3492926,
+        "counted_completed_games": null,
+        "lifetime_completed_games": null,
+        "counted_environment_steps": null,
+        "uncounted_legacy_environment_steps": null,
+        "game_count_lineage_id": null,
+        "seed": 9212,
+        "embedded_config_sha256": "014dcbb51811ec1c7a0ff2e54d401f482ad70e3440febb7da407a95e0e12fed7"
+      },
+      "verification": {
+        "strict_policy_load_cpu": true,
+        "finite_policy_weights": true,
+        "checked_on": "2026-10-03"
+      },
+      "artifacts": [
+        {
+          "role": "training_checkpoint",
+          "root": "model-audit",
+          "path": "recovered-hf-20260930/M-ckpt_036384.pt",
+          "sha256": "6019b843272c21dde81433ccf903caf1497befba8ebdefccfd700103bf4434a4"
+        },
+        {
+          "role": "recovery_manifest",
+          "root": "model-audit",
+          "path": "recovered-hf-20260930/recovery-manifest.json",
+          "sha256": "d5571125533513ea93c5587e761ddfaf858f5279d52908769324f479765eb89e"
+        },
+        {
+          "role": "compatibility_audit",
+          "root": "model-audit",
+          "path": "recovered-hf-20260930/cpu-checkpoint-audit.json",
+          "sha256": "687185f366f3ffaf788a4500dfae9664606c480fb1bc131f47d96fea0d0e1b3d"
+        }
+      ],
+      "provenance": {
+        "recovered_hf_revision": "d67e2677b8e212249f072f68ac0a32576b19f225",
+        "compatibility_reference_source_commit": "741527582ae01c297f59f247a723f69f09afddfe",
+        "original_training_source_commit": null
+      },
+      "notes": [
+        "Compatibility reference source is not proof of the original training source.",
+        "Uses historical probability inputs and handcrafted feature modules."
+      ]
+    },
+    {
+      "id": "legacy-r-r36384",
+      "kind": "policy",
+      "status": "historical_reference",
+      "parent_model_id": null,
+      "checkpoint_metadata": {
+        "format_version": 2,
+        "observation_semantics_version": 4,
+        "observation_channels": 317,
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "combat_feature_version": 1,
+        "tactical_feature_version": 2,
+        "relational_feature_version": 1,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "validated_runtime_contract": {
+        "format_version": 2,
+        "observation_semantics_version": 4,
+        "identity_encoding": "legacy_probabilities",
+        "observation_channels": 317,
+        "observation_global_dims": 28,
+        "global_summary_enabled": true,
+        "input_layout_sha256": "e8116bb0243ff8e9ed6cb3605e60e2bd0b8915e279a7bdb64ece022c513ccfd8",
+        "architecture_id": "junqi.graph317.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {
+          "combat": 1,
+          "tactical": 2,
+          "relational": 1
+        },
+        "combat_feature_version": 1,
+        "tactical_feature_version": 2,
+        "relational_feature_version": 1,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "parameter_count": 942804,
+      "training": {
+        "rollout_batches": 36384,
+        "optimizer_updates": 3492931,
+        "counted_completed_games": null,
+        "lifetime_completed_games": null,
+        "counted_environment_steps": null,
+        "uncounted_legacy_environment_steps": null,
+        "game_count_lineage_id": null,
+        "seed": 9212,
+        "embedded_config_sha256": "f1fbde1cb9b26589fe361fdc8f6b67756d066e502cf491025297937e19206f44"
+      },
+      "verification": {
+        "strict_policy_load_cpu": true,
+        "finite_policy_weights": true,
+        "checked_on": "2026-10-03"
+      },
+      "artifacts": [
+        {
+          "role": "training_checkpoint",
+          "root": "model-audit",
+          "path": "recovered-hf-20260930/R-ckpt_036384.pt",
+          "sha256": "6895534e6c2315047d3c89a25db2be95fdc005ce925cec13918b78c184084d0f"
+        },
+        {
+          "role": "recovery_manifest",
+          "root": "model-audit",
+          "path": "recovered-hf-20260930/recovery-manifest.json",
+          "sha256": "d5571125533513ea93c5587e761ddfaf858f5279d52908769324f479765eb89e"
+        },
+        {
+          "role": "compatibility_audit",
+          "root": "model-audit",
+          "path": "recovered-hf-20260930/cpu-checkpoint-audit.json",
+          "sha256": "687185f366f3ffaf788a4500dfae9664606c480fb1bc131f47d96fea0d0e1b3d"
+        }
+      ],
+      "provenance": {
+        "recovered_hf_revision": "d67e2677b8e212249f072f68ac0a32576b19f225",
+        "compatibility_reference_source_commit": "741527582ae01c297f59f247a723f69f09afddfe",
+        "original_training_source_commit": null
+      },
+      "notes": [
+        "Compatibility reference source is not proof of the original training source.",
+        "Uses historical probability inputs and handcrafted feature modules."
+      ]
+    },
+    {
+      "id": "legacy-probability-r512",
+      "kind": "policy",
+      "status": "historical_pilot_reference",
+      "parent_model_id": null,
+      "checkpoint_metadata": {
+        "format_version": 2,
+        "observation_semantics_version": 4,
+        "observation_channels": 317,
+        "observation_global_dims": 0,
+        "global_summary_enabled": false,
+        "input_layout_sha256": "c51019e16505b79d7382b9bc569f2c13bddeeca2cc7097a4e3d1a83f9588f740",
+        "architecture_id": "junqi.graph317.cls.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {
+          "combat": 1,
+          "tactical": 2
+        },
+        "combat_feature_version": 1,
+        "tactical_feature_version": 2,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "validated_runtime_contract": {
+        "format_version": 2,
+        "observation_semantics_version": 4,
+        "identity_encoding": "legacy_probabilities",
+        "observation_channels": 317,
+        "observation_global_dims": 0,
+        "global_summary_enabled": false,
+        "input_layout_sha256": "c51019e16505b79d7382b9bc569f2c13bddeeca2cc7097a4e3d1a83f9588f740",
+        "architecture_id": "junqi.graph317.cls.v1",
+        "action_dim": 16641,
+        "num_on_board_cells": 129,
+        "policy_features": {
+          "combat": 1,
+          "tactical": 2
+        },
+        "combat_feature_version": 1,
+        "tactical_feature_version": 2,
+        "relational_feature_version": 0,
+        "policy_class": "JunqiNet",
+        "stem_class": "GraphStem"
+      },
+      "parameter_count": 939061,
+      "training": {
+        "rollout_batches": 512,
+        "optimizer_updates": 12264,
+        "counted_completed_games": null,
+        "lifetime_completed_games": null,
+        "counted_environment_steps": null,
+        "uncounted_legacy_environment_steps": null,
+        "game_count_lineage_id": null,
+        "seed": 20261001,
+        "embedded_config_sha256": "b73ae7e2e0af31409c40b7f590a28a6a1a98a9932b2043cf3caddf0eab0708ed"
+      },
+      "verification": {
+        "strict_policy_load_cpu": true,
+        "finite_policy_weights": true,
+        "checked_on": "2026-10-03"
+      },
+      "artifacts": [
+        {
+          "role": "training_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "launch-20261001/results-2347635/models/baseline/ckpt_000512.pt",
+          "sha256": "c4525a328130bcbd55b798f6d0187cc1c3e5ed8b19aaf1b021af89a6fc2f7cd4"
+        },
+        {
+          "role": "inference_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "launch-20261001/results-2347635/models/baseline/policy-inference.pt",
+          "sha256": "218ffa52ea3028165d688ec2a7e780ffb159d02a09d0f8518f92458fd1edb6bb"
+        },
+        {
+          "role": "training_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "launch-20261001/results-2347635/recovered/manifest.json",
+          "sha256": "83f43e2d27c06ed2c0d7da1d235b7f76e97fb9ebdbde91e01ad8b909d832d22e"
+        },
+        {
+          "role": "recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "launch-20261001/results-2347635/local-recovery-audit.json",
+          "sha256": "5881261a099ab1dbafd90f18bd7845f00af9594bc059ea9951b334d16b22cc14"
+        }
+      ],
+      "notes": [
+        "Separate from facts-original-r512: this pilot uses legacy probability inputs."
+      ]
+    },
+    {
+      "id": "legacy-joint-v1",
+      "kind": "belief",
+      "status": "historical_failed_pilot",
+      "parent_model_id": "legacy-probability-r512",
+      "architecture_id": "junqi.belief317.autoregressive.v1",
+      "input_spec": {
+        "spatial_channels": 317,
+        "global_dims": 0,
+        "board_tokens": 129,
+        "hidden_tokens": 75,
+        "types": 12,
+        "sequence": "relative-owner-then-initial-slot",
+        "mode": "DARK",
+        "includes_dead_pieces": true
+      },
+      "identity_encoding": "legacy_probabilities",
+      "parent_policy_inference_sha256": "218ffa52ea3028165d688ec2a7e780ffb159d02a09d0f8518f92458fd1edb6bb",
+      "parameter_count": 301516,
+      "training": {
+        "optimizer_updates": 512,
+        "seed": 20261002,
+        "dataset_rows": 1024,
+        "train_rows": 768,
+        "validation_rows": 256
+      },
+      "artifacts": [
+        {
+          "role": "belief_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "launch-20261001/results-2347635/models/joint/joint-belief.pt",
+          "sha256": "3c6348e9c71404caad183bde67c0548628def7eca3cc0253da63b997a646a662"
+        },
+        {
+          "role": "training_report",
+          "root": "beijing-v100-preflight",
+          "path": "launch-20261001/results-2347635/recovered/joint/report.json",
+          "sha256": "31e9c2c8f407604123188ec2fc4f1747238954da9187a49936cdeaa43a054b15"
+        },
+        {
+          "role": "pilot_evaluation",
+          "root": "beijing-v100-preflight",
+          "path": "launch-20261001/results-2347635/recovered/comparison/comparison.json",
+          "sha256": "7b738aa202d7a354a43335e7ebc70a8da5e4191344571ab9cff22a7f10c06b72"
+        },
+        {
+          "role": "training_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "launch-20261001/results-2347635/recovered/manifest.json",
+          "sha256": "83f43e2d27c06ed2c0d7da1d235b7f76e97fb9ebdbde91e01ad8b909d832d22e"
+        },
+        {
+          "role": "recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "launch-20261001/results-2347635/local-recovery-audit.json",
+          "sha256": "5881261a099ab1dbafd90f18bd7845f00af9594bc059ea9951b334d16b22cc14"
+        }
+      ],
+      "verification": {
+        "strict_policy_and_parent_load_cpu": true,
+        "finite_weights": true,
+        "checked_on": "2026-10-03"
+      },
+      "notes": [
+        "Historical probability-input search pilot; not the future facts/history BeliefNet.",
+        "Pilot search scored 9 wins, 17 losses, 6 draws and often fell back; not evidence of improvement."
+      ]
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "best8010_vs_original512",
+      "policy_a": "facts-counted-g8010",
+      "policy_b": "facts-original-r512",
+      "wins": 200,
+      "losses": 72,
+      "draws": 128,
+      "score": 0.66,
+      "score_ci95_low": 0.625,
+      "score_ci95_high": 0.69375,
+      "games": 400,
+      "confidence_method": "paired_layout_bootstrap_5000",
+      "used_for_pi0_selection": true
+    },
+    {
+      "id": "final10017_vs_original512",
+      "policy_a": "facts-counted-g10017",
+      "policy_b": "facts-original-r512",
+      "wins": 213,
+      "losses": 74,
+      "draws": 113,
+      "score": 0.67375,
+      "score_ci95_low": 0.63875,
+      "score_ci95_high": 0.7075,
+      "games": 400,
+      "confidence_method": "paired_layout_bootstrap_5000",
+      "used_for_pi0_selection": true
+    },
+    {
+      "id": "best8010_vs_final10017",
+      "policy_a": "facts-counted-g8010",
+      "policy_b": "facts-counted-g10017",
+      "wins": 164,
+      "losses": 201,
+      "draws": 35,
+      "score": 0.45375,
+      "score_ci95_low": 0.41375,
+      "score_ci95_high": 0.49125,
+      "games": 400,
+      "confidence_method": "paired_layout_bootstrap_5000",
+      "used_for_pi0_selection": true
+    }
+  ],
+  "evaluation_limitations": [
+    "One policy-training seed; this layout cohort participated in selecting pi0.",
+    "Future confirmatory belief comparisons require a new layout cohort.",
+    "Intervals are not adjusted for multiple comparisons."
+  ]
+}

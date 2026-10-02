@@ -1,5 +1,11 @@
 # P1 BeliefNet — design & landing plan
 
+> **历史方案：不适用于当前事实输入模型。** 本文保留旧概率管线、256＋28 输入、
+> 两个敌方身份和库存先验等设计，供复现实验。当前使用 317/0、`known_only`，
+> 身份范围包括 DARK 队友及未知阵亡棋子；新信念模型尚未训练。
+> 当前接口与步骤见 [事实基线记录](FACTS_ONLY_TRAINING_20261002.md) 和
+> [替代设计](JOINT_BELIEF_REVIEW_20261001.md)。
+
 ## Goal
 
 Replace JunQi's hand-coded deductive belief rules (R1, R4, R5/R7, R6, R9,

@@ -97,7 +97,7 @@ python -m pytest -q tests/test_gpu_step_batch.py tests/test_gpu_obs_parity.py
 make test              # 无 Torch 也能运行的核心测试
 make test-rl           # 要求 Torch 的完整 Python 测试
 make lint-critical     # 阻止未定义名称、重复定义等高置信问题
-make check             # lint-critical + core tests
+make check             # lint-critical + core lint + typing + tests
 make legacy-engine     # 构建 C 引擎
 make legacy-gui        # 构建 GTK 客户端
 make legacy-sanitize   # ASan/UBSan 构建 + 畸形 UDP 协议冒烟
@@ -134,31 +134,42 @@ RL 轨迹可以包含每步 Top-K 动作概率、Value、Belief 快照及训练�
 选择“全知复盘”可以查看完整棋谱诊断；这是本机复盘工具的显式功能，视角
 选择不是多人对战的身份认证或权限隔离。
 
-公开军旗修复对应观察语义版本 4，输入尺寸仍为 317 个棋盘通道和 28 个全局量。
-版本 3 的模型应使用原版本环境复现；在版本 4 环境使用旧权重需要明确迁移，
-不能将两种观察含义混作同一训练或评估协议。
+当前训练使用 **317 个事实通道、零全局量、`known_only`、观察语义 v5**。
+未知身份通道为零，可见身份为 one-hot。公开历史和严格逻辑约束保留，手工身份
+概率、概率混合及手工估值头不进入事实路径。CPU/GPU 评测和回放按模型的输入契约
+创建观察；不同身份语义的对战需要独立适配器。
 
 ## 训练
 
+当前入口为北京 V100 的完整对局配置 `configs/v100_facts_games.yaml`：
+
 ```bash
-# 当前 10.8M H20 自对弈配置：继承 Ataraxos 配方，只将
-# ppo.adv_filt_rate 覆盖为 1.0（保留全部 transition）。
-python scripts/train.py --config configs/h20_10m_current.yaml
+# 先检查配置；不启动训练，也不分配 GPU。
+python scripts/train.py --validate-only
 
-# 可选：使用与当前 317-channel / GraphStem schema 兼容的冻结 baseline 做 H2H。
-# 路径由启动环境提供，不再写死在 tracked config 中。
-python scripts/train.py --config configs/h20_10m_current.yaml \
-  --set eval_baseline_ckpt=/path/to/compatible_baseline.pt
+# 在已分配的 V100 节点上运行当前事实配置。
+python scripts/train.py --config configs/v100_facts_games.yaml
 
-# 通用小规模入口
-python scripts/train.py --config configs/default.yaml
+# 续训时，累计完整局数目标应高于 checkpoint 已记录的局数。
+python scripts/train.py --config configs/v100_facts_games.yaml \
+  --resume /path/to/ckpt_000890.pt --target_completed_games 12000 \
+  --save_dir exps/facts_continuation
 ```
 
-当前 10.8M 主线配置为 `configs/h20_10m_current.yaml`。它通过
-`extends: ataraxos_selfplay.yaml` 复用模型、rollout、优化器、熵/KL 和
-布阵池设置，仅关闭 advantage quantile 过滤。机器相关的续训 checkpoint、
-输出目录等通过命令行参数传入。`configs/v42_*.yaml` 至
-`configs/v44_*.yaml` 保留为历史课程学习实验记录。
+配置继承为 `facts_base.yaml → v100_facts.yaml → v100_facts_games.yaml`。
+事实基础配置独立定义模型、PPO 和关闭的可选组件。默认目标为新计数起点下累计
+2,000 局；rollout 数只作为故障保护上限。历史 `v100_facts.yaml` 保留原始 512 次
+rollout 的参数。H20、旧 `default.yaml`、课程学习和旧信念配置需显式指定，详见
+[配置索引](configs/README.md)。底层 legacy 默认值用于解释历史权重。
+
+固定策略为 `ckpt_000890.pt`，计数阶段累计完成 10,017 局；此前原始第 512 轮
+checkpoint 的完整局数未知，不能把 512 当作局数。模型、父模型和证据文件见
+[模型索引与核验说明](docs/models/README.md)，训练与评测结果见
+[事实基线记录](docs/FACTS_ONLY_TRAINING_20261002.md)。新 BeliefNet 尚未训练。
+
+历史信念原型使用 `scripts/legacy_train_joint_belief.py`、
+`scripts/legacy_compare_joint_search.py` 和 `scripts/legacy_pilot_joint_belief.py`。
+原命令名保留兼容转发并提示历史身份；这些原型不能消费当前事实策略。
 
 PPO 始终使用冻结的 collection policy，在完整合法动作分布上计算
 `KL(π_new || π_collect)`。训练专用 `actions=` 快速路径只省去未使用的
@@ -168,7 +179,7 @@ PPO 始终使用冻结的 collection policy，在完整合法动作分布上计�
 
 - 多随机种子；
 - 固定 paired-seed 对局；
-- Wilson 置信区间；
+- 按完整布局对重采样的配对置信区间；
 - 胜、负、和、平均步数与无战斗步数；
 - 对随机玩家、EMA 策略和历史 checkpoint 的交叉评估。
 
@@ -179,9 +190,11 @@ PPO 始终使用冻结的 collection policy，在完整合法动作分布上计�
 - `docs/CUDA_ARCHITECTURE.md`：CUDA 状态和内核布局。
 - `docs/DECISIONS.md`：架构决策记录。
 - `docs/REPLAY.md`：复盘格式和工具。
-- `docs/RL_ITERATION_PLAN.md`：分级门禁、实验漏斗与模型晋级标准。
+- `docs/FACTS_ONLY_TRAINING_20261002.md`：当前事实基线、完整对局计数及后续步骤。
+- `docs/models/registry.json`：模型血缘、输入契约与证据哈希索引。
+- `docs/RL_ITERATION_PLAN.md`：历史实验漏斗；当前预算以完整对局为准。
 - `docs/MAINTENANCE_2026-07-28.md`：本轮修复、验证边界与后续建议。
-- `docs/PROGRESS_2026Q2_CURRICULUM.md`：当前训练实验状态。
+- `docs/PROGRESS_2026Q2_CURRICULUM.md`：历史课程学习实验。
 
 ## 安全
 
