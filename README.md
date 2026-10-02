@@ -165,11 +165,13 @@ rollout 的参数。H20、旧 `default.yaml`、课程学习和旧信念配置需
 固定策略为 `ckpt_000890.pt`，计数阶段累计完成 10,017 局；此前原始第 512 轮
 checkpoint 的完整局数未知，不能把 512 当作局数。模型、父模型和证据文件见
 [模型索引与核验说明](docs/models/README.md)，训练与评测结果见
-[事实基线记录](docs/FACTS_ONLY_TRAINING_20261002.md)。新 BeliefNet 尚未训练。
+[事实基线记录](docs/FACTS_ONLY_TRAINING_20261002.md)。当前联合 BeliefNet 的
+采集、训练与对局协议见 [事实信念比较](docs/FACTS_BELIEF_COMPARISON_20261003.md)。
 
 历史信念原型使用 `scripts/legacy_train_joint_belief.py`、
 `scripts/legacy_compare_joint_search.py` 和 `scripts/legacy_pilot_joint_belief.py`。
-原命令名保留兼容转发并提示历史身份；这些原型不能消费当前事实策略。
+`train_joint_belief.py` 和 `compare_joint_search.py` 现已迁移到事实版本；
+历史实验需显式使用 `legacy_*` 入口。历史原型不能消费当前事实策略。
 
 PPO 始终使用冻结的 collection policy，在完整合法动作分布上计算
 `KL(π_new || π_collect)`。训练专用 `actions=` 快速路径只省去未使用的

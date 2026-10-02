@@ -13,10 +13,11 @@ import pytest
 
 from junqi_core.knowledge import PublicEvent
 from junqi_core.rules import Event, Seat, ShowMode
+from junqi_rl.belief.constraints import CONSTRAINT_SCHEMA
 from junqi_rl.belief.facts_dataset import (
     ARRAY_FIELDS, DATASET_SCHEMA, TRACE_SCHEMA, batch_inputs, concatenate_shards,
     iter_shards, pack_events, persist_trace, prepare_protocol, preprocess_game,
-    read_npz, rebuild_manifest, replay_trace, selected_positions, split_for_setup,
+    protocol_sha256, read_npz, rebuild_manifest, replay_trace, selected_positions, split_for_setup,
     validate_trace, _unpack_history,
 )
 from junqi_rl.env import JunqiEnv, rotate_to_compact_action_id
@@ -62,7 +63,8 @@ def complete_trace():
 
 def protocol(games=1):
     return dict(schema=DATASET_SCHEMA, parent_checkpoint_sha256="f" * 64, games=games,
-                positions_per_game=2, position_seed=20261003, max_moves=96)
+                positions_per_game=2, position_seed=20261003, max_moves=96,
+                constraint_schema=CONSTRAINT_SCHEMA)
 
 
 def test_complete_cpu_replay_preserves_all_public_events_and_separate_targets(complete_trace):
@@ -156,6 +158,39 @@ def test_partial_manifest_cannot_start_training(tmp_path):
     prepare_protocol(tmp_path, protocol())
     assert rebuild_manifest(tmp_path)["status"] == "partial"
     with pytest.raises(ValueError, match="complete facts"):
+        list(iter_shards(tmp_path, "train"))
+
+
+@pytest.mark.parametrize("old_schema", [None, "junqi.identity-domain-inventory-combat.v1"])
+def test_old_or_unspecified_constraint_masks_are_rejected_at_every_dataset_entry(tmp_path, old_schema):
+    stale = protocol()
+    if old_schema is None:
+        stale.pop("constraint_schema")
+    else:
+        stale["constraint_schema"] = old_schema
+    with pytest.raises(ValueError, match="constraint schema"):
+        prepare_protocol(tmp_path, stale)
+    assert not (tmp_path / "protocol.json").exists()
+    # Direct preprocessing/loading must also reject pre-existing v1 caches,
+    # before even trying to open the game or its supervised arrays.
+    (tmp_path / "protocol.json").write_text(json.dumps(stale))
+    with pytest.raises(ValueError, match="constraint schema"):
+        preprocess_game(tmp_path, 0)
+    (tmp_path / "dataset-manifest.json").write_text(json.dumps(dict(
+        schema=DATASET_SCHEMA, status="complete", protocol=stale,
+        protocol_sha256=protocol_sha256(stale), shards=[])))
+    with pytest.raises(ValueError, match="constraint schema"):
+        list(iter_shards(tmp_path, "train"))
+
+
+def test_relabeling_manifest_does_not_make_an_old_mask_cache_current(tmp_path):
+    current = protocol()
+    stale = {**current, "constraint_schema": "junqi.identity-domain-inventory-combat.v1"}
+    manifest = dict(schema=DATASET_SCHEMA, status="complete", protocol=current,
+                    protocol_sha256=protocol_sha256(current), shards=[dict(
+                        split="train", protocol_sha256=protocol_sha256(stale), path="must-not-open.npz")])
+    (tmp_path / "dataset-manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="different dataset protocol"):
         list(iter_shards(tmp_path, "train"))
 
 

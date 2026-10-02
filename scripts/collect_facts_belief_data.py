@@ -29,6 +29,7 @@ from junqi_rl.belief.facts_dataset import (
     DATASET_SCHEMA, TRACE_SCHEMA, file_sha256, persist_trace, prepare_protocol,
     preprocess_game, protocol_sha256, rebuild_manifest,
 )
+from junqi_rl.belief.constraints import CONSTRAINT_SCHEMA
 
 
 def _contiguous_waves(ids, width):
@@ -164,6 +165,7 @@ def main(argv=None):
                     split="initial_setup_sha256_mod10_train0to7_validation8_test9",
                     position_sampling="one_random_ply_per_stratum_rotating_observer",
                     teacher_masks="exact_public_constraints_causal_prefix",
+                    constraint_schema=CONSTRAINT_SCHEMA,
                     acceptance_only=args.max_moves != 4000)
     prepare_protocol(args.output, protocol)
     # Verifying existing hashes up front makes collection resume fail closed.

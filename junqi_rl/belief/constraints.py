@@ -3,8 +3,8 @@
 This module computes feasibility, never identity probabilities. A candidate is
 allowed only if domains, initial army inventories, and every recorded combat
 relation have a complete satisfying assignment. Domains include public path
-restrictions supplied by the observer ledger. Full game-history reconstruction
-remains a separate check (for example, elimination by absence of legal moves).
+restrictions and elimination by absence of legal moves. Full game-history
+reconstruction remains an independent check of the complete engine broadcast.
 
 Returned masks define the support of each neural conditional. They do not make
 the resulting autoregressive distribution uniform over complete assignments.
@@ -16,9 +16,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from junqi_core.board import index_to_pos
+from junqi_core.identity import TRACKED_TYPES
+from junqi_core.move_gen import PieceRef, legal_moves_from
+from junqi_core.rules import CAMP_INDICES, Event, PieceType, Seat
+
 from .joint import IDENTITY_INPUT_SCHEMA, IdentityConstraintInput
 
-CONSTRAINT_SCHEMA = "junqi.identity-domain-inventory-combat.v1"
+CONSTRAINT_SCHEMA = "junqi.identity-domain-inventory-combat-q12.v2"
 _N_TYPES = 12
 
 
@@ -36,6 +41,72 @@ def _values(bits: int):
         bit = bits & -bits
         yield bit.bit_length() - 1
         bits ^= bit
+
+
+def _immobility_domains(pieces, seat):
+    """Exact per-piece type restrictions when a public seat has no moves.
+
+    All other piece types are opaque blockers. Movement has only three type
+    classes: immobile, ordinary movable, and engineer. No rank probabilities
+    or simulator identities participate in this check.
+    """
+    restrictions = {}
+    for pos, piece in tuple(pieces.items()):
+        if piece.seat != seat:
+            continue
+        possible = np.ones(_N_TYPES, dtype=bool)
+        for representative, predicate in (
+            (PieceType.PAIZH, lambda t: not t.is_immobile and not t.is_engineer),
+            (PieceType.GONGB, lambda t: t.is_engineer),
+        ):
+            pieces[pos] = PieceRef(seat, representative, piece_id=piece.piece_id)
+            if legal_moves_from(pieces, pos, seat):
+                possible &= np.asarray([not predicate(kind) for kind in TRACKED_TYPES])
+        pieces[pos] = piece
+        restrictions[piece.piece_id] = possible
+    return restrictions
+
+
+def _q12_domains(events):
+    """Replay only public occupancy to extract no-legal-move eliminations.
+
+    The broadcast lists flag surrender, empty-army death, then Q12 deaths in
+    engine order. Therefore a listed seat with remaining pieces whose flag
+    was not captured necessarily has no legal action at that point. Removing
+    each such army before checking the next preserves Q12 cascade blockers.
+    """
+    if not any(event.seats_died for event in events):
+        return {}
+    pieces = {index_to_pos(Seat(owner), slot):
+              PieceRef(Seat(owner), PieceType.DARK, piece_id=owner * 30 + slot)
+              for owner in range(4) for slot in range(30) if slot not in CAMP_INDICES}
+    restrictions = {}
+    for event in events:
+        src, dst = (event.src % 17, event.src // 17), (event.dst % 17, event.dst // 17)
+        attacker, defender = pieces.get(src), pieces.get(dst)
+        if (attacker is None or attacker.piece_id != event.attacker_pid
+                or (-1 if defender is None else defender.piece_id) != event.defender_pid):
+            raise ValueError('Public history occupancy or piece identity mismatch')
+        if event.event in (Event.MOVE, Event.EAT):
+            del pieces[src]
+            pieces[dst] = attacker
+        elif event.event is Event.KILLED:
+            del pieces[src]
+        elif event.event is Event.BOMB:
+            del pieces[src]
+            del pieces[dst]
+        else:
+            raise ValueError('Unknown public movement/combat event')
+        surrendered = event.defender_pid // 30 if event.flag_captured else None
+        for owner in event.seats_died:
+            seat = Seat(owner)
+            if owner != surrendered:
+                for pid, domain in _immobility_domains(pieces, seat).items():
+                    restrictions[pid] = restrictions.get(pid, np.ones(_N_TYPES, dtype=bool)) & domain
+            for pos, piece in tuple(pieces.items()):
+                if piece.seat == seat:
+                    del pieces[pos]
+    return restrictions
 
 
 class CompiledIdentityConstraints:
@@ -298,7 +369,17 @@ def compile_constraints(inputs: IdentityConstraintInput, row=0, *, max_search_no
             raise ValueError("Combat refers to an identity absent from observer knowledge")
         return int(observer_known[pid])
 
-    for event in inputs.public_history[row]:
+    events = inputs.public_history[row]
+    if any(event.seats_died for event in events):
+        if len(ids) != 75:
+            raise ValueError('Public elimination constraints require all 75 other-army identities')
+        for pid, domain in _q12_domains(events).items():
+            if pid in index:
+                domains[index[pid]] &= domain
+            elif not domain[known_label(pid)]:
+                raise ValueError('Known identity contradicts public no-legal-move elimination')
+
+    for event in events:
         if not event.has_combat:
             continue
         left, right = index.get(event.attacker_pid), index.get(event.defender_pid)

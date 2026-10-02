@@ -7,11 +7,13 @@ import numpy as np
 import pytest
 
 from junqi_core.identity import TYPE_TO_INDEX
+from junqi_core.board import index_to_pos
 from junqi_core.knowledge import ObserverKnowledge, PublicEvent
+from junqi_core.move_gen import PieceRef
 from junqi_core.rules import Event, PieceType, Seat, ShowMode
 from junqi_core.setup import generate_random_setup
 from junqi_core.state import Action, GameState
-from junqi_rl.belief.constraints import ConstraintBudgetExceeded, compile_constraints
+from junqi_rl.belief.constraints import ConstraintBudgetExceeded, _immobility_domains, compile_constraints
 from junqi_rl.belief.joint import IDENTITY_INPUT_SCHEMA, IdentityConstraintInput, build_joint_input
 
 
@@ -152,6 +154,21 @@ def test_teacher_masks_depend_on_only_the_causal_prefix():
     second = compile_constraints(inputs).teacher_masks([0, 2, 1])
     np.testing.assert_array_equal(first[:2], second[:2])
     assert not np.array_equal(first[2], second[2])
+
+
+def test_no_move_elimination_uses_public_occupancy_and_movement_classes_only():
+    stronghold = index_to_pos(Seat.SOUTH, 26)
+    pieces = {(2, 7): PieceRef(Seat.SOUTH, PieceType.DARK, piece_id=0),
+              stronghold: PieceRef(Seat.SOUTH, PieceType.DARK, piece_id=26),
+              # An opaque opposing type would fail if movement read a blocker
+              # identity rather than only its public presence and owner.
+              (1, 7): PieceRef(Seat.WEST, object(), piece_id=30)}
+    original = dict(pieces)
+    domains = _immobility_domains(pieces, Seat.SOUTH)
+    assert pieces == original
+    expected = {TYPE_TO_INDEX[PieceType.JUNQI], TYPE_TO_INDEX[PieceType.DILEI]}
+    assert set(np.flatnonzero(domains[0])) == expected
+    assert domains[26].all()  # Every identity is immobile inside a stronghold.
 
 
 def test_random_small_relations_agree_with_exhaustive_feasibility():

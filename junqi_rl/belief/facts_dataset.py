@@ -76,10 +76,19 @@ def split_for_setup(initial_setup_sha256: str) -> str:
     return "train" if bucket < 8 else "validation" if bucket == 8 else "test"
 
 
+def validate_constraint_schema(protocol: dict) -> None:
+    """Cached causal masks are valid only for their exact constraint semantics."""
+    from junqi_rl.belief.constraints import CONSTRAINT_SCHEMA
+    if not isinstance(protocol, dict) or protocol.get("constraint_schema") != CONSTRAINT_SCHEMA:
+        raise ValueError(f"dataset constraint schema mismatch; require {CONSTRAINT_SCHEMA!r}; "
+                         "old cached teacher masks must be rebuilt")
+
+
 def prepare_protocol(root, protocol: dict) -> dict:
     root = Path(root)
     if protocol.get("schema") != DATASET_SCHEMA:
         raise ValueError("dataset protocol schema mismatch")
+    validate_constraint_schema(protocol)
     path = root / "protocol.json"
     if path.exists():
         saved = json.loads(path.read_text())
@@ -246,6 +255,7 @@ def preprocess_game(root, game_id: int) -> dict:
     """CPU process-pool entry point; resume reuses only hash-verified shards."""
     root = Path(root)
     protocol = json.loads((root / "protocol.json").read_text())
+    validate_constraint_schema(protocol)
     identity = f"game-{game_id:07d}"
     raw_meta = json.loads((root / "raw" / (identity + ".json")).read_text())
     if raw_meta["protocol_sha256"] != protocol_sha256(protocol):
@@ -279,6 +289,7 @@ def preprocess_game(root, game_id: int) -> dict:
 def rebuild_manifest(root) -> dict:
     root = Path(root)
     protocol = json.loads((root / "protocol.json").read_text())
+    validate_constraint_schema(protocol)
     digest = protocol_sha256(protocol)
     raw, shards = [], []
     splits, rows, reasons = Counter(), Counter(), Counter()
@@ -322,9 +333,16 @@ def iter_shards(root, split: str) -> Iterator[dict[str, np.ndarray]]:
     manifest = json.loads((root / "dataset-manifest.json").read_text())
     if manifest.get("schema") != DATASET_SCHEMA or manifest.get("status") != "complete":
         raise ValueError("training requires a complete facts dataset manifest")
+    protocol = manifest.get("protocol")
+    validate_constraint_schema(protocol)
+    digest = protocol_sha256(protocol)
+    if manifest.get("protocol_sha256") != digest:
+        raise ValueError("dataset protocol hash mismatch")
     for item in manifest["shards"]:
         if item["split"] != split:
             continue
+        if item.get("protocol_sha256") != digest:
+            raise ValueError("supervised shard was cached under a different dataset protocol")
         path = root / item["path"]
         if file_sha256(path) != item["sha256"]:
             raise ValueError("supervised shard hash mismatch")
