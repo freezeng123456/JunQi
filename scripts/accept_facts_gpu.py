@@ -202,7 +202,10 @@ def _smoke_audit(cpu_policy, snapshot_path: Path) -> dict:
     snapshot = copy.deepcopy(dict(world=world.state_dict(), trainer=trainer.state_dict(),
                                   games=progress.state_dict(), rng=capture_rng(rng)))
     torch.save(snapshot, snapshot_path)
-    loaded = torch.load(snapshot_path, map_location="cuda", weights_only=False)
+    # Keep non-capturable AdamW's scalar step counters on CPU. Optimizer
+    # load_state_dict moves moment tensors to their parameter devices; a
+    # blanket CUDA deserialization would also move these CPU counters.
+    loaded = torch.load(snapshot_path, map_location="cpu", weights_only=False)
     expected = [advance(original, index) for index in (1, 2)]
     restored = components()
     restored[0].load_state_dict(loaded["world"])

@@ -1597,6 +1597,18 @@ class PPOTrainer:
         )
         self._policy_unwrapped.load_state_dict(sd["policy"])
         self.optimizer.load_state_dict(sd["optimizer"])
+        # Non-capturable AdamW keeps scalar step counters on CPU. Historical
+        # blanket CUDA deserialization moved them too; PyTorch intentionally
+        # preserves their input device in optimizer.load_state_dict. Normalize
+        # those counters without moving moments, or fused/capturable counters.
+        for group in self.optimizer.param_groups:
+            if group.get("capturable", False) or group.get("fused", False):
+                continue
+            for parameter in group["params"]:
+                state = self.optimizer.state.get(parameter, {})
+                step = state.get("step")
+                if isinstance(step, torch.Tensor) and step.device.type != "cpu":
+                    state["step"] = step.cpu()
         self.num_train_step = sd["num_train_step"]
         self.num_rollout = sd["num_rollout"]
         self._nan_skip_count = sd.get("nan_skip_count", 0)
@@ -1611,5 +1623,5 @@ class PPOTrainer:
 
     def load(self, path: str) -> None:
         """Load checkpoint from ``path``."""
-        sd = torch.load(path, map_location=self.device, weights_only=False)
+        sd = torch.load(path, map_location="cpu", weights_only=False)
         self.load_state_dict(sd)

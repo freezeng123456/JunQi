@@ -639,7 +639,9 @@ def train(cfg: TrainConfig) -> None:
     if cfg.resume:
         if is_rank0:
             print(f"[train] Resuming from {cfg.resume}")
-        resume_sd = torch.load(cfg.resume, map_location=device, weights_only=False)
+        # Optimizer loading places moments on each parameter's device while
+        # retaining the CPU scalar counters used by non-capturable AdamW.
+        resume_sd = torch.load(cfg.resume, map_location="cpu", weights_only=False)
         trainer.load_state_dict(resume_sd)
         if arr_trainer is not None and "arrangement" in resume_sd:
             arr_sd = resume_sd["arrangement"]
