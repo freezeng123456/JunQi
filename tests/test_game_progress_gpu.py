@@ -77,12 +77,37 @@ def test_complete_gpu_save_resume_matches_uninterrupted_training(tmp_path):
 
 
 def test_uniform_evaluation_preserves_seeded_actions_with_strict_cuda_determinism():
-    from junqi_rl.analysis.random_eval import _sample_uniform, _sample_weights
+    from junqi_rl.analysis.random_eval import _game_uniform, _sample_uniform
     torch.use_deterministic_algorithms(True)
     legal = torch.rand(512, 37, generator=torch.Generator().manual_seed(82)) > .4
     legal[:, 5] = True
     seeds = torch.arange(512) + 6100200
     for ply in (0, 31, 3999):
-        expected = _sample_weights(legal.float(), legal, seeds, ply)
+        # Freeze the historical CPU float32 uniform reference independently
+        # of the intentionally versioned nonuniform weighted sampler.
+        cumulative = legal.float().cumsum(-1)
+        threshold = _game_uniform(seeds, ply)[:, None] * cumulative[:, -1:]
+        expected = (cumulative > threshold).to(torch.int32).argmax(-1).to(torch.int32)
         actual = _sample_uniform(legal.cuda(), seeds.cuda(), ply).cpu()
         torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
+def test_nonuniform_sampling_is_strict_cuda_deterministic_and_batch_independent():
+    from junqi_rl.analysis.random_eval import _sample_weights
+    torch.use_deterministic_algorithms(True)
+    rng = torch.Generator().manual_seed(991)
+    weights = torch.rand(32, 16641, generator=rng).square()
+    legal = torch.rand(32, 16641, generator=rng) > .8
+    legal[:, 13] = True
+    weights[:, 13] = 1.0
+    weights[:, 17] = torch.finfo(torch.float32).tiny
+    legal[:, 17] = True
+    seeds = torch.arange(32) + 6200300
+    for ply in (0, 317, 3999):
+        expected = _sample_weights(weights, legal, seeds, ply, stream=19)
+        actual = _sample_weights(weights.cuda(), legal.cuda(), seeds.cuda(), ply, stream=19)
+        split = torch.cat([_sample_weights(weights[a:b].cuda(), legal[a:b].cuda(),
+                          seeds[a:b].cuda(), ply, stream=19) for a, b in ((0, 7), (7, 23), (23, 32))])
+        torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
+        torch.testing.assert_close(actual, split, rtol=0, atol=0)
+        assert legal.gather(1, actual.cpu().long()[:, None]).all()

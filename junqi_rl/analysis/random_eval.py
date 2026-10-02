@@ -19,6 +19,14 @@ if TYPE_CHECKING:
 
 _GPU_ROLLOUT_CACHE: dict[tuple[int, int, int, bool, str], GpuRollout] = {}
 
+# Persist these versions with new protocols/records. Unversioned historical
+# records predate the integer weighted CDF; their seeded actions are not v2.
+WEIGHTED_SAMPLING_VERSION = "seeded-int64-cdf-max38-u32.v2"
+UNIFORM_SAMPLING_VERSION = "seeded-int32-counts-f32-u32.v1"
+WEIGHTED_MASS_BITS = 38
+WEIGHTED_MASS_SCALE = 1 << WEIGHTED_MASS_BITS
+_MAX_EXACT_MASS_ACTIONS = (1 << 53) // WEIGHTED_MASS_SCALE
+
 
 def _refresh_evaluation_belief(rollout, policy, belief_net, *, team, options):
     """Publish learned beliefs only for the evaluated policy's own observers."""
@@ -42,20 +50,48 @@ def _autocast_context(
     return torch.amp.autocast("cuda", dtype=dtype)
 
 
-def _game_uniform(seeds: torch.Tensor, ply: int, stream: int = 0) -> torch.Tensor:
+def _game_uniform(seeds: torch.Tensor, ply: int, stream: int = 0,
+                  *, dtype: torch.dtype = torch.float32) -> torch.Tensor:
     """Counter-based per-game random variates, independent of batch scheduling."""
     x = (seeds.to(torch.int64) + (ply + 1) * 0x9E3779B9 + stream * 0x85EBCA6B) & 0xFFFFFFFF
     x = ((x ^ (x >> 16)) * 0x7FEB352D) & 0xFFFFFFFF
     x = ((x ^ (x >> 15)) * 0x846CA68B) & 0xFFFFFFFF
     x = x ^ (x >> 16)
-    return ((x.to(torch.float64) + 0.5) / 4294967296.0).float().clamp_max(1 - 2**-24)
+    uniform = (x.to(torch.float64) + 0.5) / 4294967296.0
+    # The uniform opponent retains its exact historical float32 quantiles.
+    # Weighted v2 uses all 32 counter bits and float64 threshold arithmetic.
+    return uniform if dtype == torch.float64 else uniform.float().clamp_max(1 - 2**-24)
+
+
+def _integer_weight_masses(weights, legal):
+    """Quantize positive legal weights without deleting tiny support.
+
+    Scale each row's largest weight to M=2**38, round, and give each positive
+    input at least one integer unit. With K positive actions, the normalized
+    distribution's total-variation error from quantization is <= K/M (ignoring
+    float64 roundoff), <= 6.06e-8 for all 16641 board actions and usually much
+    smaller because only legal positive actions count. Integer totals remain
+    <= 2**53, so float64 represents every cumulative mass exactly. The finite
+    32-bit midpoint RNG adds its own CDF resolution, at most 2**-33 per boundary.
+
+    Callers must supply finite nonnegative weights and positive legal mass in
+    every row; _policy_actions already checks this once per inference batch.
+    """
+    if weights.ndim != 2 or weights.shape != legal.shape:
+        raise ValueError("weighted sampling requires matching [batch, actions] arrays")
+    if not 0 < weights.shape[-1] <= _MAX_EXACT_MASS_ACTIONS:
+        raise ValueError("action count exceeds the exact float64 integer-mass range")
+    positive_weights = torch.where(legal, weights.to(torch.float64), 0.0)
+    scaled = positive_weights / positive_weights.amax(dim=-1, keepdim=True) * WEIGHTED_MASS_SCALE
+    return torch.where(positive_weights > 0, scaled.round().clamp_min(1), 0).to(torch.int64)
 
 
 def _sample_weights(weights, legal, seeds, ply, stream=0):
-    weights = torch.where(legal, weights.float(), 0.0)
-    cumulative = weights.cumsum(dim=-1)
-    total = cumulative[:, -1:]
-    threshold = _game_uniform(seeds, ply, stream).unsqueeze(-1) * total
+    # CUDA floating cumsum raises under strict determinism. Integer cumsum is
+    # deterministic on CPU/CUDA and requires no per-row host transfer or RNG.
+    cumulative = _integer_weight_masses(weights, legal).cumsum(dim=-1)
+    total = cumulative[:, -1:].to(torch.float64)
+    threshold = _game_uniform(seeds, ply, stream, dtype=torch.float64).unsqueeze(-1) * total
     return (cumulative > threshold).to(torch.int32).argmax(dim=-1).to(torch.int32)
 
 
@@ -210,6 +246,9 @@ def _evaluate_gpu_games(
                     "opponent": "random" if second_policy is None else "policy",
                     "outcome": outcomes[i], "moves": int(game_moves[i]),
                     "termination_reason": reason, "backend": "gpu",
+                    "policy_action_sampling": "argmax.v1" if greedy else WEIGHTED_SAMPLING_VERSION,
+                    "opponent_action_sampling": (UNIFORM_SAMPLING_VERSION if second_policy is None
+                                                  else "argmax.v1" if greedy else WEIGHTED_SAMPLING_VERSION),
                     "first_policy_neural_belief": belief_net is not None,
                     "belief_refresh_steps": belief_refresh_steps if belief_net is not None else None,
                 })
@@ -363,6 +402,8 @@ def evaluate_vs_random_cpu(
                     else "loss" if trained_reward < 0 else "draw",
                     "moves": int(game_moves[env_idx]), "termination_reason": reason,
                     "backend": "cpu",
+                    "policy_action_sampling": "argmax.v1" if greedy else WEIGHTED_SAMPLING_VERSION,
+                    "opponent_action_sampling": "numpy-pcg64-choice.v1",
                 })
             game_moves[env_idx] = 0
             if next_game_id >= num_games:

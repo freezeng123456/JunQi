@@ -156,12 +156,14 @@ def main(argv=None):
         parser.error("game, sample, environment, block, worker, and move budgets must be positive")
     if min(args.setup_seed, args.action_seed, args.position_seed) < 0:
         parser.error("seeds must be nonnegative")
+    from junqi_rl.analysis.random_eval import WEIGHTED_SAMPLING_VERSION
     protocol = dict(schema=DATASET_SCHEMA, parent_checkpoint_sha256=file_sha256(args.checkpoint),
                     identity_input_schema="junqi.hidden-identity-facts.v1", identity_encoding="known_only",
                     observation_channels=317, observation_global_dims=0, observation_semantics_version=5,
                     games=args.games, positions_per_game=args.positions_per_game, max_moves=args.max_moves,
                     setup_seed=args.setup_seed, action_seed=args.action_seed, position_seed=args.position_seed,
-                    show_mode="DARK", action_sampling="seeded_stochastic_stream19",
+                    show_mode="DARK", action_sampling=WEIGHTED_SAMPLING_VERSION,
+                    action_sampling_stream=19,
                     split="initial_setup_sha256_mod10_train0to7_validation8_test9",
                     position_sampling="one_random_ply_per_stratum_rotating_observer",
                     teacher_masks="exact_public_constraints_causal_prefix",
