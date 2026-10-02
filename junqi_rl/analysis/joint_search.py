@@ -1,6 +1,4 @@
-"""Compatibility alias for the historical probability-input search prototype."""
-from . import legacy_joint_search as _implementation
+"""Current facts-only joint search; historical experiments use legacy_joint_search."""
+from .facts_joint_search import FactsBlueprint, FactsJointSearch, SearchConfig
 
-
-def __getattr__(name):
-    return getattr(_implementation, name)
+__all__ = ['FactsBlueprint', 'FactsJointSearch', 'SearchConfig']

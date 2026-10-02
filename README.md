@@ -172,6 +172,7 @@ checkpoint 的完整局数未知，不能把 512 当作局数。模型、父模�
 `scripts/legacy_compare_joint_search.py` 和 `scripts/legacy_pilot_joint_belief.py`。
 `train_joint_belief.py` 和 `compare_joint_search.py` 现已迁移到事实版本；
 历史实验需显式使用 `legacy_*` 入口。历史原型不能消费当前事实策略。
+`analysis.joint_search` 同样指向事实搜索，含糊的旧 `pilot_joint_belief.py` 别名已移除。
 
 PPO 始终使用冻结的 collection policy，在完整合法动作分布上计算
 `KL(π_new || π_collect)`。训练专用 `actions=` 快速路径只省去未使用的

@@ -13,7 +13,7 @@
     "rollout_numbers_are_not_game_counts": true
   },
   "config_hash_contract": "SHA-256 of embedded train_cfg serialized as JSON with sort_keys=True, separators=(comma,colon), ensure_ascii=True; original path strings retained only inside the hashed checkpoint.",
-  "evidence_scope": "Recovered files are hashed and strictly loaded on CPU on 2026-10-03. Historical GPU evidence is referenced, not rerun. Current repository cleanup is not relabeled as historical training source.",
+  "evidence_scope": "Recovered files were hashed and strictly loaded on CPU on 2026-10-03. The unchanged facts-counted-g10017 checkpoint also passed a recovered V100 acceptance run at source 6c6633220b67faffa0f01a5fa5c4f7a556a97f0b. Other historical GPU evidence is referenced, not rerun. This acceptance does not cover the later q12.v2 belief constraint schema or establish a trained facts BeliefNet result. Current repository cleanup is not relabeled as historical training source.",
   "models": [
     {
       "id": "facts-original-r512",
@@ -412,7 +412,60 @@
       "verification": {
         "strict_policy_load_cpu": true,
         "finite_policy_weights": true,
-        "checked_on": "2026-10-03"
+        "checked_on": "2026-10-03",
+        "gpu_acceptance": {
+          "status": "passed",
+          "checked_on": "2026-10-03",
+          "job_id": 2348994,
+          "scheduler_state": "COMPLETED",
+          "exit_code": "0:0",
+          "scheduler_elapsed_seconds": 74,
+          "source_commit": "6c6633220b67faffa0f01a5fa5c4f7a556a97f0b",
+          "device": "Tesla V100-SXM2-32GB",
+          "torch_version": "2.5.1+cu121",
+          "cuda_version": "12.1",
+          "strict_policy_load": true,
+          "finite_policy_weights": true,
+          "source_checkpoint_sha256": "ef60cd5f21086e77a61a4744b57b267d51590fae3df1d659fc87b09458661aa1",
+          "source_checkpoint_unchanged": true,
+          "observation_parity": {
+            "show_modes": [
+              "BRIGHT",
+              "DARK",
+              "HALF_DARK"
+            ],
+            "positions": 48,
+            "spatial_channels": 317,
+            "max_abs_difference": 0.0
+          },
+          "policy_output_parity": {
+            "max_abs_difference": 1.1444091796875e-05,
+            "atol": 0.0003,
+            "rtol": 0.0003
+          },
+          "training_resume": {
+            "initialization": "frozen policy weights; fresh optimizer",
+            "acceptance_only": true,
+            "updates_before_save": 3,
+            "updates_after_resume": 9,
+            "parameters_and_optimizer_match_uninterrupted": true,
+            "actions_match_uninterrupted": true,
+            "completed_records_match_uninterrupted": true,
+            "smoke_completed_games": 4,
+            "max_game_moves": 17,
+            "included_in_model_training_count": false
+          },
+          "pytest": {
+            "passed": 27,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "seconds": 24.328
+          },
+          "belief_constraint_schema_in_acceptance_source": "junqi.identity-domain-inventory-combat.v1",
+          "q12_v2_belief_gpu_validation": false,
+          "trained_facts_belief_validation": false
+        }
       },
       "artifacts": [
         {
@@ -480,11 +533,43 @@
           "root": "beijing-v100-preflight",
           "path": "heldout-20261002-v1/recovered-final/final10017_vs_original512.jsonl",
           "sha256": "abe04e2af93cac4226ff84e8fc891acd4feb93df2d744af69a40f91ceb72a5e3"
+        },
+        {
+          "role": "gpu_acceptance_audit",
+          "root": "beijing-v100-preflight",
+          "path": "gpu-acceptance-20261003-v2/recovered/gpu-acceptance-20261003-v2/evidence/facts-gpu-acceptance.json",
+          "sha256": "5a95dbaae4fe38843bb951698e29a553f078189a4f6b65dbfcf414905851cc35"
+        },
+        {
+          "role": "gpu_acceptance_pytest_report",
+          "root": "beijing-v100-preflight",
+          "path": "gpu-acceptance-20261003-v2/recovered/gpu-acceptance-20261003-v2/evidence/gpu-tests.xml",
+          "sha256": "c687772380dd80ccc1c2130f28b713a3bacb1b507f3d6563947528f81e42ffa5"
+        },
+        {
+          "role": "gpu_acceptance_scheduler_record",
+          "root": "beijing-v100-preflight",
+          "path": "gpu-acceptance-20261003-v2/recovered/gpu-acceptance-20261003-v2/scheduler.txt",
+          "sha256": "d438659b5fd4d3ba84326cb13a135fd19bc639345d9500ecc3d90e469a0af00a"
+        },
+        {
+          "role": "gpu_acceptance_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "gpu-acceptance-20261003-v2/recovered/gpu-acceptance-20261003-v2/protocol.json",
+          "sha256": "5202762f43f42e54e3210ece942d7529c824b40114aecfd8c3a5c50313201266"
+        },
+        {
+          "role": "gpu_acceptance_recovery_archive",
+          "root": "beijing-v100-preflight",
+          "path": "gpu-acceptance-20261003-v2/gpu-acceptance-results-20261003.tar.gz",
+          "sha256": "5a3945c331e4849eb743532a20a7d95aa2b065bce6a0d53cc91d6b8951af099e"
         }
       ],
       "notes": [
         "Counted games begin after the original 512 rollout batches; lifetime game count is unknown.",
-        "No neural belief model is attached."
+        "No neural belief model is attached.",
+        "V100 acceptance smoke used a fresh optimizer and four 17-move-limit games; it neither changed frozen pi0 nor increased its counted training games.",
+        "Acceptance source used belief constraint schema v1; later q12.v2 and any trained facts BeliefNet need their own recovered validation evidence."
       ]
     },
     {
