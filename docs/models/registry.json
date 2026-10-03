@@ -14,7 +14,7 @@
     "belief_collection_games": "Complete frozen-parent self-play games; separate from parent policy training. Observer rows are not additional games."
   },
   "config_hash_contract": "SHA-256 of embedded train_cfg serialized as JSON with sort_keys=True, separators=(comma,colon), ensure_ascii=True; original path strings retained only inside the hashed checkpoint.",
-  "evidence_scope": "Recovered files were hashed and checkpoints strictly loaded on CPU on 2026-10-03. The frozen facts-counted-g10017 policy retains its earlier V100 acceptance at source 6c6633220b67faffa0f01a5fa5c4f7a556a97f0b. Facts joint training and the 200-game paired system comparison completed in V100 job 2348998 at source b7813532640e5238e64b49a5c47e9dc9219feda6 with q12.v2 constraints; both GPU acceptance gates and 34 GPU tests passed. The final archive and 4212 recovered artifacts passed lineage, SHA and match-statistics audit. Other historical GPU evidence is referenced, not rerun. The new comparison does not establish a strength improvement or isolate the contribution of BeliefNet from search. Current repository cleanup is not relabeled as historical training source. On 2026-10-04 four matched joint/marginal belief models from two seeds were recovered after V100 preparation job 2349370 (COMPLETED, exit 0:0; 2630 seconds) at frozen source c2580f272f8edb59db3c7b7ac841608c20fe383f. The preparation-only audit verified 4864 artifacts, 86 GPU tests with zero skips, both exact GPU training-resume acceptances, four selected/resume/test lineages, and the complete post-build source digest including nine generated CMake files. The planned 1200 formal match games remain in progress at registration; no new formal win rate is registered, and facts-counted-g10017 remains the default.",
+  "evidence_scope": "Recovered files were hashed and checkpoints strictly loaded on CPU on 2026-10-03. The frozen facts-counted-g10017 policy retains its earlier V100 acceptance at source 6c6633220b67faffa0f01a5fa5c4f7a556a97f0b. Facts joint training and the 200-game paired system comparison completed in V100 job 2348998 at source b7813532640e5238e64b49a5c47e9dc9219feda6 with q12.v2 constraints; both GPU acceptance gates and 34 GPU tests passed. The final archive and 4212 recovered artifacts passed lineage, SHA and match-statistics audit. Other historical GPU evidence is referenced, not rerun. The new comparison does not establish a strength improvement or isolate the contribution of BeliefNet from search. Current repository cleanup is not relabeled as historical training source. On 2026-10-04 four matched joint/marginal belief models from two seeds were recovered after V100 preparation job 2349370 (COMPLETED, exit 0:0; 2630 seconds) at frozen source c2580f272f8edb59db3c7b7ac841608c20fe383f. The preparation-only audit verified 4864 artifacts, 86 GPU tests with zero skips, both exact GPU training-resume acceptances, four selected/resume/test lineages, and the complete post-build source digest including nine generated CMake files. All 1200 planned formal match games completed in jobs 2349386 and 2349387 (both COMPLETED, exit 0:0), at the same frozen source. The final strict audit passed 6054 artifact checks and recomputed all six seed-specific comparisons and three fixed-seed pooled intervals. Recovery reused 95 verified preparation files and transferred 1341 additional files; all 1436 final member files were verified. The original full remote tar archive was not downloaded or hashed locally. The incremental transfer archive hash matches its remote digest. Every comparison remains statistically inconclusive; facts-counted-g10017 remains the default.",
   "models": [
     {
       "id": "facts-original-r512",
@@ -1491,6 +1491,78 @@
           "root": "beijing-v100-preflight",
           "path": "facts-belief-ablation-20261004-v1/recovered-postbuild/facts-belief-ablation-20261004-v1/evidence/postbuild-source-audit.json",
           "sha256": "b2ab36dabe135b3ae44d2fc9c1824364e925783544a271ffe79dd3bd415d8bb6"
+        },
+        {
+          "role": "final_recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovery-audit.json",
+          "sha256": "8acc5c61080d22ac47e24a3c876bcca648920772e1267853d244e906168ea2c6"
+        },
+        {
+          "role": "incremental_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/incremental-recovery.json",
+          "sha256": "1dd782837ea074ab79c4c3d18c5547e71905bac27bd7438d0ccf437bdbd19b7b"
+        },
+        {
+          "role": "incremental_transport_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/received-incremental-package.tar.gz",
+          "sha256": "b2d27d88d4c93955d25731134acf493fa5450e5934b32746c70ddfa4d941fff5"
+        },
+        {
+          "role": "final_package_member_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/evidence/final-package-manifest.json",
+          "sha256": "12a25863ac18efecbaad445859de543e7519eabcdfbcc43ef970a63405425b22"
+        },
+        {
+          "role": "incremental_transport_index",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/incremental-parts/transport-index.json",
+          "sha256": "76ea48f66c9d4660a6c451c569c8504fd6af0d72207959cdf83339c1a3cd49d5"
+        },
+        {
+          "role": "formal_scheduler_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/evidence/scheduler-final.txt",
+          "sha256": "3922b649dc450719c61f13fb6e903acae5ee6b0f02e7205937de1f4329bd9663"
+        },
+        {
+          "role": "formal_experiment_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/protocol.json",
+          "sha256": "013ec34cb246dafb8c0205241743dc6ed33a2faf253e4fe6f824ddcc0da5e1ae"
+        },
+        {
+          "role": "formal_launcher",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches-retry1.sh",
+          "sha256": "65e494da051d0d34d7d7cf25c87e7eb0db0565d8166333c3ee9738ccdde429d8"
+        },
+        {
+          "role": "formal_comparison_joint_baseline_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261004/joint-baseline/protocol.json",
+          "sha256": "85e141477298048dd793f31c9e7c7411f8857c56953a664786ca85c745b0ee55"
+        },
+        {
+          "role": "formal_comparison_joint_baseline",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261004/joint-baseline/comparison.json",
+          "sha256": "28a7989187e668bcedbe92c82a3c01748cb158c608d14c59851decb56de53d43"
+        },
+        {
+          "role": "formal_comparison_joint_marginal_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261004/joint-marginal/protocol.json",
+          "sha256": "c3ccd72ad3e9deb7c683d4a93f6233f60877b756affadfeecd2809d95dfd3326"
+        },
+        {
+          "role": "formal_comparison_joint_marginal",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261004/joint-marginal/comparison.json",
+          "sha256": "295157a494c5ab1da5f245fe23851f0d7bea37ee0956fe202b3aab5e491cf611"
         }
       ],
       "verification": {
@@ -1500,13 +1572,11 @@
         "validation_selection_and_test_binding_verified": true,
         "selected_weights_equal_resume_best_weights": true,
         "optimizer_and_rng_state_verified": true,
-        "formal_comparison_statistics_recomputed": false,
-        "formal_comparison_status_at_registration": "running",
+        "formal_comparison_statistics_recomputed": true,
         "formal_experiment_planned_complete_games": 1200,
-        "archive_sha256_matches_remote": true,
         "gpu_experiment": {
           "status": "passed",
-          "scope": "preparation only; formal matches remain in progress",
+          "scope": "Preparation training and GPU acceptance; formal comparisons completed in the separately recorded jobs.",
           "job_id": 2349370,
           "scheduler_state": "COMPLETED",
           "exit_code": "0:0",
@@ -1527,10 +1597,11 @@
           "acceptance_scope": "Separate 40 short smoke games and temporary weights; excluded from the shared 2000-game dataset and 10-epoch model training."
         },
         "recovery_audit_limitations": [
-          "Preparation artifacts only; no formal comparison win rate is certified.",
-          "GPU evidence and recovered resume tensors are checked locally without rerunning CUDA kernels.",
-          "Held-out neural metrics are bound to selected weights and denominators; NLL and accuracy are not recomputed.",
-          "Conditional joint NLL and public-only marginal NLL are not directly comparable."
+          "Verifies recovered artifacts; does not replay GPU kernels, matches, or neural NLL.",
+          "Joint conditional NLL and public-only marginal NLL have different conditioning.",
+          "Pooled intervals condition on two trained belief seeds, not the training population.",
+          "The complete remote tar archive was not downloaded or hashed locally; the 1436 final member files were reconstructed from a verified 95-file base plus 1341-file delta and individually verified.",
+          "Joint-vs-marginal compares learned conditioning with the same search budget; comparisons against pi0 measure the combined belief-and-search system."
         ],
         "reproduces_previous_selected_joint_weights": {
           "old_checkpoint_sha256": "0c9d9718681fb61ebce73bb7dd3a949417706316c88b3415314f2eb6e92595bd",
@@ -1544,9 +1615,9 @@
           "reference_model_id": "facts-joint-g2000-e10"
         },
         "recovery_audit_status": "passed",
-        "recovery_audit_scope": "preparation_only",
-        "recovery_artifacts_checked": 4864,
-        "formal_match_games_audited": 0,
+        "recovery_audit_scope": "training_and_all_six_formal_comparisons",
+        "recovery_artifacts_checked": 6054,
+        "formal_match_games_audited": 1200,
         "postbuild_source_audit": {
           "status": "passed",
           "frozen_source_files_verified": 747,
@@ -1555,6 +1626,43 @@
           "source_tree_sha256": "588fbc84a6bfbc96cbab4ce6e68f90d3f6f1b21f5fb599154af1b16d79829833",
           "both_gpu_acceptance_source_digests_reconstructed_locally": true,
           "supplemental_archive_sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        },
+        "formal_comparison_status": "completed",
+        "formal_experiment_completed_games": 1200,
+        "formal_model_games_audited": 400,
+        "formal_gpu_jobs": [
+          {
+            "job_id": 2349386,
+            "elapsed": "01:54:56",
+            "scheduler_elapsed_seconds": 6896,
+            "node": "g0035",
+            "scheduler_state": "COMPLETED",
+            "exit_code": "0:0",
+            "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+            "complete_formal_games": 600
+          }
+        ],
+        "preparation_archive_sha256_matches_remote": true,
+        "preparation_recovery_artifacts_checked": 4864,
+        "final_transport": {
+          "mode": "incremental",
+          "base_files_reused": 95,
+          "delta_files": 1341,
+          "final_files_verified": 1436,
+          "final_file_set_exact": true,
+          "reconstructed_file_tree_verified": true,
+          "transfer_package_sha256": "b2d27d88d4c93955d25731134acf493fa5450e5934b32746c70ddfa4d941fff5",
+          "transfer_package_sha256_matches_remote": true,
+          "original_package_manifest_sha256": "12a25863ac18efecbaad445859de543e7519eabcdfbcc43ef970a63405425b22",
+          "full_archive_downloaded": false,
+          "full_archive_sha256_verified_locally": false,
+          "remote_full_archive_identity": {
+            "bytes": 66457587,
+            "files": 1436,
+            "name": "facts-belief-ablation-results-2349386-2349387.tar.gz",
+            "sha256": "95d97bfe28187ac0967d37d04d5b7ba7a4a10fd69f81912d9d681617c21f21fa"
+          },
+          "audit_sequence": "Immutable incremental-recovery.json records transport before the separate passed recovery-audit.json experiment audit."
         }
       },
       "notes": [
@@ -1562,9 +1670,16 @@
         "Inputs are facts-only 317/0 with known_only identities. Hard public constraints retain q12.v2 semantics; no handcrafted identity probabilities are restored.",
         "The unchanged frozen parent policy receives sampled-world search results; learned identity probabilities are not inserted into its observation channels.",
         "Matched marginal and joint networks differ only by the identity-prefix embedding and conditioning; both use the same public observations, history and exact constraints.",
-        "The 1200-game formal comparison is running at registration. No new formal win rate is available; the default remains facts-counted-g10017.",
+        "All 1200 prespecified formal match games completed and passed recovery/statistics audit. No comparison establishes stable improvement; the default remains facts-counted-g10017.",
         "The e10 ID denotes completed epochs; validation selected epoch 10 in this run.",
-        "All 107 selected state-dict tensors exactly reproduce the earlier joint model with the same training seed; serialized checkpoint hashes differ because run metadata and timings differ."
+        "All 107 selected state-dict tensors exactly reproduce the earlier joint model with the same training seed; serialized checkpoint hashes differ because run metadata and timings differ.",
+        "Each checkpoint appears in two 200-game comparisons. Pooled results combine the two fixed belief seeds statistically and do not constitute an ensemble or a training-seed-population interval."
+      ],
+      "formal_evaluation_ids": [
+        "facts-ablation-20261004-joint-baseline-s20261004",
+        "facts-ablation-20261004-joint-marginal-s20261004",
+        "facts-ablation-20261004-joint-baseline-pooled",
+        "facts-ablation-20261004-joint-marginal-pooled"
       ]
     },
     {
@@ -1823,6 +1938,78 @@
           "root": "beijing-v100-preflight",
           "path": "facts-belief-ablation-20261004-v1/recovered-postbuild/facts-belief-ablation-20261004-v1/evidence/postbuild-source-audit.json",
           "sha256": "b2ab36dabe135b3ae44d2fc9c1824364e925783544a271ffe79dd3bd415d8bb6"
+        },
+        {
+          "role": "final_recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovery-audit.json",
+          "sha256": "8acc5c61080d22ac47e24a3c876bcca648920772e1267853d244e906168ea2c6"
+        },
+        {
+          "role": "incremental_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/incremental-recovery.json",
+          "sha256": "1dd782837ea074ab79c4c3d18c5547e71905bac27bd7438d0ccf437bdbd19b7b"
+        },
+        {
+          "role": "incremental_transport_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/received-incremental-package.tar.gz",
+          "sha256": "b2d27d88d4c93955d25731134acf493fa5450e5934b32746c70ddfa4d941fff5"
+        },
+        {
+          "role": "final_package_member_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/evidence/final-package-manifest.json",
+          "sha256": "12a25863ac18efecbaad445859de543e7519eabcdfbcc43ef970a63405425b22"
+        },
+        {
+          "role": "incremental_transport_index",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/incremental-parts/transport-index.json",
+          "sha256": "76ea48f66c9d4660a6c451c569c8504fd6af0d72207959cdf83339c1a3cd49d5"
+        },
+        {
+          "role": "formal_scheduler_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/evidence/scheduler-final.txt",
+          "sha256": "3922b649dc450719c61f13fb6e903acae5ee6b0f02e7205937de1f4329bd9663"
+        },
+        {
+          "role": "formal_experiment_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/protocol.json",
+          "sha256": "013ec34cb246dafb8c0205241743dc6ed33a2faf253e4fe6f824ddcc0da5e1ae"
+        },
+        {
+          "role": "formal_launcher",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches-retry1.sh",
+          "sha256": "65e494da051d0d34d7d7cf25c87e7eb0db0565d8166333c3ee9738ccdde429d8"
+        },
+        {
+          "role": "formal_comparison_marginal_baseline_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261004/marginal-baseline/protocol.json",
+          "sha256": "9f387016e6c6c3252f3c2db9fd3de776c1032812873eb7be70a1a2cd48b29b47"
+        },
+        {
+          "role": "formal_comparison_marginal_baseline",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261004/marginal-baseline/comparison.json",
+          "sha256": "be168d774ec9012201a82e000a662acc11fa83195b2301817e4bdde5adeffab0"
+        },
+        {
+          "role": "formal_comparison_joint_marginal_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261004/joint-marginal/protocol.json",
+          "sha256": "c3ccd72ad3e9deb7c683d4a93f6233f60877b756affadfeecd2809d95dfd3326"
+        },
+        {
+          "role": "formal_comparison_joint_marginal",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261004/joint-marginal/comparison.json",
+          "sha256": "295157a494c5ab1da5f245fe23851f0d7bea37ee0956fe202b3aab5e491cf611"
         }
       ],
       "verification": {
@@ -1832,13 +2019,11 @@
         "validation_selection_and_test_binding_verified": true,
         "selected_weights_equal_resume_best_weights": true,
         "optimizer_and_rng_state_verified": true,
-        "formal_comparison_statistics_recomputed": false,
-        "formal_comparison_status_at_registration": "running",
+        "formal_comparison_statistics_recomputed": true,
         "formal_experiment_planned_complete_games": 1200,
-        "archive_sha256_matches_remote": true,
         "gpu_experiment": {
           "status": "passed",
-          "scope": "preparation only; formal matches remain in progress",
+          "scope": "Preparation training and GPU acceptance; formal comparisons completed in the separately recorded jobs.",
           "job_id": 2349370,
           "scheduler_state": "COMPLETED",
           "exit_code": "0:0",
@@ -1859,15 +2044,16 @@
           "acceptance_scope": "Separate 40 short smoke games and temporary weights; excluded from the shared 2000-game dataset and 10-epoch model training."
         },
         "recovery_audit_limitations": [
-          "Preparation artifacts only; no formal comparison win rate is certified.",
-          "GPU evidence and recovered resume tensors are checked locally without rerunning CUDA kernels.",
-          "Held-out neural metrics are bound to selected weights and denominators; NLL and accuracy are not recomputed.",
-          "Conditional joint NLL and public-only marginal NLL are not directly comparable."
+          "Verifies recovered artifacts; does not replay GPU kernels, matches, or neural NLL.",
+          "Joint conditional NLL and public-only marginal NLL have different conditioning.",
+          "Pooled intervals condition on two trained belief seeds, not the training population.",
+          "The complete remote tar archive was not downloaded or hashed locally; the 1436 final member files were reconstructed from a verified 95-file base plus 1341-file delta and individually verified.",
+          "Joint-vs-marginal compares learned conditioning with the same search budget; comparisons against pi0 measure the combined belief-and-search system."
         ],
         "recovery_audit_status": "passed",
-        "recovery_audit_scope": "preparation_only",
-        "recovery_artifacts_checked": 4864,
-        "formal_match_games_audited": 0,
+        "recovery_audit_scope": "training_and_all_six_formal_comparisons",
+        "recovery_artifacts_checked": 6054,
+        "formal_match_games_audited": 1200,
         "postbuild_source_audit": {
           "status": "passed",
           "frozen_source_files_verified": 747,
@@ -1876,6 +2062,43 @@
           "source_tree_sha256": "588fbc84a6bfbc96cbab4ce6e68f90d3f6f1b21f5fb599154af1b16d79829833",
           "both_gpu_acceptance_source_digests_reconstructed_locally": true,
           "supplemental_archive_sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        },
+        "formal_comparison_status": "completed",
+        "formal_experiment_completed_games": 1200,
+        "formal_model_games_audited": 400,
+        "formal_gpu_jobs": [
+          {
+            "job_id": 2349386,
+            "elapsed": "01:54:56",
+            "scheduler_elapsed_seconds": 6896,
+            "node": "g0035",
+            "scheduler_state": "COMPLETED",
+            "exit_code": "0:0",
+            "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+            "complete_formal_games": 600
+          }
+        ],
+        "preparation_archive_sha256_matches_remote": true,
+        "preparation_recovery_artifacts_checked": 4864,
+        "final_transport": {
+          "mode": "incremental",
+          "base_files_reused": 95,
+          "delta_files": 1341,
+          "final_files_verified": 1436,
+          "final_file_set_exact": true,
+          "reconstructed_file_tree_verified": true,
+          "transfer_package_sha256": "b2d27d88d4c93955d25731134acf493fa5450e5934b32746c70ddfa4d941fff5",
+          "transfer_package_sha256_matches_remote": true,
+          "original_package_manifest_sha256": "12a25863ac18efecbaad445859de543e7519eabcdfbcc43ef970a63405425b22",
+          "full_archive_downloaded": false,
+          "full_archive_sha256_verified_locally": false,
+          "remote_full_archive_identity": {
+            "bytes": 66457587,
+            "files": 1436,
+            "name": "facts-belief-ablation-results-2349386-2349387.tar.gz",
+            "sha256": "95d97bfe28187ac0967d37d04d5b7ba7a4a10fd69f81912d9d681617c21f21fa"
+          },
+          "audit_sequence": "Immutable incremental-recovery.json records transport before the separate passed recovery-audit.json experiment audit."
         }
       },
       "notes": [
@@ -1883,8 +2106,15 @@
         "Inputs are facts-only 317/0 with known_only identities. Hard public constraints retain q12.v2 semantics; no handcrafted identity probabilities are restored.",
         "The unchanged frozen parent policy receives sampled-world search results; learned identity probabilities are not inserted into its observation channels.",
         "Matched marginal and joint networks differ only by the identity-prefix embedding and conditioning; both use the same public observations, history and exact constraints.",
-        "The 1200-game formal comparison is running at registration. No new formal win rate is available; the default remains facts-counted-g10017.",
-        "The e10 ID denotes completed epochs; validation selected epoch 10 in this run."
+        "All 1200 prespecified formal match games completed and passed recovery/statistics audit. No comparison establishes stable improvement; the default remains facts-counted-g10017.",
+        "The e10 ID denotes completed epochs; validation selected epoch 10 in this run.",
+        "Each checkpoint appears in two 200-game comparisons. Pooled results combine the two fixed belief seeds statistically and do not constitute an ensemble or a training-seed-population interval."
+      ],
+      "formal_evaluation_ids": [
+        "facts-ablation-20261004-marginal-baseline-s20261004",
+        "facts-ablation-20261004-joint-marginal-s20261004",
+        "facts-ablation-20261004-marginal-baseline-pooled",
+        "facts-ablation-20261004-joint-marginal-pooled"
       ]
     },
     {
@@ -2140,6 +2370,78 @@
           "root": "beijing-v100-preflight",
           "path": "facts-belief-ablation-20261004-v1/recovered-postbuild/facts-belief-ablation-20261004-v1/evidence/postbuild-source-audit.json",
           "sha256": "b2ab36dabe135b3ae44d2fc9c1824364e925783544a271ffe79dd3bd415d8bb6"
+        },
+        {
+          "role": "final_recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovery-audit.json",
+          "sha256": "8acc5c61080d22ac47e24a3c876bcca648920772e1267853d244e906168ea2c6"
+        },
+        {
+          "role": "incremental_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/incremental-recovery.json",
+          "sha256": "1dd782837ea074ab79c4c3d18c5547e71905bac27bd7438d0ccf437bdbd19b7b"
+        },
+        {
+          "role": "incremental_transport_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/received-incremental-package.tar.gz",
+          "sha256": "b2d27d88d4c93955d25731134acf493fa5450e5934b32746c70ddfa4d941fff5"
+        },
+        {
+          "role": "final_package_member_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/evidence/final-package-manifest.json",
+          "sha256": "12a25863ac18efecbaad445859de543e7519eabcdfbcc43ef970a63405425b22"
+        },
+        {
+          "role": "incremental_transport_index",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/incremental-parts/transport-index.json",
+          "sha256": "76ea48f66c9d4660a6c451c569c8504fd6af0d72207959cdf83339c1a3cd49d5"
+        },
+        {
+          "role": "formal_scheduler_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/evidence/scheduler-final.txt",
+          "sha256": "3922b649dc450719c61f13fb6e903acae5ee6b0f02e7205937de1f4329bd9663"
+        },
+        {
+          "role": "formal_experiment_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/protocol.json",
+          "sha256": "013ec34cb246dafb8c0205241743dc6ed33a2faf253e4fe6f824ddcc0da5e1ae"
+        },
+        {
+          "role": "formal_launcher",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches-retry1.sh",
+          "sha256": "65e494da051d0d34d7d7cf25c87e7eb0db0565d8166333c3ee9738ccdde429d8"
+        },
+        {
+          "role": "formal_comparison_joint_baseline_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261005/joint-baseline/protocol.json",
+          "sha256": "c6d692a1825a6bec189c2b373c301c23d1288956055d0b6c0f3ea0ae4ba93e6e"
+        },
+        {
+          "role": "formal_comparison_joint_baseline",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261005/joint-baseline/comparison.json",
+          "sha256": "86d51a55fe9885c8902c18aaf87ac5bf0f514d42b9a515a83b42cde92768f9ab"
+        },
+        {
+          "role": "formal_comparison_joint_marginal_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261005/joint-marginal/protocol.json",
+          "sha256": "1ca660f62505844f6ce6763bd3993d6da3c271099ec9e2950bc1790c7e6da516"
+        },
+        {
+          "role": "formal_comparison_joint_marginal",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261005/joint-marginal/comparison.json",
+          "sha256": "7d96944b3d7c41391c360be9b113a724836c01b6b1d425910bb73da6110cf3df"
         }
       ],
       "verification": {
@@ -2149,13 +2451,11 @@
         "validation_selection_and_test_binding_verified": true,
         "selected_weights_equal_resume_best_weights": true,
         "optimizer_and_rng_state_verified": true,
-        "formal_comparison_statistics_recomputed": false,
-        "formal_comparison_status_at_registration": "running",
+        "formal_comparison_statistics_recomputed": true,
         "formal_experiment_planned_complete_games": 1200,
-        "archive_sha256_matches_remote": true,
         "gpu_experiment": {
           "status": "passed",
-          "scope": "preparation only; formal matches remain in progress",
+          "scope": "Preparation training and GPU acceptance; formal comparisons completed in the separately recorded jobs.",
           "job_id": 2349370,
           "scheduler_state": "COMPLETED",
           "exit_code": "0:0",
@@ -2176,15 +2476,16 @@
           "acceptance_scope": "Separate 40 short smoke games and temporary weights; excluded from the shared 2000-game dataset and 10-epoch model training."
         },
         "recovery_audit_limitations": [
-          "Preparation artifacts only; no formal comparison win rate is certified.",
-          "GPU evidence and recovered resume tensors are checked locally without rerunning CUDA kernels.",
-          "Held-out neural metrics are bound to selected weights and denominators; NLL and accuracy are not recomputed.",
-          "Conditional joint NLL and public-only marginal NLL are not directly comparable."
+          "Verifies recovered artifacts; does not replay GPU kernels, matches, or neural NLL.",
+          "Joint conditional NLL and public-only marginal NLL have different conditioning.",
+          "Pooled intervals condition on two trained belief seeds, not the training population.",
+          "The complete remote tar archive was not downloaded or hashed locally; the 1436 final member files were reconstructed from a verified 95-file base plus 1341-file delta and individually verified.",
+          "Joint-vs-marginal compares learned conditioning with the same search budget; comparisons against pi0 measure the combined belief-and-search system."
         ],
         "recovery_audit_status": "passed",
-        "recovery_audit_scope": "preparation_only",
-        "recovery_artifacts_checked": 4864,
-        "formal_match_games_audited": 0,
+        "recovery_audit_scope": "training_and_all_six_formal_comparisons",
+        "recovery_artifacts_checked": 6054,
+        "formal_match_games_audited": 1200,
         "postbuild_source_audit": {
           "status": "passed",
           "frozen_source_files_verified": 747,
@@ -2193,6 +2494,43 @@
           "source_tree_sha256": "588fbc84a6bfbc96cbab4ce6e68f90d3f6f1b21f5fb599154af1b16d79829833",
           "both_gpu_acceptance_source_digests_reconstructed_locally": true,
           "supplemental_archive_sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        },
+        "formal_comparison_status": "completed",
+        "formal_experiment_completed_games": 1200,
+        "formal_model_games_audited": 400,
+        "formal_gpu_jobs": [
+          {
+            "job_id": 2349387,
+            "elapsed": "01:30:04",
+            "scheduler_elapsed_seconds": 5404,
+            "node": "g0015",
+            "scheduler_state": "COMPLETED",
+            "exit_code": "0:0",
+            "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+            "complete_formal_games": 600
+          }
+        ],
+        "preparation_archive_sha256_matches_remote": true,
+        "preparation_recovery_artifacts_checked": 4864,
+        "final_transport": {
+          "mode": "incremental",
+          "base_files_reused": 95,
+          "delta_files": 1341,
+          "final_files_verified": 1436,
+          "final_file_set_exact": true,
+          "reconstructed_file_tree_verified": true,
+          "transfer_package_sha256": "b2d27d88d4c93955d25731134acf493fa5450e5934b32746c70ddfa4d941fff5",
+          "transfer_package_sha256_matches_remote": true,
+          "original_package_manifest_sha256": "12a25863ac18efecbaad445859de543e7519eabcdfbcc43ef970a63405425b22",
+          "full_archive_downloaded": false,
+          "full_archive_sha256_verified_locally": false,
+          "remote_full_archive_identity": {
+            "bytes": 66457587,
+            "files": 1436,
+            "name": "facts-belief-ablation-results-2349386-2349387.tar.gz",
+            "sha256": "95d97bfe28187ac0967d37d04d5b7ba7a4a10fd69f81912d9d681617c21f21fa"
+          },
+          "audit_sequence": "Immutable incremental-recovery.json records transport before the separate passed recovery-audit.json experiment audit."
         }
       },
       "notes": [
@@ -2200,8 +2538,15 @@
         "Inputs are facts-only 317/0 with known_only identities. Hard public constraints retain q12.v2 semantics; no handcrafted identity probabilities are restored.",
         "The unchanged frozen parent policy receives sampled-world search results; learned identity probabilities are not inserted into its observation channels.",
         "Matched marginal and joint networks differ only by the identity-prefix embedding and conditioning; both use the same public observations, history and exact constraints.",
-        "The 1200-game formal comparison is running at registration. No new formal win rate is available; the default remains facts-counted-g10017.",
-        "The e10 ID denotes completed epochs; validation selected epoch 10 in this run."
+        "All 1200 prespecified formal match games completed and passed recovery/statistics audit. No comparison establishes stable improvement; the default remains facts-counted-g10017.",
+        "The e10 ID denotes completed epochs; validation selected epoch 10 in this run.",
+        "Each checkpoint appears in two 200-game comparisons. Pooled results combine the two fixed belief seeds statistically and do not constitute an ensemble or a training-seed-population interval."
+      ],
+      "formal_evaluation_ids": [
+        "facts-ablation-20261004-joint-baseline-s20261005",
+        "facts-ablation-20261004-joint-marginal-s20261005",
+        "facts-ablation-20261004-joint-baseline-pooled",
+        "facts-ablation-20261004-joint-marginal-pooled"
       ]
     },
     {
@@ -2460,6 +2805,78 @@
           "root": "beijing-v100-preflight",
           "path": "facts-belief-ablation-20261004-v1/recovered-postbuild/facts-belief-ablation-20261004-v1/evidence/postbuild-source-audit.json",
           "sha256": "b2ab36dabe135b3ae44d2fc9c1824364e925783544a271ffe79dd3bd415d8bb6"
+        },
+        {
+          "role": "final_recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovery-audit.json",
+          "sha256": "8acc5c61080d22ac47e24a3c876bcca648920772e1267853d244e906168ea2c6"
+        },
+        {
+          "role": "incremental_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/incremental-recovery.json",
+          "sha256": "1dd782837ea074ab79c4c3d18c5547e71905bac27bd7438d0ccf437bdbd19b7b"
+        },
+        {
+          "role": "incremental_transport_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/received-incremental-package.tar.gz",
+          "sha256": "b2d27d88d4c93955d25731134acf493fa5450e5934b32746c70ddfa4d941fff5"
+        },
+        {
+          "role": "final_package_member_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/evidence/final-package-manifest.json",
+          "sha256": "12a25863ac18efecbaad445859de543e7519eabcdfbcc43ef970a63405425b22"
+        },
+        {
+          "role": "incremental_transport_index",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/incremental-parts/transport-index.json",
+          "sha256": "76ea48f66c9d4660a6c451c569c8504fd6af0d72207959cdf83339c1a3cd49d5"
+        },
+        {
+          "role": "formal_scheduler_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/evidence/scheduler-final.txt",
+          "sha256": "3922b649dc450719c61f13fb6e903acae5ee6b0f02e7205937de1f4329bd9663"
+        },
+        {
+          "role": "formal_experiment_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/protocol.json",
+          "sha256": "013ec34cb246dafb8c0205241743dc6ed33a2faf253e4fe6f824ddcc0da5e1ae"
+        },
+        {
+          "role": "formal_launcher",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches-retry1.sh",
+          "sha256": "65e494da051d0d34d7d7cf25c87e7eb0db0565d8166333c3ee9738ccdde429d8"
+        },
+        {
+          "role": "formal_comparison_marginal_baseline_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261005/marginal-baseline/protocol.json",
+          "sha256": "1a71ea2fb629f09699f0cdcc63e495478c6f729d14787546f32730616226b4e0"
+        },
+        {
+          "role": "formal_comparison_marginal_baseline",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261005/marginal-baseline/comparison.json",
+          "sha256": "5728feff4f90ba2a52c528fb0fb539dbd87392b6df3b63994981d3ca4b1d3f48"
+        },
+        {
+          "role": "formal_comparison_joint_marginal_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261005/joint-marginal/protocol.json",
+          "sha256": "1ca660f62505844f6ce6763bd3993d6da3c271099ec9e2950bc1790c7e6da516"
+        },
+        {
+          "role": "formal_comparison_joint_marginal",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-final/facts-belief-ablation-20261004-v1/matches/s20261005/joint-marginal/comparison.json",
+          "sha256": "7d96944b3d7c41391c360be9b113a724836c01b6b1d425910bb73da6110cf3df"
         }
       ],
       "verification": {
@@ -2469,13 +2886,11 @@
         "validation_selection_and_test_binding_verified": true,
         "selected_weights_equal_resume_best_weights": true,
         "optimizer_and_rng_state_verified": true,
-        "formal_comparison_statistics_recomputed": false,
-        "formal_comparison_status_at_registration": "running",
+        "formal_comparison_statistics_recomputed": true,
         "formal_experiment_planned_complete_games": 1200,
-        "archive_sha256_matches_remote": true,
         "gpu_experiment": {
           "status": "passed",
-          "scope": "preparation only; formal matches remain in progress",
+          "scope": "Preparation training and GPU acceptance; formal comparisons completed in the separately recorded jobs.",
           "job_id": 2349370,
           "scheduler_state": "COMPLETED",
           "exit_code": "0:0",
@@ -2496,15 +2911,16 @@
           "acceptance_scope": "Separate 40 short smoke games and temporary weights; excluded from the shared 2000-game dataset and 10-epoch model training."
         },
         "recovery_audit_limitations": [
-          "Preparation artifacts only; no formal comparison win rate is certified.",
-          "GPU evidence and recovered resume tensors are checked locally without rerunning CUDA kernels.",
-          "Held-out neural metrics are bound to selected weights and denominators; NLL and accuracy are not recomputed.",
-          "Conditional joint NLL and public-only marginal NLL are not directly comparable."
+          "Verifies recovered artifacts; does not replay GPU kernels, matches, or neural NLL.",
+          "Joint conditional NLL and public-only marginal NLL have different conditioning.",
+          "Pooled intervals condition on two trained belief seeds, not the training population.",
+          "The complete remote tar archive was not downloaded or hashed locally; the 1436 final member files were reconstructed from a verified 95-file base plus 1341-file delta and individually verified.",
+          "Joint-vs-marginal compares learned conditioning with the same search budget; comparisons against pi0 measure the combined belief-and-search system."
         ],
         "recovery_audit_status": "passed",
-        "recovery_audit_scope": "preparation_only",
-        "recovery_artifacts_checked": 4864,
-        "formal_match_games_audited": 0,
+        "recovery_audit_scope": "training_and_all_six_formal_comparisons",
+        "recovery_artifacts_checked": 6054,
+        "formal_match_games_audited": 1200,
         "postbuild_source_audit": {
           "status": "passed",
           "frozen_source_files_verified": 747,
@@ -2513,6 +2929,43 @@
           "source_tree_sha256": "588fbc84a6bfbc96cbab4ce6e68f90d3f6f1b21f5fb599154af1b16d79829833",
           "both_gpu_acceptance_source_digests_reconstructed_locally": true,
           "supplemental_archive_sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        },
+        "formal_comparison_status": "completed",
+        "formal_experiment_completed_games": 1200,
+        "formal_model_games_audited": 400,
+        "formal_gpu_jobs": [
+          {
+            "job_id": 2349387,
+            "elapsed": "01:30:04",
+            "scheduler_elapsed_seconds": 5404,
+            "node": "g0015",
+            "scheduler_state": "COMPLETED",
+            "exit_code": "0:0",
+            "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+            "complete_formal_games": 600
+          }
+        ],
+        "preparation_archive_sha256_matches_remote": true,
+        "preparation_recovery_artifacts_checked": 4864,
+        "final_transport": {
+          "mode": "incremental",
+          "base_files_reused": 95,
+          "delta_files": 1341,
+          "final_files_verified": 1436,
+          "final_file_set_exact": true,
+          "reconstructed_file_tree_verified": true,
+          "transfer_package_sha256": "b2d27d88d4c93955d25731134acf493fa5450e5934b32746c70ddfa4d941fff5",
+          "transfer_package_sha256_matches_remote": true,
+          "original_package_manifest_sha256": "12a25863ac18efecbaad445859de543e7519eabcdfbcc43ef970a63405425b22",
+          "full_archive_downloaded": false,
+          "full_archive_sha256_verified_locally": false,
+          "remote_full_archive_identity": {
+            "bytes": 66457587,
+            "files": 1436,
+            "name": "facts-belief-ablation-results-2349386-2349387.tar.gz",
+            "sha256": "95d97bfe28187ac0967d37d04d5b7ba7a4a10fd69f81912d9d681617c21f21fa"
+          },
+          "audit_sequence": "Immutable incremental-recovery.json records transport before the separate passed recovery-audit.json experiment audit."
         }
       },
       "notes": [
@@ -2520,8 +2973,15 @@
         "Inputs are facts-only 317/0 with known_only identities. Hard public constraints retain q12.v2 semantics; no handcrafted identity probabilities are restored.",
         "The unchanged frozen parent policy receives sampled-world search results; learned identity probabilities are not inserted into its observation channels.",
         "Matched marginal and joint networks differ only by the identity-prefix embedding and conditioning; both use the same public observations, history and exact constraints.",
-        "The 1200-game formal comparison is running at registration. No new formal win rate is available; the default remains facts-counted-g10017.",
-        "The e10 ID denotes completed epochs; validation selected epoch 10 in this run."
+        "All 1200 prespecified formal match games completed and passed recovery/statistics audit. No comparison establishes stable improvement; the default remains facts-counted-g10017.",
+        "The e10 ID denotes completed epochs; validation selected epoch 10 in this run.",
+        "Each checkpoint appears in two 200-game comparisons. Pooled results combine the two fixed belief seeds statistically and do not constitute an ensemble or a training-seed-population interval."
+      ],
+      "formal_evaluation_ids": [
+        "facts-ablation-20261004-marginal-baseline-s20261005",
+        "facts-ablation-20261004-joint-marginal-s20261005",
+        "facts-ablation-20261004-marginal-baseline-pooled",
+        "facts-ablation-20261004-joint-marginal-pooled"
       ]
     }
   ],
@@ -2622,13 +3082,975 @@
       "artifact_model_id": "facts-joint-g2000-e10",
       "artifact_role": "formal_comparison",
       "conclusion": "Inconclusive improvement: both 95% intervals include 0.5. Keep frozen pi0 as default."
+    },
+    {
+      "id": "facts-ablation-20261004-marginal-baseline-s20261004",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "status": "completed",
+      "aggregation": "single_belief_training_seed",
+      "belief_training_seed": 20261004,
+      "matchup": "marginal-baseline",
+      "candidate": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": "facts-marginal-g2000-e10-s20261004",
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        }
+      },
+      "opponent": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": null,
+        "search": false
+      },
+      "outcome_perspective": "candidate",
+      "games": 200,
+      "complete_layout_pairs": 100,
+      "unpaired_completed_games": 0,
+      "wins": 103,
+      "losses": 97,
+      "draws": 0,
+      "win_rate": 0.515,
+      "win_rate_ci95": [
+        0.46,
+        0.57
+      ],
+      "score": 0.515,
+      "score_ci95": [
+        0.46,
+        0.57
+      ],
+      "confidence_method": "percentile bootstrap over complete layout pairs",
+      "bootstrap_repeats": 10000,
+      "bootstrap_seed": 95000000,
+      "layout_seed": 95000000,
+      "protocol_sha256": "eece285a13bb2135c7b82b9386083ff7255b11caa6978a9ccb202534b32b6a51",
+      "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+      "job_id": 2349386,
+      "inference_source_sha256": "b7671e5ca3431398a8dd33b8e52114a8dfdae309e9434bd4e8a610fa408517bd",
+      "used_for_pi0_selection": false,
+      "used_for_belief_selection": false,
+      "used_for_search_budget_selection": false,
+      "predeclared_primary_contrast": false,
+      "dataset_and_prior_layouts_disjoint": true,
+      "search_totals": {
+        "candidate": {
+          "decisions": 12452,
+          "successful_decisions": 12452,
+          "joint_refreshes": 12452,
+          "proposals": 12452,
+          "accepted_proposals": 12452,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 844670,
+          "rollout_world_steps": 624544,
+          "legal_actions": 624544,
+          "candidate_actions": 624544,
+          "unique_accepted_assignments": 12452,
+          "constraint_seconds": 4528.963675479405,
+          "sampling_seconds": 5422.986861967482,
+          "materialization_seconds": 172.4089658781886,
+          "simulation_seconds": 1735.536889737472,
+          "decision_seconds_total": 7628.084871247411,
+          "blueprint_queries": {
+            "policy_calls": 12452,
+            "policy_positions": 12452,
+            "value_calls": 12438,
+            "value_positions": 623611
+          },
+          "constraint_queries": {
+            "queries": 933900,
+            "cache_hits": 0,
+            "search_nodes": 9438324,
+            "budget_exhaustions": 0
+          },
+          "rejection_reasons": {},
+          "mean_search_decision_seconds": 0.6125991705145688,
+          "acceptance_rate": 1.0,
+          "action_coverage": 1.0
+        },
+        "opponent": {
+          "decisions": 12428,
+          "successful_decisions": 0,
+          "joint_refreshes": 0,
+          "proposals": 0,
+          "accepted_proposals": 0,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 0,
+          "rollout_world_steps": 0,
+          "legal_actions": 0,
+          "candidate_actions": 0,
+          "unique_accepted_assignments": 0,
+          "constraint_seconds": 0,
+          "sampling_seconds": 0,
+          "materialization_seconds": 0,
+          "simulation_seconds": 0,
+          "decision_seconds_total": 0,
+          "blueprint_queries": {},
+          "constraint_queries": {},
+          "rejection_reasons": {}
+        }
+      },
+      "artifact_model_id": "facts-marginal-g2000-e10-s20261004",
+      "artifact_role": "formal_comparison_marginal_baseline",
+      "conclusion": "Both 95% intervals include 0.5; this comparison does not establish improvement. Keep frozen pi0 as default."
+    },
+    {
+      "id": "facts-ablation-20261004-joint-baseline-s20261004",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "status": "completed",
+      "aggregation": "single_belief_training_seed",
+      "belief_training_seed": 20261004,
+      "matchup": "joint-baseline",
+      "candidate": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": "facts-joint-g2000-e10-s20261004",
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        }
+      },
+      "opponent": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": null,
+        "search": false
+      },
+      "outcome_perspective": "candidate",
+      "games": 200,
+      "complete_layout_pairs": 100,
+      "unpaired_completed_games": 0,
+      "wins": 105,
+      "losses": 95,
+      "draws": 0,
+      "win_rate": 0.525,
+      "win_rate_ci95": [
+        0.46,
+        0.585
+      ],
+      "score": 0.525,
+      "score_ci95": [
+        0.46,
+        0.585
+      ],
+      "confidence_method": "percentile bootstrap over complete layout pairs",
+      "bootstrap_repeats": 10000,
+      "bootstrap_seed": 95000000,
+      "layout_seed": 95000000,
+      "protocol_sha256": "249228886c58daa076777cf42b28397ce5a0e11e074863985548111c046a06b1",
+      "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+      "job_id": 2349386,
+      "inference_source_sha256": "b7671e5ca3431398a8dd33b8e52114a8dfdae309e9434bd4e8a610fa408517bd",
+      "used_for_pi0_selection": false,
+      "used_for_belief_selection": false,
+      "used_for_search_budget_selection": false,
+      "predeclared_primary_contrast": false,
+      "dataset_and_prior_layouts_disjoint": true,
+      "search_totals": {
+        "candidate": {
+          "decisions": 12437,
+          "successful_decisions": 12437,
+          "joint_refreshes": 12437,
+          "proposals": 12437,
+          "accepted_proposals": 12437,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 830473,
+          "rollout_world_steps": 629412,
+          "legal_actions": 629412,
+          "candidate_actions": 629412,
+          "unique_accepted_assignments": 12437,
+          "constraint_seconds": 4676.590639634058,
+          "sampling_seconds": 11236.263124905527,
+          "materialization_seconds": 174.79673838522285,
+          "simulation_seconds": 1800.834533338435,
+          "decision_seconds_total": 13525.60405038856,
+          "blueprint_queries": {
+            "policy_calls": 12437,
+            "policy_positions": 12437,
+            "value_calls": 12416,
+            "value_positions": 628389
+          },
+          "constraint_queries": {
+            "queries": 932775,
+            "cache_hits": 0,
+            "search_nodes": 9450191,
+            "budget_exhaustions": 0
+          },
+          "rejection_reasons": {},
+          "mean_search_decision_seconds": 1.087529472572852,
+          "acceptance_rate": 1.0,
+          "action_coverage": 1.0
+        },
+        "opponent": {
+          "decisions": 12349,
+          "successful_decisions": 0,
+          "joint_refreshes": 0,
+          "proposals": 0,
+          "accepted_proposals": 0,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 0,
+          "rollout_world_steps": 0,
+          "legal_actions": 0,
+          "candidate_actions": 0,
+          "unique_accepted_assignments": 0,
+          "constraint_seconds": 0,
+          "sampling_seconds": 0,
+          "materialization_seconds": 0,
+          "simulation_seconds": 0,
+          "decision_seconds_total": 0,
+          "blueprint_queries": {},
+          "constraint_queries": {},
+          "rejection_reasons": {}
+        }
+      },
+      "artifact_model_id": "facts-joint-g2000-e10-s20261004",
+      "artifact_role": "formal_comparison_joint_baseline",
+      "conclusion": "Both 95% intervals include 0.5; this comparison does not establish improvement. Keep frozen pi0 as default."
+    },
+    {
+      "id": "facts-ablation-20261004-joint-marginal-s20261004",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "status": "completed",
+      "aggregation": "single_belief_training_seed",
+      "belief_training_seed": 20261004,
+      "matchup": "joint-marginal",
+      "candidate": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": "facts-joint-g2000-e10-s20261004",
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        }
+      },
+      "opponent": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": "facts-marginal-g2000-e10-s20261004",
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        }
+      },
+      "outcome_perspective": "candidate",
+      "games": 200,
+      "complete_layout_pairs": 100,
+      "unpaired_completed_games": 0,
+      "wins": 101,
+      "losses": 98,
+      "draws": 1,
+      "win_rate": 0.505,
+      "win_rate_ci95": [
+        0.445,
+        0.5601249999999982
+      ],
+      "score": 0.5075,
+      "score_ci95": [
+        0.45,
+        0.565
+      ],
+      "confidence_method": "percentile bootstrap over complete layout pairs",
+      "bootstrap_repeats": 10000,
+      "bootstrap_seed": 95000000,
+      "layout_seed": 95000000,
+      "protocol_sha256": "5da39fd71433dd226ed12c1b1dd74ac9d8ce6dfb39de4105a504ae24906414ad",
+      "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+      "job_id": 2349386,
+      "inference_source_sha256": "b7671e5ca3431398a8dd33b8e52114a8dfdae309e9434bd4e8a610fa408517bd",
+      "used_for_pi0_selection": false,
+      "used_for_belief_selection": false,
+      "used_for_search_budget_selection": false,
+      "predeclared_primary_contrast": true,
+      "dataset_and_prior_layouts_disjoint": true,
+      "search_totals": {
+        "candidate": {
+          "decisions": 12507,
+          "successful_decisions": 12507,
+          "joint_refreshes": 12507,
+          "proposals": 12507,
+          "accepted_proposals": 12507,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 891860,
+          "rollout_world_steps": 603290,
+          "legal_actions": 603290,
+          "candidate_actions": 603290,
+          "unique_accepted_assignments": 12507,
+          "constraint_seconds": 5054.316448327154,
+          "sampling_seconds": 11580.528837861493,
+          "materialization_seconds": 191.58776188921183,
+          "simulation_seconds": 1799.451325203292,
+          "decision_seconds_total": 13892.403219920583,
+          "blueprint_queries": {
+            "policy_calls": 12507,
+            "policy_positions": 12507,
+            "value_calls": 12494,
+            "value_positions": 602569
+          },
+          "constraint_queries": {
+            "queries": 938025,
+            "cache_hits": 0,
+            "search_nodes": 9505921,
+            "budget_exhaustions": 0
+          },
+          "rejection_reasons": {},
+          "mean_search_decision_seconds": 1.1107702262669372,
+          "acceptance_rate": 1.0,
+          "action_coverage": 1.0
+        },
+        "opponent": {
+          "decisions": 12848,
+          "successful_decisions": 12848,
+          "joint_refreshes": 12848,
+          "proposals": 12848,
+          "accepted_proposals": 12848,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 932011,
+          "rollout_world_steps": 631032,
+          "legal_actions": 631032,
+          "candidate_actions": 631032,
+          "unique_accepted_assignments": 12848,
+          "constraint_seconds": 5323.226480606012,
+          "sampling_seconds": 6388.402859473601,
+          "materialization_seconds": 198.58887400850654,
+          "simulation_seconds": 1877.8767710430548,
+          "decision_seconds_total": 8784.496190654114,
+          "blueprint_queries": {
+            "policy_calls": 12848,
+            "policy_positions": 12848,
+            "value_calls": 12825,
+            "value_positions": 629663
+          },
+          "constraint_queries": {
+            "queries": 963600,
+            "cache_hits": 0,
+            "search_nodes": 10086219,
+            "budget_exhaustions": 0
+          },
+          "rejection_reasons": {},
+          "mean_search_decision_seconds": 0.6837247969064535,
+          "acceptance_rate": 1.0,
+          "action_coverage": 1.0
+        }
+      },
+      "artifact_model_id": "facts-joint-g2000-e10-s20261004",
+      "artifact_role": "formal_comparison_joint_marginal",
+      "conclusion": "Both 95% intervals include 0.5; this comparison does not establish improvement. Keep frozen pi0 as default."
+    },
+    {
+      "id": "facts-ablation-20261004-marginal-baseline-s20261005",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "status": "completed",
+      "aggregation": "single_belief_training_seed",
+      "belief_training_seed": 20261005,
+      "matchup": "marginal-baseline",
+      "candidate": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": "facts-marginal-g2000-e10-s20261005",
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        }
+      },
+      "opponent": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": null,
+        "search": false
+      },
+      "outcome_perspective": "candidate",
+      "games": 200,
+      "complete_layout_pairs": 100,
+      "unpaired_completed_games": 0,
+      "wins": 107,
+      "losses": 91,
+      "draws": 2,
+      "win_rate": 0.535,
+      "win_rate_ci95": [
+        0.47,
+        0.6
+      ],
+      "score": 0.54,
+      "score_ci95": [
+        0.475,
+        0.605
+      ],
+      "confidence_method": "percentile bootstrap over complete layout pairs",
+      "bootstrap_repeats": 10000,
+      "bootstrap_seed": 96000000,
+      "layout_seed": 96000000,
+      "protocol_sha256": "4380b1de062c5f73e94f36a5803b9f0110cb83488e6f2dbf5623fcb2994891e6",
+      "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+      "job_id": 2349387,
+      "inference_source_sha256": "b7671e5ca3431398a8dd33b8e52114a8dfdae309e9434bd4e8a610fa408517bd",
+      "used_for_pi0_selection": false,
+      "used_for_belief_selection": false,
+      "used_for_search_budget_selection": false,
+      "predeclared_primary_contrast": false,
+      "dataset_and_prior_layouts_disjoint": true,
+      "search_totals": {
+        "candidate": {
+          "decisions": 13087,
+          "successful_decisions": 13087,
+          "joint_refreshes": 13087,
+          "proposals": 13087,
+          "accepted_proposals": 13087,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 954894,
+          "rollout_world_steps": 657335,
+          "legal_actions": 657335,
+          "candidate_actions": 657335,
+          "unique_accepted_assignments": 13087,
+          "constraint_seconds": 3885.7383456151,
+          "sampling_seconds": 4811.940998172853,
+          "materialization_seconds": 160.64987536659464,
+          "simulation_seconds": 1529.3913846407086,
+          "decision_seconds_total": 6781.157694319263,
+          "blueprint_queries": {
+            "policy_calls": 13087,
+            "policy_positions": 13087,
+            "value_calls": 13068,
+            "value_positions": 656578
+          },
+          "constraint_queries": {
+            "queries": 981525,
+            "cache_hits": 0,
+            "search_nodes": 10057281,
+            "budget_exhaustions": 0
+          },
+          "rejection_reasons": {},
+          "mean_search_decision_seconds": 0.5181598299319373,
+          "acceptance_rate": 1.0,
+          "action_coverage": 1.0
+        },
+        "opponent": {
+          "decisions": 12749,
+          "successful_decisions": 0,
+          "joint_refreshes": 0,
+          "proposals": 0,
+          "accepted_proposals": 0,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 0,
+          "rollout_world_steps": 0,
+          "legal_actions": 0,
+          "candidate_actions": 0,
+          "unique_accepted_assignments": 0,
+          "constraint_seconds": 0,
+          "sampling_seconds": 0,
+          "materialization_seconds": 0,
+          "simulation_seconds": 0,
+          "decision_seconds_total": 0,
+          "blueprint_queries": {},
+          "constraint_queries": {},
+          "rejection_reasons": {}
+        }
+      },
+      "artifact_model_id": "facts-marginal-g2000-e10-s20261005",
+      "artifact_role": "formal_comparison_marginal_baseline",
+      "conclusion": "Both 95% intervals include 0.5; this comparison does not establish improvement. Keep frozen pi0 as default."
+    },
+    {
+      "id": "facts-ablation-20261004-joint-baseline-s20261005",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "status": "completed",
+      "aggregation": "single_belief_training_seed",
+      "belief_training_seed": 20261005,
+      "matchup": "joint-baseline",
+      "candidate": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": "facts-joint-g2000-e10-s20261005",
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        }
+      },
+      "opponent": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": null,
+        "search": false
+      },
+      "outcome_perspective": "candidate",
+      "games": 200,
+      "complete_layout_pairs": 100,
+      "unpaired_completed_games": 0,
+      "wins": 107,
+      "losses": 92,
+      "draws": 1,
+      "win_rate": 0.535,
+      "win_rate_ci95": [
+        0.47,
+        0.6
+      ],
+      "score": 0.5375,
+      "score_ci95": [
+        0.475,
+        0.6
+      ],
+      "confidence_method": "percentile bootstrap over complete layout pairs",
+      "bootstrap_repeats": 10000,
+      "bootstrap_seed": 96000000,
+      "layout_seed": 96000000,
+      "protocol_sha256": "be41398cedc981634a9491f5e6ffb1445213e17becacdddfb7552edfc10953e1",
+      "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+      "job_id": 2349387,
+      "inference_source_sha256": "b7671e5ca3431398a8dd33b8e52114a8dfdae309e9434bd4e8a610fa408517bd",
+      "used_for_pi0_selection": false,
+      "used_for_belief_selection": false,
+      "used_for_search_budget_selection": false,
+      "predeclared_primary_contrast": false,
+      "dataset_and_prior_layouts_disjoint": true,
+      "search_totals": {
+        "candidate": {
+          "decisions": 12960,
+          "successful_decisions": 12960,
+          "joint_refreshes": 12960,
+          "proposals": 12960,
+          "accepted_proposals": 12960,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 919810,
+          "rollout_world_steps": 652326,
+          "legal_actions": 652326,
+          "candidate_actions": 652326,
+          "unique_accepted_assignments": 12960,
+          "constraint_seconds": 3746.703516256064,
+          "sampling_seconds": 9948.92853895016,
+          "materialization_seconds": 153.39826796995476,
+          "simulation_seconds": 1538.7402981277555,
+          "decision_seconds_total": 11930.2850502301,
+          "blueprint_queries": {
+            "policy_calls": 12960,
+            "policy_positions": 12960,
+            "value_calls": 12945,
+            "value_positions": 651557
+          },
+          "constraint_queries": {
+            "queries": 972000,
+            "cache_hits": 0,
+            "search_nodes": 10026671,
+            "budget_exhaustions": 0
+          },
+          "rejection_reasons": {},
+          "mean_search_decision_seconds": 0.9205466859745448,
+          "acceptance_rate": 1.0,
+          "action_coverage": 1.0
+        },
+        "opponent": {
+          "decisions": 12666,
+          "successful_decisions": 0,
+          "joint_refreshes": 0,
+          "proposals": 0,
+          "accepted_proposals": 0,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 0,
+          "rollout_world_steps": 0,
+          "legal_actions": 0,
+          "candidate_actions": 0,
+          "unique_accepted_assignments": 0,
+          "constraint_seconds": 0,
+          "sampling_seconds": 0,
+          "materialization_seconds": 0,
+          "simulation_seconds": 0,
+          "decision_seconds_total": 0,
+          "blueprint_queries": {},
+          "constraint_queries": {},
+          "rejection_reasons": {}
+        }
+      },
+      "artifact_model_id": "facts-joint-g2000-e10-s20261005",
+      "artifact_role": "formal_comparison_joint_baseline",
+      "conclusion": "Both 95% intervals include 0.5; this comparison does not establish improvement. Keep frozen pi0 as default."
+    },
+    {
+      "id": "facts-ablation-20261004-joint-marginal-s20261005",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "status": "completed",
+      "aggregation": "single_belief_training_seed",
+      "belief_training_seed": 20261005,
+      "matchup": "joint-marginal",
+      "candidate": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": "facts-joint-g2000-e10-s20261005",
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        }
+      },
+      "opponent": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": "facts-marginal-g2000-e10-s20261005",
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        }
+      },
+      "outcome_perspective": "candidate",
+      "games": 200,
+      "complete_layout_pairs": 100,
+      "unpaired_completed_games": 0,
+      "wins": 104,
+      "losses": 95,
+      "draws": 1,
+      "win_rate": 0.52,
+      "win_rate_ci95": [
+        0.46,
+        0.585
+      ],
+      "score": 0.5225,
+      "score_ci95": [
+        0.46,
+        0.585
+      ],
+      "confidence_method": "percentile bootstrap over complete layout pairs",
+      "bootstrap_repeats": 10000,
+      "bootstrap_seed": 96000000,
+      "layout_seed": 96000000,
+      "protocol_sha256": "edfbdcc6618d95b7b9e994d998b1649d85a23fd9604d45f5ce99095411b48ab1",
+      "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+      "job_id": 2349387,
+      "inference_source_sha256": "b7671e5ca3431398a8dd33b8e52114a8dfdae309e9434bd4e8a610fa408517bd",
+      "used_for_pi0_selection": false,
+      "used_for_belief_selection": false,
+      "used_for_search_budget_selection": false,
+      "predeclared_primary_contrast": true,
+      "dataset_and_prior_layouts_disjoint": true,
+      "search_totals": {
+        "candidate": {
+          "decisions": 12713,
+          "successful_decisions": 12713,
+          "joint_refreshes": 12713,
+          "proposals": 12713,
+          "accepted_proposals": 12713,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 876483,
+          "rollout_world_steps": 629635,
+          "legal_actions": 629635,
+          "candidate_actions": 629635,
+          "unique_accepted_assignments": 12713,
+          "constraint_seconds": 3867.029539412353,
+          "sampling_seconds": 9790.650114522316,
+          "materialization_seconds": 156.3996737827547,
+          "simulation_seconds": 1519.1302279378287,
+          "decision_seconds_total": 11747.705356518272,
+          "blueprint_queries": {
+            "policy_calls": 12713,
+            "policy_positions": 12713,
+            "value_calls": 12695,
+            "value_positions": 628410
+          },
+          "constraint_queries": {
+            "queries": 953475,
+            "cache_hits": 0,
+            "search_nodes": 9697244,
+            "budget_exhaustions": 0
+          },
+          "rejection_reasons": {},
+          "mean_search_decision_seconds": 0.9240702711018857,
+          "acceptance_rate": 1.0,
+          "action_coverage": 1.0
+        },
+        "opponent": {
+          "decisions": 13032,
+          "successful_decisions": 13032,
+          "joint_refreshes": 13032,
+          "proposals": 13032,
+          "accepted_proposals": 13032,
+          "rejected_proposals": 0,
+          "sample_budget_failures": 0,
+          "constraint_budget_failures": 0,
+          "public_replay_steps": 927026,
+          "rollout_world_steps": 673287,
+          "legal_actions": 673287,
+          "candidate_actions": 673287,
+          "unique_accepted_assignments": 13032,
+          "constraint_seconds": 3947.7334989402443,
+          "sampling_seconds": 5033.990427725017,
+          "materialization_seconds": 162.814312659204,
+          "simulation_seconds": 1630.2375645386055,
+          "decision_seconds_total": 7109.059294503182,
+          "blueprint_queries": {
+            "policy_calls": 13032,
+            "policy_positions": 13032,
+            "value_calls": 13020,
+            "value_positions": 672588
+          },
+          "constraint_queries": {
+            "queries": 977400,
+            "cache_hits": 0,
+            "search_nodes": 9904757,
+            "budget_exhaustions": 0
+          },
+          "rejection_reasons": {},
+          "mean_search_decision_seconds": 0.5455079262203179,
+          "acceptance_rate": 1.0,
+          "action_coverage": 1.0
+        }
+      },
+      "artifact_model_id": "facts-joint-g2000-e10-s20261005",
+      "artifact_role": "formal_comparison_joint_marginal",
+      "conclusion": "Both 95% intervals include 0.5; this comparison does not establish improvement. Keep frozen pi0 as default."
+    },
+    {
+      "id": "facts-ablation-20261004-marginal-baseline-pooled",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "status": "completed",
+      "aggregation": "fixed_seed_stratified_pool",
+      "matchup": "marginal-baseline",
+      "candidate": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_ids": [
+          "facts-marginal-g2000-e10-s20261004",
+          "facts-marginal-g2000-e10-s20261005"
+        ],
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        },
+        "model_usage": "One fixed checkpoint per training seed; this is a statistical pool, not an ensemble."
+      },
+      "opponent": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_ids": [],
+        "search": false
+      },
+      "outcome_perspective": "candidate",
+      "component_evaluation_ids": [
+        "facts-ablation-20261004-marginal-baseline-s20261004",
+        "facts-ablation-20261004-marginal-baseline-s20261005"
+      ],
+      "games": 400,
+      "complete_layout_pairs": 200,
+      "confidence_method": "percentile bootstrap of layout pairs stratified by fixed trained belief seed",
+      "wins": 210,
+      "losses": 188,
+      "draws": 2,
+      "win_rate": 0.525,
+      "score": 0.5275,
+      "win_rate_ci95": [
+        0.4825,
+        0.5675
+      ],
+      "score_ci95": [
+        0.485,
+        0.57
+      ],
+      "training_seeds": [
+        20261004,
+        20261005
+      ],
+      "bootstrap_repeats": 10000,
+      "bootstrap_seed": 20261004,
+      "interval_scope": "conditional on these trained belief seeds; not a training-seed-population interval",
+      "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+      "used_for_pi0_selection": false,
+      "used_for_belief_selection": false,
+      "used_for_search_budget_selection": false,
+      "exploratory_pool": true,
+      "predeclared_primary_contrast": false,
+      "shared_layouts_across_matchups": true,
+      "layout_cohorts_disjoint_across_belief_seeds": true,
+      "artifact_model_id": "facts-marginal-g2000-e10-s20261004",
+      "artifact_role": "final_recovery_audit",
+      "audit_result_path": "pooled/marginal-baseline",
+      "conclusion": "Both 95% intervals include 0.5; no stable gain is established on these fixed trained seeds. Keep frozen pi0 as default."
+    },
+    {
+      "id": "facts-ablation-20261004-joint-baseline-pooled",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "status": "completed",
+      "aggregation": "fixed_seed_stratified_pool",
+      "matchup": "joint-baseline",
+      "candidate": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_ids": [
+          "facts-joint-g2000-e10-s20261004",
+          "facts-joint-g2000-e10-s20261005"
+        ],
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        },
+        "model_usage": "One fixed checkpoint per training seed; this is a statistical pool, not an ensemble."
+      },
+      "opponent": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_ids": [],
+        "search": false
+      },
+      "outcome_perspective": "candidate",
+      "component_evaluation_ids": [
+        "facts-ablation-20261004-joint-baseline-s20261004",
+        "facts-ablation-20261004-joint-baseline-s20261005"
+      ],
+      "games": 400,
+      "complete_layout_pairs": 200,
+      "confidence_method": "percentile bootstrap of layout pairs stratified by fixed trained belief seed",
+      "wins": 212,
+      "losses": 187,
+      "draws": 1,
+      "win_rate": 0.53,
+      "score": 0.53125,
+      "win_rate_ci95": [
+        0.4875,
+        0.5725
+      ],
+      "score_ci95": [
+        0.4875,
+        0.575
+      ],
+      "training_seeds": [
+        20261004,
+        20261005
+      ],
+      "bootstrap_repeats": 10000,
+      "bootstrap_seed": 20261004,
+      "interval_scope": "conditional on these trained belief seeds; not a training-seed-population interval",
+      "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+      "used_for_pi0_selection": false,
+      "used_for_belief_selection": false,
+      "used_for_search_budget_selection": false,
+      "exploratory_pool": true,
+      "predeclared_primary_contrast": false,
+      "shared_layouts_across_matchups": true,
+      "layout_cohorts_disjoint_across_belief_seeds": true,
+      "artifact_model_id": "facts-joint-g2000-e10-s20261004",
+      "artifact_role": "final_recovery_audit",
+      "audit_result_path": "pooled/joint-baseline",
+      "conclusion": "Both 95% intervals include 0.5; no stable gain is established on these fixed trained seeds. Keep frozen pi0 as default."
+    },
+    {
+      "id": "facts-ablation-20261004-joint-marginal-pooled",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "status": "completed",
+      "aggregation": "fixed_seed_stratified_pool",
+      "matchup": "joint-marginal",
+      "candidate": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_ids": [
+          "facts-joint-g2000-e10-s20261004",
+          "facts-joint-g2000-e10-s20261005"
+        ],
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        },
+        "model_usage": "One fixed checkpoint per training seed; this is a statistical pool, not an ensemble."
+      },
+      "opponent": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_ids": [
+          "facts-marginal-g2000-e10-s20261004",
+          "facts-marginal-g2000-e10-s20261005"
+        ],
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "beta": 0.5,
+          "proposal_batches": 8,
+          "max_constraint_nodes": 100000
+        },
+        "model_usage": "One fixed checkpoint per training seed; this is a statistical pool, not an ensemble."
+      },
+      "outcome_perspective": "candidate",
+      "component_evaluation_ids": [
+        "facts-ablation-20261004-joint-marginal-s20261004",
+        "facts-ablation-20261004-joint-marginal-s20261005"
+      ],
+      "games": 400,
+      "complete_layout_pairs": 200,
+      "confidence_method": "percentile bootstrap of layout pairs stratified by fixed trained belief seed",
+      "wins": 205,
+      "losses": 193,
+      "draws": 2,
+      "win_rate": 0.5125,
+      "score": 0.515,
+      "win_rate_ci95": [
+        0.47,
+        0.555
+      ],
+      "score_ci95": [
+        0.4725,
+        0.55625
+      ],
+      "training_seeds": [
+        20261004,
+        20261005
+      ],
+      "bootstrap_repeats": 10000,
+      "bootstrap_seed": 20261004,
+      "interval_scope": "conditional on these trained belief seeds; not a training-seed-population interval",
+      "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+      "used_for_pi0_selection": false,
+      "used_for_belief_selection": false,
+      "used_for_search_budget_selection": false,
+      "exploratory_pool": true,
+      "predeclared_primary_contrast": true,
+      "shared_layouts_across_matchups": true,
+      "layout_cohorts_disjoint_across_belief_seeds": true,
+      "artifact_model_id": "facts-joint-g2000-e10-s20261004",
+      "artifact_role": "final_recovery_audit",
+      "audit_result_path": "pooled/joint-marginal",
+      "conclusion": "Both 95% intervals include 0.5; no stable gain is established on these fixed trained seeds. Keep frozen pi0 as default."
     }
   ],
   "evaluation_limitations": [
     "The original 1200-game evaluation cohort participated in selecting pi0 and is not held-out evidence for that selection.",
-    "The facts joint experiment uses one training seed and one 100-layout-pair cohort; both score and win-rate intervals include 0.5.",
-    "The formal candidate combines the same frozen policy, trained belief module and search; this comparison does not isolate neural-belief effects from search effects.",
-    "Held-out test NLL and accuracy are teacher-forced conditional identity metrics, not marginal identity accuracy or gameplay strength.",
-    "Intervals are not adjusted for multiple comparisons."
+    "The prior 2026-10-03 facts joint experiment uses one training seed and one 100-layout-pair cohort; both score and win-rate intervals include 0.5.",
+    "The prior 2026-10-03 formal candidate combines the same frozen policy, trained belief module and search; this comparison does not isolate neural-belief effects from search effects.",
+    "The prior 2026-10-03 held-out test NLL and accuracy are teacher-forced conditional identity metrics, not marginal identity accuracy or gameplay strength.",
+    "Intervals are not adjusted for multiple comparisons.",
+    "The matched 2026-10-04 experiment uses two trained belief seeds but one frozen policy seed. Pooled intervals condition on those fixed trained belief seeds and do not estimate training-seed-population uncertainty.",
+    "The three matchups share layouts within each belief seed; their results are correlated, and six seed-specific intervals plus three pooled intervals are not nine independent discoveries.",
+    "The 1200-game matched experiment uses 200 distinct layouts across two seeds, each reused for all three matchups with swapped teams.",
+    "Matched marginal NLL is public-only per-piece prediction; joint NLL is teacher-forced conditional prediction. Their numerical values are not directly comparable.",
+    "Marginal-vs-pi0 and joint-vs-pi0 measure the complete belief-plus-search system. Joint-vs-marginal compares the two learned conditioning designs under the same frozen search budget."
   ]
 }
