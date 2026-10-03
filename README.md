@@ -167,6 +167,9 @@ checkpoint 的完整局数未知，不能把 512 当作局数。模型、父模�
 [模型索引与核验说明](docs/models/README.md)，训练与评测结果见
 [事实基线记录](docs/FACTS_ONLY_TRAINING_20261002.md)。当前联合 BeliefNet 的
 采集、训练与对局协议见 [事实信念比较](docs/FACTS_BELIEF_COMPARISON_20261003.md)。
+本轮 V100 验收、2,000 局数据训练及 200 局对比已完成并回收，见
+[实测结果与证据](docs/FACTS_JOINT_COMPARISON_20261003.md)：联合信念＋搜索取得
+106 胜、92 负、2 和，胜率 53%；95% 配对区间包含 50%，默认模型继续保留 π₀。
 
 历史信念原型使用 `scripts/legacy_train_joint_belief.py`、
 `scripts/legacy_compare_joint_search.py` 和 `scripts/legacy_pilot_joint_belief.py`。

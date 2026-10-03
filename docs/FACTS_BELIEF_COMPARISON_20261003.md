@@ -1,5 +1,8 @@
 # 事实基线与联合 BeliefNet 对局比较
 
+本页记录实现及实验协议。已完成的训练、正式胜率和回收证据见
+[V100 实测报告](FACTS_JOINT_COMPARISON_20261003.md)。
+
 ## 冻结的实验定义
 
 | 项目 | A：事实基线 | B：事实联合信念与搜索 |
@@ -69,7 +72,7 @@ NLL 和 accuracy 都是 **teacher-forced conditional** 指标，不是边缘概�
 
 ## 当前命令
 
-在已分配的计算节点中运行：
+以下为已分配计算节点中的单进程调用范式。本次正式对局使用种子 `94000000`、8 个 worker；完整冻结启动脚本与资源参数见实测报告对应的 `run.sh`。
 
 ```bash
 python scripts/collect_facts_belief_data.py --checkpoint PI0 --output DATA \
@@ -87,4 +90,8 @@ python scripts/aggregate_facts_comparison.py --output MATCHES --require-complete
 
 ## 实测结果
 
-待远端验收、训练及完整配对对局结束后回收记录；此处不预填棋力结论。
+作业 `2348998` 正常完成；34 项 GPU 验收测试及两种模型的保存恢复验收通过。
+2,000 个完整对局生成 16,000 个监督位置，联合信念训练 10 epochs 后完成独立测试。
+100 个新布局、双方换位的正式 200 局中，B 取得 **106 胜、92 负、2 和**，
+胜率 **53%**，95% 配对区间 **47%–59%**；目前未确认稳定提升。
+完整产物已回收并通过本机哈希、父模型绑定及统计重算审计，详见实测报告。

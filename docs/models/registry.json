@@ -10,10 +10,11 @@
     "unit": "one completed four-player match",
     "original_r512_completed_games": null,
     "later_counts": "cumulative new games after facts-original-r512; not lifetime totals",
-    "rollout_numbers_are_not_game_counts": true
+    "rollout_numbers_are_not_game_counts": true,
+    "belief_collection_games": "Complete frozen-parent self-play games; separate from parent policy training. Observer rows are not additional games."
   },
   "config_hash_contract": "SHA-256 of embedded train_cfg serialized as JSON with sort_keys=True, separators=(comma,colon), ensure_ascii=True; original path strings retained only inside the hashed checkpoint.",
-  "evidence_scope": "Recovered files were hashed and strictly loaded on CPU on 2026-10-03. The unchanged facts-counted-g10017 checkpoint also passed a recovered V100 acceptance run at source 6c6633220b67faffa0f01a5fa5c4f7a556a97f0b. Other historical GPU evidence is referenced, not rerun. This acceptance does not cover the later q12.v2 belief constraint schema or establish a trained facts BeliefNet result. Current repository cleanup is not relabeled as historical training source.",
+  "evidence_scope": "Recovered files were hashed and checkpoints strictly loaded on CPU on 2026-10-03. The frozen facts-counted-g10017 policy retains its earlier V100 acceptance at source 6c6633220b67faffa0f01a5fa5c4f7a556a97f0b. Facts joint training and the 200-game paired system comparison completed in V100 job 2348998 at source b7813532640e5238e64b49a5c47e9dc9219feda6 with q12.v2 constraints; both GPU acceptance gates and 34 GPU tests passed. The final archive and 4212 recovered artifacts passed lineage, SHA and match-statistics audit. Other historical GPU evidence is referenced, not rerun. The new comparison does not establish a strength improvement or isolate the contribution of BeliefNet from search. Current repository cleanup is not relabeled as historical training source.",
   "models": [
     {
       "id": "facts-original-r512",
@@ -987,6 +988,255 @@
         "Historical probability-input search pilot; not the future facts/history BeliefNet.",
         "Pilot search scored 9 wins, 17 losses, 6 draws and often fell back; not evidence of improvement."
       ]
+    },
+    {
+      "id": "facts-joint-g2000-e10",
+      "kind": "belief",
+      "status": "validation_selected",
+      "parent_model_id": "facts-counted-g10017",
+      "architecture_id": "junqi.belief317.facts-autoregressive.v1",
+      "input_spec": {
+        "format_version": 1,
+        "identity_schema": "junqi.hidden-identity-facts.v1",
+        "knowledge_schema": "junqi.observer-facts.v1",
+        "identity_encoding": "known_only",
+        "observation_semantics_version": 5,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "spatial_channels": 317,
+        "global_dims": 0,
+        "board_tokens": 129,
+        "hidden_tokens": 75,
+        "types": 12,
+        "sequence": "relative-owner-then-initial-slot",
+        "mode": "DARK",
+        "includes_dead_pieces": true,
+        "neural_history_window": 64,
+        "full_history_constraints": true,
+        "history_features": "observer-relative-public-events.v1",
+        "constraint_semantics": "junqi.identity-domain-inventory-combat-q12.v2"
+      },
+      "config": {
+        "n_encoder_layer": 2,
+        "n_head": 4,
+        "embed_dim": 64,
+        "ff_factor": 2,
+        "dropout": 0.0,
+        "pos_emb_std": 0.1,
+        "cnn_channels": 32,
+        "cnn_layers": 2,
+        "use_seat_embedding": true,
+        "n_decoder_layer": 2,
+        "history_window": 64
+      },
+      "identity_encoding": "known_only",
+      "parent_policy_sha256": "ef60cd5f21086e77a61a4744b57b267d51590fae3df1d659fc87b09458661aa1",
+      "parameter_count": 327436,
+      "training": {
+        "source_commit": "b7813532640e5238e64b49a5c47e9dc9219feda6",
+        "job_id": 2348998,
+        "completed_collection_games": 2000,
+        "dataset_rows": 16000,
+        "positions_per_game": 8,
+        "split_games": {
+          "test": 207,
+          "train": 1595,
+          "validation": 198
+        },
+        "split_rows": {
+          "test": 1656,
+          "train": 12760,
+          "validation": 1584
+        },
+        "epochs_completed": 10,
+        "selected_epoch": 10,
+        "optimizer_updates": 3990,
+        "seed": 20261004,
+        "batch_size": 32,
+        "learning_rate": 0.0001,
+        "dataset_manifest_sha256": "b996c95f32f84649e43722d275ddb60677d0e50fda638047428e4e067673cde5",
+        "dataset_protocol_sha256": "1725c39c30b421a7668e6637f4b645291449647119de738eeeed3de852d50ad0",
+        "selection": "minimum validation conditional NLL; earliest epoch wins ties",
+        "test_fold_used_for_training_or_selection": false,
+        "training_seconds": 290.8731078240089,
+        "initial_validation": {
+          "conditional_nll_per_unknown_piece": 1.4418919925317033,
+          "rows": 1584,
+          "teacher_forced_accuracy": 0.3563304171124918,
+          "unknown_targets": 111217
+        },
+        "selected_validation": {
+          "conditional_nll_per_unknown_piece": 1.2796346353897392,
+          "rows": 1584,
+          "teacher_forced_accuracy": 0.4412365016139619,
+          "unknown_targets": 111217
+        },
+        "heldout_test": {
+          "conditional_nll_per_unknown_piece": 1.2951288891429449,
+          "rows": 1656,
+          "teacher_forced_accuracy": 0.4351377910702841,
+          "unknown_targets": 117025
+        },
+        "metric_scope": "Teacher-forced conditional predictions; not gameplay win rate or marginal accuracy"
+      },
+      "artifacts": [
+        {
+          "role": "belief_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/training/joint-belief.pt",
+          "sha256": "0c9d9718681fb61ebce73bb7dd3a949417706316c88b3415314f2eb6e92595bd"
+        },
+        {
+          "role": "resume_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/training/last.pt",
+          "sha256": "e9e0bbd65a78b81e820c83694938c5a7bd92b6f7ec4e8dee8fc10fffa2583d25"
+        },
+        {
+          "role": "training_report",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/training/report.json",
+          "sha256": "992565b7452240bb62b17a1a5d4423df7dde93f1df8fd536ffb04a5afc0c7f21"
+        },
+        {
+          "role": "training_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/training/training-protocol.json",
+          "sha256": "e1b81d0bb9fac9fc2cf4755ff87dcaa4f850323cbed25f01eec696f8095b5eb8"
+        },
+        {
+          "role": "dataset_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/dataset/dataset-manifest.json",
+          "sha256": "b996c95f32f84649e43722d275ddb60677d0e50fda638047428e4e067673cde5"
+        },
+        {
+          "role": "dataset_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/dataset/protocol.json",
+          "sha256": "4a54e3d856d1bd10411004ef8a6af779206956a79569a348cdcf1f70fa15a2d6"
+        },
+        {
+          "role": "heldout_test_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/training/test-audit.json",
+          "sha256": "3b86185a7076c780e12e029107a4afadde1eb58295dbe833df56e4f874d6289a"
+        },
+        {
+          "role": "formal_comparison_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/comparison/protocol.json",
+          "sha256": "df667baa67c6ecbd2fff8341556874c9f1aebf892ad7a9dab19f03bd02ff850c"
+        },
+        {
+          "role": "formal_comparison",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/comparison/comparison.json",
+          "sha256": "70d99c032b41f42eb42385d332a5c64e1d27e6d67dcf828dc5603a7fbc7ca629"
+        },
+        {
+          "role": "engineering_pilot_comparison",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/pilot/comparison.json",
+          "sha256": "9e99256719947d837154ff9d12d045d849a67153ed46a4ae8c919c51d75d19ef"
+        },
+        {
+          "role": "parent_gpu_acceptance",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/evidence/facts-gpu-acceptance.json",
+          "sha256": "7696f8267407a4fa6a40fbcf25fc9e662b3106353d0be697be8a6cf38b811e24"
+        },
+        {
+          "role": "belief_gpu_training_acceptance",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/evidence/belief-training-acceptance.json",
+          "sha256": "443bf6b2c3a9a87fa167c2e6ad9571e7ac7e1b5cbcc4bdbf76e78f0d43e375ce"
+        },
+        {
+          "role": "gpu_test_report",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/evidence/gpu-tests.xml",
+          "sha256": "3ce5e9ca519a95d7a03a0535494263395a5ffdcc85c916f56170ff40e8c5e1d5"
+        },
+        {
+          "role": "scheduler_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/scheduler.txt",
+          "sha256": "8aff62801064c3c706eb84bd182046f0f3fe887b5d0ae6a0fa99aa11301955b0"
+        },
+        {
+          "role": "experiment_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/protocol.json",
+          "sha256": "77597c6fe7130f972490082f8075f64b7bd884f514895ff2433618c375635cce"
+        },
+        {
+          "role": "frozen_comparison_source",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/source/scripts/compare_facts_joint.py",
+          "sha256": "caf5b797687378b86a6690feb5f1cb134aa8786e73f5bb7a13130a1948b6f070"
+        },
+        {
+          "role": "training_upload_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/facts-belief-comparison-upload-20261003-v2.tar.gz",
+          "sha256": "5c1c4a638d64b7c31ae6a42ebc3072e3f8a597f4846a928a6f21bbb9d577b75e"
+        },
+        {
+          "role": "recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovery-audit.json",
+          "sha256": "475e03e1aca1b4408d831c468a01b58a106573ae5f681f4ebb857cbfded51a19"
+        },
+        {
+          "role": "recovery_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/facts-belief-results-2348998.tar.gz",
+          "sha256": "2d4364cc8518bebf2e378d38fa5a301434ec8932a1b2cee620473ea7eba43946"
+        }
+      ],
+      "verification": {
+        "checked_on": "2026-10-03",
+        "strict_facts_joint_and_parent_load_cpu": true,
+        "finite_weights": true,
+        "validation_selection_and_test_binding_verified": true,
+        "comparison_statistics_recomputed": true,
+        "recovery_audit_status": "passed",
+        "recovery_artifacts_checked": 4212,
+        "archive_sha256_matches_remote": true,
+        "gpu_experiment": {
+          "status": "passed",
+          "job_id": 2348998,
+          "scheduler_state": "COMPLETED",
+          "exit_code": "0:0",
+          "scheduler_elapsed_seconds": 5393,
+          "source_commit": "b7813532640e5238e64b49a5c47e9dc9219feda6",
+          "device": "Tesla V100-SXM2-32GB",
+          "torch_version": "2.5.1+cu121",
+          "cuda_version": "12.1",
+          "gpu_tests": {
+            "passed": 34,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "parent_acceptance_status": "passed",
+          "belief_training_acceptance_status": "passed",
+          "belief_smoke_resume_matches_uninterrupted_exactly": true,
+          "acceptance_scope": "Isolated smoke data and weights; excluded from the 2000-game dataset and final 10-epoch training."
+        },
+        "recovery_audit_limitations": [
+          "Checks recovered artifacts and recomputes match statistics; does not rerun GPU kernels or matches.",
+          "Checks held-out neural metrics and their denominator; does not recompute neural NLL or accuracy.",
+          "Gameplay compares frozen policy against the same policy plus neural beliefs and search."
+        ]
+      },
+      "notes": [
+        "Frozen-parent self-play collection contains 2000 complete games and 16000 observer positions; these are not additional parent-policy training games.",
+        "Supervised identities are separate truth labels. Policy inputs remain facts-only (317/0); the separate learned belief module supplies sampled worlds to search, without legacy rule probabilities.",
+        "The selected artifact is a belief module. Gameplay evaluation attaches it and fixed search to the unchanged parent policy.",
+        "Formal 200-game paired comparison did not establish improvement; the default remains facts-counted-g10017.",
+        "The e10 id records completed training epochs; validation also selected epoch 10 in this run."
+      ]
     }
   ],
   "evaluations": [
@@ -1031,11 +1281,68 @@
       "games": 400,
       "confidence_method": "paired_layout_bootstrap_5000",
       "used_for_pi0_selection": true
+    },
+    {
+      "id": "facts-joint-g2000-e10-search_vs_frozen-pi0",
+      "candidate": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": "facts-joint-g2000-e10",
+        "search_config": {
+          "particles": 1,
+          "depth": 1,
+          "proposal_batches": 8,
+          "beta": 0.5,
+          "max_constraint_nodes": 100000
+        }
+      },
+      "baseline": {
+        "policy_model_id": "facts-counted-g10017",
+        "belief_model_id": null,
+        "search": false
+      },
+      "outcome_perspective": "candidate",
+      "games": 200,
+      "complete_layout_pairs": 100,
+      "wins": 106,
+      "losses": 92,
+      "draws": 2,
+      "win_rate": 0.53,
+      "win_rate_ci95": [
+        0.47,
+        0.59
+      ],
+      "score": 0.535,
+      "score_ci95": [
+        0.4775,
+        0.595
+      ],
+      "confidence_method": "percentile bootstrap over complete layout pairs",
+      "bootstrap_repeats": 10000,
+      "layout_seed": 94000000,
+      "protocol_sha256": "c114b741069b3d584f110945490c44d3d37b9f54053d2263329cb2bbb08ae5ef",
+      "used_for_pi0_selection": false,
+      "used_for_belief_selection": false,
+      "dataset_layouts_disjoint": true,
+      "search_totals": {
+        "decisions": 12618,
+        "successful_decisions": 12618,
+        "proposals": 12618,
+        "accepted_proposals": 12618,
+        "rejected_proposals": 0,
+        "sample_budget_failures": 0,
+        "candidate_actions": 621224,
+        "legal_actions": 621224
+      },
+      "artifact_model_id": "facts-joint-g2000-e10",
+      "artifact_role": "formal_comparison",
+      "conclusion": "Inconclusive improvement: both 95% intervals include 0.5. Keep frozen pi0 as default."
     }
   ],
   "evaluation_limitations": [
-    "One policy-training seed; this layout cohort participated in selecting pi0.",
-    "Future confirmatory belief comparisons require a new layout cohort.",
+    "The original 1200-game evaluation cohort participated in selecting pi0 and is not held-out evidence for that selection.",
+    "The facts joint experiment uses one training seed and one 100-layout-pair cohort; both score and win-rate intervals include 0.5.",
+    "The formal candidate combines the same frozen policy, trained belief module and search; this comparison does not isolate neural-belief effects from search effects.",
+    "Held-out test NLL and accuracy are teacher-forced conditional identity metrics, not marginal identity accuracy or gameplay strength.",
     "Intervals are not adjusted for multiple comparisons."
   ]
 }
