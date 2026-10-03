@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_on": "2026-10-03",
+  "updated_on": "2026-10-04",
   "default_model_id": "facts-counted-g10017",
   "artifact_roots": {
     "beijing-v100-preflight": "Recovered Beijing V100 experiments (workspace work/beijing-v100-preflight)",
@@ -14,7 +14,7 @@
     "belief_collection_games": "Complete frozen-parent self-play games; separate from parent policy training. Observer rows are not additional games."
   },
   "config_hash_contract": "SHA-256 of embedded train_cfg serialized as JSON with sort_keys=True, separators=(comma,colon), ensure_ascii=True; original path strings retained only inside the hashed checkpoint.",
-  "evidence_scope": "Recovered files were hashed and checkpoints strictly loaded on CPU on 2026-10-03. The frozen facts-counted-g10017 policy retains its earlier V100 acceptance at source 6c6633220b67faffa0f01a5fa5c4f7a556a97f0b. Facts joint training and the 200-game paired system comparison completed in V100 job 2348998 at source b7813532640e5238e64b49a5c47e9dc9219feda6 with q12.v2 constraints; both GPU acceptance gates and 34 GPU tests passed. The final archive and 4212 recovered artifacts passed lineage, SHA and match-statistics audit. Other historical GPU evidence is referenced, not rerun. The new comparison does not establish a strength improvement or isolate the contribution of BeliefNet from search. Current repository cleanup is not relabeled as historical training source.",
+  "evidence_scope": "Recovered files were hashed and checkpoints strictly loaded on CPU on 2026-10-03. The frozen facts-counted-g10017 policy retains its earlier V100 acceptance at source 6c6633220b67faffa0f01a5fa5c4f7a556a97f0b. Facts joint training and the 200-game paired system comparison completed in V100 job 2348998 at source b7813532640e5238e64b49a5c47e9dc9219feda6 with q12.v2 constraints; both GPU acceptance gates and 34 GPU tests passed. The final archive and 4212 recovered artifacts passed lineage, SHA and match-statistics audit. Other historical GPU evidence is referenced, not rerun. The new comparison does not establish a strength improvement or isolate the contribution of BeliefNet from search. Current repository cleanup is not relabeled as historical training source. On 2026-10-04 four matched joint/marginal belief models from two seeds were recovered after V100 preparation job 2349370 (COMPLETED, exit 0:0; 2630 seconds) at frozen source c2580f272f8edb59db3c7b7ac841608c20fe383f. The preparation-only audit verified 4864 artifacts, 86 GPU tests with zero skips, both exact GPU training-resume acceptances, four selected/resume/test lineages, and the complete post-build source digest including nine generated CMake files. The planned 1200 formal match games remain in progress at registration; no new formal win rate is registered, and facts-counted-g10017 remains the default.",
   "models": [
     {
       "id": "facts-original-r512",
@@ -1236,6 +1236,1292 @@
         "The selected artifact is a belief module. Gameplay evaluation attaches it and fixed search to the unchanged parent policy.",
         "Formal 200-game paired comparison did not establish improvement; the default remains facts-counted-g10017.",
         "The e10 id records completed training epochs; validation also selected epoch 10 in this run."
+      ]
+    },
+    {
+      "id": "facts-joint-g2000-e10-s20261004",
+      "kind": "belief",
+      "belief_kind": "joint",
+      "status": "validation_selected",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "parent_model_id": "facts-counted-g10017",
+      "architecture_id": "junqi.belief317.facts-autoregressive.v1",
+      "input_spec": {
+        "format_version": 1,
+        "identity_schema": "junqi.hidden-identity-facts.v1",
+        "knowledge_schema": "junqi.observer-facts.v1",
+        "identity_encoding": "known_only",
+        "observation_semantics_version": 5,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "spatial_channels": 317,
+        "global_dims": 0,
+        "board_tokens": 129,
+        "hidden_tokens": 75,
+        "types": 12,
+        "sequence": "relative-owner-then-initial-slot",
+        "mode": "DARK",
+        "includes_dead_pieces": true,
+        "neural_history_window": 64,
+        "full_history_constraints": true,
+        "history_features": "observer-relative-public-events.v1",
+        "constraint_semantics": "junqi.identity-domain-inventory-combat-q12.v2"
+      },
+      "config": {
+        "n_encoder_layer": 2,
+        "n_head": 4,
+        "embed_dim": 64,
+        "ff_factor": 2,
+        "dropout": 0.0,
+        "pos_emb_std": 0.1,
+        "cnn_channels": 32,
+        "cnn_layers": 2,
+        "use_seat_embedding": true,
+        "n_decoder_layer": 2,
+        "history_window": 64
+      },
+      "identity_encoding": "known_only",
+      "parent_policy_sha256": "ef60cd5f21086e77a61a4744b57b267d51590fae3df1d659fc87b09458661aa1",
+      "parameter_count": 327436,
+      "matched_parameter_counts": {
+        "joint": 327436,
+        "marginal": 326604,
+        "joint_minus_marginal": 832,
+        "difference": "Only the 13 by 64 identity-prefix embedding is absent in the marginal model."
+      },
+      "training": {
+        "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+        "job_id": 2349370,
+        "completed_collection_games": 2000,
+        "dataset_rows": 16000,
+        "positions_per_game": 8,
+        "split_games": {
+          "test": 207,
+          "train": 1595,
+          "validation": 198
+        },
+        "split_rows": {
+          "test": 1656,
+          "train": 12760,
+          "validation": 1584
+        },
+        "epochs_completed": 10,
+        "selected_epoch": 10,
+        "optimizer_updates": 3990,
+        "seed": 20261004,
+        "batch_size": 32,
+        "learning_rate": 0.0001,
+        "dataset_manifest_sha256": "b996c95f32f84649e43722d275ddb60677d0e50fda638047428e4e067673cde5",
+        "dataset_protocol_sha256": "1725c39c30b421a7668e6637f4b645291449647119de738eeeed3de852d50ad0",
+        "selection": "minimum validation conditional NLL; earliest epoch wins ties",
+        "test_fold_used_for_training_or_selection": false,
+        "training_seconds": 398.2147097568959,
+        "initial_validation": {
+          "conditional_nll_per_unknown_piece": 1.4418919925317033,
+          "rows": 1584,
+          "teacher_forced_accuracy": 0.3563304171124918,
+          "unknown_targets": 111217
+        },
+        "selected_validation": {
+          "conditional_nll_per_unknown_piece": 1.2796346353897392,
+          "rows": 1584,
+          "teacher_forced_accuracy": 0.4412365016139619,
+          "unknown_targets": 111217
+        },
+        "heldout_test": {
+          "conditional_nll_per_unknown_piece": 1.2951288891429449,
+          "rows": 1656,
+          "teacher_forced_accuracy": 0.4351377910702841,
+          "unknown_targets": 117025
+        },
+        "metric_scope": "Teacher-forced conditional predictions; not gameplay strength or marginal accuracy"
+      },
+      "artifacts": [
+        {
+          "role": "belief_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/joint-s20261004/joint-belief.pt",
+          "sha256": "1c3774da7fa4dba7d47cb45ef9aecf443394d6c035f16a020028844ee375b049"
+        },
+        {
+          "role": "resume_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/joint-s20261004/last.pt",
+          "sha256": "2c3654e691f8b56fef16b0e1635ef4fb787b9c1855cb9f901da97285811efa22"
+        },
+        {
+          "role": "training_report",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/joint-s20261004/report.json",
+          "sha256": "78764689daef34d3cc8402c11ac19ef6c38ec90e0a2e111ddcbf872aba646fb6"
+        },
+        {
+          "role": "training_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/joint-s20261004/training-protocol.json",
+          "sha256": "e1b81d0bb9fac9fc2cf4755ff87dcaa4f850323cbed25f01eec696f8095b5eb8"
+        },
+        {
+          "role": "heldout_test_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/joint-s20261004/test-audit.json",
+          "sha256": "b7b8f4e9c7aac0df5328e80f74bb7ea78532d17977bb113ac8d3bfdd382e2728"
+        },
+        {
+          "role": "frozen_model_source",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source/junqi_rl/networks/facts_joint_belief_net.py",
+          "sha256": "a153ee4d1c74630316bb2db3e1eab2da5a006cf23b7063b9db9c8e15169f5b64"
+        },
+        {
+          "role": "dataset_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/dataset/dataset-manifest.json",
+          "sha256": "b996c95f32f84649e43722d275ddb60677d0e50fda638047428e4e067673cde5"
+        },
+        {
+          "role": "dataset_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/dataset/protocol.json",
+          "sha256": "4a54e3d856d1bd10411004ef8a6af779206956a79569a348cdcf1f70fa15a2d6"
+        },
+        {
+          "role": "experiment_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/protocol.json",
+          "sha256": "013ec34cb246dafb8c0205241743dc6ed33a2faf253e4fe6f824ddcc0da5e1ae"
+        },
+        {
+          "role": "training_source_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source-sha256.json",
+          "sha256": "9e63c2cfca94449f89a6f5cd3c306e2b8a1c7a06b833d221ed893de6efafb23c"
+        },
+        {
+          "role": "frozen_training_source",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source/scripts/train_facts_joint_belief.py",
+          "sha256": "93c614e673e80f8a17394846c2b7817fa2b091d7859ca4fda19123474a8ffb0f"
+        },
+        {
+          "role": "training_upload_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/facts-belief-ablation-upload-20261004-v1.tar.gz",
+          "sha256": "58f7ea1e9de928655f57f1e1ff0edc0c8ab563d56598b9672029468f70080692"
+        },
+        {
+          "role": "preparation_recovery_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/facts-belief-ablation-preparation-2349370.tar.gz",
+          "sha256": "fc40ba695be8c321d07c8f25986060bc386166392ee5521fc26ab9f82f85c26a"
+        },
+        {
+          "role": "preparation_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/preparation-recovery.json",
+          "sha256": "6fdbeef3f6d819827341797a2f78e6b5f3df8b182b9684d74eccfced4b0bb71a"
+        },
+        {
+          "role": "joint_gpu_training_acceptance",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/acceptance-joint.json",
+          "sha256": "d414559e6bd5c466fd2c6f8de6afc465d90b64ac9e6d1845924deb6066e60b41"
+        },
+        {
+          "role": "marginal_gpu_training_acceptance",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/acceptance-marginal.json",
+          "sha256": "7ffc89b2440cd6e0099e8f8383783e123ca8d9397a9b6703eb6098f2ce487a13"
+        },
+        {
+          "role": "gpu_test_report",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/gpu-tests.xml",
+          "sha256": "fbac350f93ca839ca58beaf8c1fb5226833b86238c72295e31adf265598c1f72"
+        },
+        {
+          "role": "gpu_hardware_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/prepare-hardware.txt",
+          "sha256": "27292c45a20318897e37470690a9db0acf8d03a24fcc9983aebe6cd3420600e6"
+        },
+        {
+          "role": "scheduler_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/scheduler-initial-attempts.txt",
+          "sha256": "7fcbfb9f0dad9b5e86490d74da13156e6ef4e7b37cc674cf5753a9666cb5e1ce"
+        },
+        {
+          "role": "validation_development_benchmark",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/validation-benchmark.json",
+          "sha256": "936b838ba6f5c499d7ccb25367f4ca62fe880625fecc0b23a627ad4119f1a2f3"
+        },
+        {
+          "role": "development_analysis",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/development-analysis.json",
+          "sha256": "5b8495c575ffd87c77625d5aa935d6f4d3970b88ff2a23062af7c850ba684909"
+        },
+        {
+          "role": "constraint_parity_and_performance_benchmark",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/constraint-benchmark.json",
+          "sha256": "1b33f73e69fd9fa9041f7f8bcd68c1e2c15f9b85096c6eb30a788a79b6c51c10"
+        },
+        {
+          "role": "preparation_recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/preparation-audit-complete.json",
+          "sha256": "b66f8ff3f83ce397002cfc7ea0788d81de5907851bf4e9d16e1eadcb8a2bbec2"
+        },
+        {
+          "role": "postbuild_source_recovery_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/postbuild-source-evidence-2349370.tar.gz",
+          "sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        },
+        {
+          "role": "postbuild_source_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/postbuild-source-recovery.json",
+          "sha256": "0aac6f563a9cbc43b5c9ec58ead7c2fd2d45f43c1b89cae5ae51a418f5b5393d"
+        },
+        {
+          "role": "postbuild_source_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-postbuild/facts-belief-ablation-20261004-v1/evidence/postbuild-source-audit.json",
+          "sha256": "b2ab36dabe135b3ae44d2fc9c1824364e925783544a271ffe79dd3bd415d8bb6"
+        }
+      ],
+      "verification": {
+        "checked_on": "2026-10-04",
+        "strict_facts_belief_and_parent_load_cpu": true,
+        "finite_weights": true,
+        "validation_selection_and_test_binding_verified": true,
+        "selected_weights_equal_resume_best_weights": true,
+        "optimizer_and_rng_state_verified": true,
+        "formal_comparison_statistics_recomputed": false,
+        "formal_comparison_status_at_registration": "running",
+        "formal_experiment_planned_complete_games": 1200,
+        "archive_sha256_matches_remote": true,
+        "gpu_experiment": {
+          "status": "passed",
+          "scope": "preparation only; formal matches remain in progress",
+          "job_id": 2349370,
+          "scheduler_state": "COMPLETED",
+          "exit_code": "0:0",
+          "scheduler_elapsed_seconds": 2630,
+          "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+          "device": "Tesla V100-SXM2-32GB",
+          "torch_version": "2.5.1+cu121",
+          "cuda_version": "12.1",
+          "gpu_tests": {
+            "passed": 86,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "joint_training_acceptance_status": "passed",
+          "marginal_training_acceptance_status": "passed",
+          "belief_smoke_resume_matches_uninterrupted_exactly": true,
+          "acceptance_scope": "Separate 40 short smoke games and temporary weights; excluded from the shared 2000-game dataset and 10-epoch model training."
+        },
+        "recovery_audit_limitations": [
+          "Preparation artifacts only; no formal comparison win rate is certified.",
+          "GPU evidence and recovered resume tensors are checked locally without rerunning CUDA kernels.",
+          "Held-out neural metrics are bound to selected weights and denominators; NLL and accuracy are not recomputed.",
+          "Conditional joint NLL and public-only marginal NLL are not directly comparable."
+        ],
+        "reproduces_previous_selected_joint_weights": {
+          "old_checkpoint_sha256": "0c9d9718681fb61ebce73bb7dd3a949417706316c88b3415314f2eb6e92595bd",
+          "new_checkpoint_sha256": "1c3774da7fa4dba7d47cb45ef9aecf443394d6c035f16a020028844ee375b049",
+          "state_dict_tensors": 107,
+          "equal_keys": true,
+          "all_weights_and_buffers_bitwise_equal": true,
+          "max_abs_tensor_difference": 0.0,
+          "checkpoint_file_bytes_equal": false,
+          "note": "Checkpoint file includes run metadata/timings; file hashes differ while all 107 net tensors (parameters and buffers) are identical.",
+          "reference_model_id": "facts-joint-g2000-e10"
+        },
+        "recovery_audit_status": "passed",
+        "recovery_audit_scope": "preparation_only",
+        "recovery_artifacts_checked": 4864,
+        "formal_match_games_audited": 0,
+        "postbuild_source_audit": {
+          "status": "passed",
+          "frozen_source_files_verified": 747,
+          "generated_build_files_verified": 9,
+          "frozen_source_files_modified": false,
+          "source_tree_sha256": "588fbc84a6bfbc96cbab4ce6e68f90d3f6f1b21f5fb599154af1b16d79829833",
+          "both_gpu_acceptance_source_digests_reconstructed_locally": true,
+          "supplemental_archive_sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        }
+      },
+      "notes": [
+        "The four models reuse the same 2000 complete parent-policy self-play games and 16000 observer positions; these are not additional policy training games or 8000 distinct collected games.",
+        "Inputs are facts-only 317/0 with known_only identities. Hard public constraints retain q12.v2 semantics; no handcrafted identity probabilities are restored.",
+        "The unchanged frozen parent policy receives sampled-world search results; learned identity probabilities are not inserted into its observation channels.",
+        "Matched marginal and joint networks differ only by the identity-prefix embedding and conditioning; both use the same public observations, history and exact constraints.",
+        "The 1200-game formal comparison is running at registration. No new formal win rate is available; the default remains facts-counted-g10017.",
+        "The e10 ID denotes completed epochs; validation selected epoch 10 in this run.",
+        "All 107 selected state-dict tensors exactly reproduce the earlier joint model with the same training seed; serialized checkpoint hashes differ because run metadata and timings differ."
+      ]
+    },
+    {
+      "id": "facts-marginal-g2000-e10-s20261004",
+      "kind": "belief",
+      "belief_kind": "marginal",
+      "status": "validation_selected",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "parent_model_id": "facts-counted-g10017",
+      "architecture_id": "junqi.belief317.facts-marginal.v1",
+      "input_spec": {
+        "format_version": 1,
+        "identity_schema": "junqi.hidden-identity-facts.v1",
+        "knowledge_schema": "junqi.observer-facts.v1",
+        "identity_encoding": "known_only",
+        "observation_semantics_version": 5,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "spatial_channels": 317,
+        "global_dims": 0,
+        "board_tokens": 129,
+        "hidden_tokens": 75,
+        "types": 12,
+        "sequence": "relative-owner-then-initial-slot",
+        "mode": "DARK",
+        "includes_dead_pieces": true,
+        "neural_history_window": 64,
+        "full_history_constraints": true,
+        "history_features": "observer-relative-public-events.v1",
+        "constraint_semantics": "junqi.identity-domain-inventory-combat-q12.v2",
+        "neural_identity_conditioning": "observer-public-facts-only; no target or sampled identity prefixes",
+        "training_support": "public-type-domains-only; no teacher-prefix masks",
+        "sampling_distribution": "static-marginal-logits-sequential-feasible-prefix-renormalization.v1"
+      },
+      "config": {
+        "n_encoder_layer": 2,
+        "n_head": 4,
+        "embed_dim": 64,
+        "ff_factor": 2,
+        "dropout": 0.0,
+        "pos_emb_std": 0.1,
+        "cnn_channels": 32,
+        "cnn_layers": 2,
+        "use_seat_embedding": true,
+        "n_decoder_layer": 2,
+        "history_window": 64
+      },
+      "identity_encoding": "known_only",
+      "parent_policy_sha256": "ef60cd5f21086e77a61a4744b57b267d51590fae3df1d659fc87b09458661aa1",
+      "parameter_count": 326604,
+      "matched_parameter_counts": {
+        "joint": 327436,
+        "marginal": 326604,
+        "joint_minus_marginal": 832,
+        "difference": "Only the 13 by 64 identity-prefix embedding is absent in the marginal model."
+      },
+      "training": {
+        "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+        "job_id": 2349370,
+        "completed_collection_games": 2000,
+        "dataset_rows": 16000,
+        "positions_per_game": 8,
+        "split_games": {
+          "test": 207,
+          "train": 1595,
+          "validation": 198
+        },
+        "split_rows": {
+          "test": 1656,
+          "train": 12760,
+          "validation": 1584
+        },
+        "epochs_completed": 10,
+        "selected_epoch": 10,
+        "optimizer_updates": 3990,
+        "seed": 20261004,
+        "batch_size": 32,
+        "learning_rate": 0.0001,
+        "dataset_manifest_sha256": "b996c95f32f84649e43722d275ddb60677d0e50fda638047428e4e067673cde5",
+        "dataset_protocol_sha256": "1725c39c30b421a7668e6637f4b645291449647119de738eeeed3de852d50ad0",
+        "selection": "minimum validation marginal NLL; earliest epoch wins ties",
+        "test_fold_used_for_training_or_selection": false,
+        "training_seconds": 431.2136565335095,
+        "initial_validation": {
+          "marginal_accuracy": 0.12682413659782227,
+          "marginal_nll_per_unknown_piece": 2.385554721867638,
+          "rows": 1584,
+          "unknown_targets": 111217
+        },
+        "selected_validation": {
+          "marginal_accuracy": 0.31412463921882444,
+          "marginal_nll_per_unknown_piece": 1.904887861838371,
+          "rows": 1584,
+          "unknown_targets": 111217
+        },
+        "heldout_test": {
+          "marginal_accuracy": 0.31665028839991455,
+          "marginal_nll_per_unknown_piece": 1.9151432695003738,
+          "rows": 1656,
+          "unknown_targets": 117025
+        },
+        "metric_scope": "Public-only per-piece marginal predictions; not gameplay strength or joint assignment probability"
+      },
+      "artifacts": [
+        {
+          "role": "belief_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/marginal-s20261004/marginal-belief.pt",
+          "sha256": "7459f5dc5784819d3942ec29690631c1cd1489645becef0afd4537aff1a99325"
+        },
+        {
+          "role": "resume_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/marginal-s20261004/last.pt",
+          "sha256": "7bca9620deae3135096eef02c9a0e3b50461c4e134a675efa020c93c46cd4730"
+        },
+        {
+          "role": "training_report",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/marginal-s20261004/report.json",
+          "sha256": "2c9d9f75daed40ad21fe82661aa3e5d9dee7e0769b0f69d673d78c13220db4a6"
+        },
+        {
+          "role": "training_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/marginal-s20261004/training-protocol.json",
+          "sha256": "f1979815605a9bcbab2b051083e7d0dafdfd176948ac9a725bd6aa5017073a53"
+        },
+        {
+          "role": "heldout_test_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/marginal-s20261004/test-audit.json",
+          "sha256": "ddf1fd9ae6086fad9e675163bba3f0010a78518ad122b3ba3527eb5bf85ea97b"
+        },
+        {
+          "role": "frozen_model_source",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source/junqi_rl/networks/facts_marginal_belief_net.py",
+          "sha256": "2ccbc44a3907ee619d3650f8dd3fac2c3be82be2c2107a9659c94e4758ad7bde"
+        },
+        {
+          "role": "dataset_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/dataset/dataset-manifest.json",
+          "sha256": "b996c95f32f84649e43722d275ddb60677d0e50fda638047428e4e067673cde5"
+        },
+        {
+          "role": "dataset_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/dataset/protocol.json",
+          "sha256": "4a54e3d856d1bd10411004ef8a6af779206956a79569a348cdcf1f70fa15a2d6"
+        },
+        {
+          "role": "experiment_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/protocol.json",
+          "sha256": "013ec34cb246dafb8c0205241743dc6ed33a2faf253e4fe6f824ddcc0da5e1ae"
+        },
+        {
+          "role": "training_source_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source-sha256.json",
+          "sha256": "9e63c2cfca94449f89a6f5cd3c306e2b8a1c7a06b833d221ed893de6efafb23c"
+        },
+        {
+          "role": "frozen_training_source",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source/scripts/train_facts_joint_belief.py",
+          "sha256": "93c614e673e80f8a17394846c2b7817fa2b091d7859ca4fda19123474a8ffb0f"
+        },
+        {
+          "role": "training_upload_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/facts-belief-ablation-upload-20261004-v1.tar.gz",
+          "sha256": "58f7ea1e9de928655f57f1e1ff0edc0c8ab563d56598b9672029468f70080692"
+        },
+        {
+          "role": "preparation_recovery_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/facts-belief-ablation-preparation-2349370.tar.gz",
+          "sha256": "fc40ba695be8c321d07c8f25986060bc386166392ee5521fc26ab9f82f85c26a"
+        },
+        {
+          "role": "preparation_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/preparation-recovery.json",
+          "sha256": "6fdbeef3f6d819827341797a2f78e6b5f3df8b182b9684d74eccfced4b0bb71a"
+        },
+        {
+          "role": "joint_gpu_training_acceptance",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/acceptance-joint.json",
+          "sha256": "d414559e6bd5c466fd2c6f8de6afc465d90b64ac9e6d1845924deb6066e60b41"
+        },
+        {
+          "role": "marginal_gpu_training_acceptance",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/acceptance-marginal.json",
+          "sha256": "7ffc89b2440cd6e0099e8f8383783e123ca8d9397a9b6703eb6098f2ce487a13"
+        },
+        {
+          "role": "gpu_test_report",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/gpu-tests.xml",
+          "sha256": "fbac350f93ca839ca58beaf8c1fb5226833b86238c72295e31adf265598c1f72"
+        },
+        {
+          "role": "gpu_hardware_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/prepare-hardware.txt",
+          "sha256": "27292c45a20318897e37470690a9db0acf8d03a24fcc9983aebe6cd3420600e6"
+        },
+        {
+          "role": "scheduler_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/scheduler-initial-attempts.txt",
+          "sha256": "7fcbfb9f0dad9b5e86490d74da13156e6ef4e7b37cc674cf5753a9666cb5e1ce"
+        },
+        {
+          "role": "validation_development_benchmark",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/validation-benchmark.json",
+          "sha256": "936b838ba6f5c499d7ccb25367f4ca62fe880625fecc0b23a627ad4119f1a2f3"
+        },
+        {
+          "role": "development_analysis",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/development-analysis.json",
+          "sha256": "5b8495c575ffd87c77625d5aa935d6f4d3970b88ff2a23062af7c850ba684909"
+        },
+        {
+          "role": "constraint_parity_and_performance_benchmark",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/constraint-benchmark.json",
+          "sha256": "1b33f73e69fd9fa9041f7f8bcd68c1e2c15f9b85096c6eb30a788a79b6c51c10"
+        },
+        {
+          "role": "preparation_recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/preparation-audit-complete.json",
+          "sha256": "b66f8ff3f83ce397002cfc7ea0788d81de5907851bf4e9d16e1eadcb8a2bbec2"
+        },
+        {
+          "role": "postbuild_source_recovery_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/postbuild-source-evidence-2349370.tar.gz",
+          "sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        },
+        {
+          "role": "postbuild_source_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/postbuild-source-recovery.json",
+          "sha256": "0aac6f563a9cbc43b5c9ec58ead7c2fd2d45f43c1b89cae5ae51a418f5b5393d"
+        },
+        {
+          "role": "postbuild_source_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-postbuild/facts-belief-ablation-20261004-v1/evidence/postbuild-source-audit.json",
+          "sha256": "b2ab36dabe135b3ae44d2fc9c1824364e925783544a271ffe79dd3bd415d8bb6"
+        }
+      ],
+      "verification": {
+        "checked_on": "2026-10-04",
+        "strict_facts_belief_and_parent_load_cpu": true,
+        "finite_weights": true,
+        "validation_selection_and_test_binding_verified": true,
+        "selected_weights_equal_resume_best_weights": true,
+        "optimizer_and_rng_state_verified": true,
+        "formal_comparison_statistics_recomputed": false,
+        "formal_comparison_status_at_registration": "running",
+        "formal_experiment_planned_complete_games": 1200,
+        "archive_sha256_matches_remote": true,
+        "gpu_experiment": {
+          "status": "passed",
+          "scope": "preparation only; formal matches remain in progress",
+          "job_id": 2349370,
+          "scheduler_state": "COMPLETED",
+          "exit_code": "0:0",
+          "scheduler_elapsed_seconds": 2630,
+          "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+          "device": "Tesla V100-SXM2-32GB",
+          "torch_version": "2.5.1+cu121",
+          "cuda_version": "12.1",
+          "gpu_tests": {
+            "passed": 86,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "joint_training_acceptance_status": "passed",
+          "marginal_training_acceptance_status": "passed",
+          "belief_smoke_resume_matches_uninterrupted_exactly": true,
+          "acceptance_scope": "Separate 40 short smoke games and temporary weights; excluded from the shared 2000-game dataset and 10-epoch model training."
+        },
+        "recovery_audit_limitations": [
+          "Preparation artifacts only; no formal comparison win rate is certified.",
+          "GPU evidence and recovered resume tensors are checked locally without rerunning CUDA kernels.",
+          "Held-out neural metrics are bound to selected weights and denominators; NLL and accuracy are not recomputed.",
+          "Conditional joint NLL and public-only marginal NLL are not directly comparable."
+        ],
+        "recovery_audit_status": "passed",
+        "recovery_audit_scope": "preparation_only",
+        "recovery_artifacts_checked": 4864,
+        "formal_match_games_audited": 0,
+        "postbuild_source_audit": {
+          "status": "passed",
+          "frozen_source_files_verified": 747,
+          "generated_build_files_verified": 9,
+          "frozen_source_files_modified": false,
+          "source_tree_sha256": "588fbc84a6bfbc96cbab4ce6e68f90d3f6f1b21f5fb599154af1b16d79829833",
+          "both_gpu_acceptance_source_digests_reconstructed_locally": true,
+          "supplemental_archive_sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        }
+      },
+      "notes": [
+        "The four models reuse the same 2000 complete parent-policy self-play games and 16000 observer positions; these are not additional policy training games or 8000 distinct collected games.",
+        "Inputs are facts-only 317/0 with known_only identities. Hard public constraints retain q12.v2 semantics; no handcrafted identity probabilities are restored.",
+        "The unchanged frozen parent policy receives sampled-world search results; learned identity probabilities are not inserted into its observation channels.",
+        "Matched marginal and joint networks differ only by the identity-prefix embedding and conditioning; both use the same public observations, history and exact constraints.",
+        "The 1200-game formal comparison is running at registration. No new formal win rate is available; the default remains facts-counted-g10017.",
+        "The e10 ID denotes completed epochs; validation selected epoch 10 in this run."
+      ]
+    },
+    {
+      "id": "facts-joint-g2000-e10-s20261005",
+      "kind": "belief",
+      "belief_kind": "joint",
+      "status": "validation_selected",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "parent_model_id": "facts-counted-g10017",
+      "architecture_id": "junqi.belief317.facts-autoregressive.v1",
+      "input_spec": {
+        "format_version": 1,
+        "identity_schema": "junqi.hidden-identity-facts.v1",
+        "knowledge_schema": "junqi.observer-facts.v1",
+        "identity_encoding": "known_only",
+        "observation_semantics_version": 5,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "spatial_channels": 317,
+        "global_dims": 0,
+        "board_tokens": 129,
+        "hidden_tokens": 75,
+        "types": 12,
+        "sequence": "relative-owner-then-initial-slot",
+        "mode": "DARK",
+        "includes_dead_pieces": true,
+        "neural_history_window": 64,
+        "full_history_constraints": true,
+        "history_features": "observer-relative-public-events.v1",
+        "constraint_semantics": "junqi.identity-domain-inventory-combat-q12.v2"
+      },
+      "config": {
+        "n_encoder_layer": 2,
+        "n_head": 4,
+        "embed_dim": 64,
+        "ff_factor": 2,
+        "dropout": 0.0,
+        "pos_emb_std": 0.1,
+        "cnn_channels": 32,
+        "cnn_layers": 2,
+        "use_seat_embedding": true,
+        "n_decoder_layer": 2,
+        "history_window": 64
+      },
+      "identity_encoding": "known_only",
+      "parent_policy_sha256": "ef60cd5f21086e77a61a4744b57b267d51590fae3df1d659fc87b09458661aa1",
+      "parameter_count": 327436,
+      "matched_parameter_counts": {
+        "joint": 327436,
+        "marginal": 326604,
+        "joint_minus_marginal": 832,
+        "difference": "Only the 13 by 64 identity-prefix embedding is absent in the marginal model."
+      },
+      "training": {
+        "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+        "job_id": 2349370,
+        "completed_collection_games": 2000,
+        "dataset_rows": 16000,
+        "positions_per_game": 8,
+        "split_games": {
+          "test": 207,
+          "train": 1595,
+          "validation": 198
+        },
+        "split_rows": {
+          "test": 1656,
+          "train": 12760,
+          "validation": 1584
+        },
+        "epochs_completed": 10,
+        "selected_epoch": 10,
+        "optimizer_updates": 3990,
+        "seed": 20261005,
+        "batch_size": 32,
+        "learning_rate": 0.0001,
+        "dataset_manifest_sha256": "b996c95f32f84649e43722d275ddb60677d0e50fda638047428e4e067673cde5",
+        "dataset_protocol_sha256": "1725c39c30b421a7668e6637f4b645291449647119de738eeeed3de852d50ad0",
+        "selection": "minimum validation conditional NLL; earliest epoch wins ties",
+        "test_fold_used_for_training_or_selection": false,
+        "training_seconds": 428.79194780718535,
+        "initial_validation": {
+          "conditional_nll_per_unknown_piece": 1.4439729282232314,
+          "rows": 1584,
+          "teacher_forced_accuracy": 0.3319636386523643,
+          "unknown_targets": 111217
+        },
+        "selected_validation": {
+          "conditional_nll_per_unknown_piece": 1.2817698829694988,
+          "rows": 1584,
+          "teacher_forced_accuracy": 0.44138036451261947,
+          "unknown_targets": 111217
+        },
+        "heldout_test": {
+          "conditional_nll_per_unknown_piece": 1.2955050294742043,
+          "rows": 1656,
+          "teacher_forced_accuracy": 0.43635120700704977,
+          "unknown_targets": 117025
+        },
+        "metric_scope": "Teacher-forced conditional predictions; not gameplay strength or marginal accuracy"
+      },
+      "artifacts": [
+        {
+          "role": "belief_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/joint-s20261005/joint-belief.pt",
+          "sha256": "f707009921092cb7adeb1105dd3a9df519dad549b982cd42eda1e18247a5d822"
+        },
+        {
+          "role": "resume_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/joint-s20261005/last.pt",
+          "sha256": "39d3fca59c8d899acf17ad8c888f54caa078fcb5b4f8c747133098d9d3d86772"
+        },
+        {
+          "role": "training_report",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/joint-s20261005/report.json",
+          "sha256": "bad3afc3ab1bd7377a8b52f687833a4d63632447b7b5d6bc99d2b91b49c92904"
+        },
+        {
+          "role": "training_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/joint-s20261005/training-protocol.json",
+          "sha256": "2dee007bfb27b89cbf79728a85e5428d46778dae9af37fb16a3e14631362c044"
+        },
+        {
+          "role": "heldout_test_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/joint-s20261005/test-audit.json",
+          "sha256": "bb790a24b80c1432e117118e815c12615a674a5fb0b65813b51ccffe003fae61"
+        },
+        {
+          "role": "frozen_model_source",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source/junqi_rl/networks/facts_joint_belief_net.py",
+          "sha256": "a153ee4d1c74630316bb2db3e1eab2da5a006cf23b7063b9db9c8e15169f5b64"
+        },
+        {
+          "role": "dataset_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/dataset/dataset-manifest.json",
+          "sha256": "b996c95f32f84649e43722d275ddb60677d0e50fda638047428e4e067673cde5"
+        },
+        {
+          "role": "dataset_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/dataset/protocol.json",
+          "sha256": "4a54e3d856d1bd10411004ef8a6af779206956a79569a348cdcf1f70fa15a2d6"
+        },
+        {
+          "role": "experiment_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/protocol.json",
+          "sha256": "013ec34cb246dafb8c0205241743dc6ed33a2faf253e4fe6f824ddcc0da5e1ae"
+        },
+        {
+          "role": "training_source_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source-sha256.json",
+          "sha256": "9e63c2cfca94449f89a6f5cd3c306e2b8a1c7a06b833d221ed893de6efafb23c"
+        },
+        {
+          "role": "frozen_training_source",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source/scripts/train_facts_joint_belief.py",
+          "sha256": "93c614e673e80f8a17394846c2b7817fa2b091d7859ca4fda19123474a8ffb0f"
+        },
+        {
+          "role": "training_upload_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/facts-belief-ablation-upload-20261004-v1.tar.gz",
+          "sha256": "58f7ea1e9de928655f57f1e1ff0edc0c8ab563d56598b9672029468f70080692"
+        },
+        {
+          "role": "preparation_recovery_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/facts-belief-ablation-preparation-2349370.tar.gz",
+          "sha256": "fc40ba695be8c321d07c8f25986060bc386166392ee5521fc26ab9f82f85c26a"
+        },
+        {
+          "role": "preparation_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/preparation-recovery.json",
+          "sha256": "6fdbeef3f6d819827341797a2f78e6b5f3df8b182b9684d74eccfced4b0bb71a"
+        },
+        {
+          "role": "joint_gpu_training_acceptance",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/acceptance-joint.json",
+          "sha256": "d414559e6bd5c466fd2c6f8de6afc465d90b64ac9e6d1845924deb6066e60b41"
+        },
+        {
+          "role": "marginal_gpu_training_acceptance",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/acceptance-marginal.json",
+          "sha256": "7ffc89b2440cd6e0099e8f8383783e123ca8d9397a9b6703eb6098f2ce487a13"
+        },
+        {
+          "role": "gpu_test_report",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/gpu-tests.xml",
+          "sha256": "fbac350f93ca839ca58beaf8c1fb5226833b86238c72295e31adf265598c1f72"
+        },
+        {
+          "role": "gpu_hardware_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/prepare-hardware.txt",
+          "sha256": "27292c45a20318897e37470690a9db0acf8d03a24fcc9983aebe6cd3420600e6"
+        },
+        {
+          "role": "scheduler_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/scheduler-initial-attempts.txt",
+          "sha256": "7fcbfb9f0dad9b5e86490d74da13156e6ef4e7b37cc674cf5753a9666cb5e1ce"
+        },
+        {
+          "role": "validation_development_benchmark",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/validation-benchmark.json",
+          "sha256": "936b838ba6f5c499d7ccb25367f4ca62fe880625fecc0b23a627ad4119f1a2f3"
+        },
+        {
+          "role": "development_analysis",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/development-analysis.json",
+          "sha256": "5b8495c575ffd87c77625d5aa935d6f4d3970b88ff2a23062af7c850ba684909"
+        },
+        {
+          "role": "constraint_parity_and_performance_benchmark",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/constraint-benchmark.json",
+          "sha256": "1b33f73e69fd9fa9041f7f8bcd68c1e2c15f9b85096c6eb30a788a79b6c51c10"
+        },
+        {
+          "role": "preparation_recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/preparation-audit-complete.json",
+          "sha256": "b66f8ff3f83ce397002cfc7ea0788d81de5907851bf4e9d16e1eadcb8a2bbec2"
+        },
+        {
+          "role": "postbuild_source_recovery_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/postbuild-source-evidence-2349370.tar.gz",
+          "sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        },
+        {
+          "role": "postbuild_source_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/postbuild-source-recovery.json",
+          "sha256": "0aac6f563a9cbc43b5c9ec58ead7c2fd2d45f43c1b89cae5ae51a418f5b5393d"
+        },
+        {
+          "role": "postbuild_source_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-postbuild/facts-belief-ablation-20261004-v1/evidence/postbuild-source-audit.json",
+          "sha256": "b2ab36dabe135b3ae44d2fc9c1824364e925783544a271ffe79dd3bd415d8bb6"
+        }
+      ],
+      "verification": {
+        "checked_on": "2026-10-04",
+        "strict_facts_belief_and_parent_load_cpu": true,
+        "finite_weights": true,
+        "validation_selection_and_test_binding_verified": true,
+        "selected_weights_equal_resume_best_weights": true,
+        "optimizer_and_rng_state_verified": true,
+        "formal_comparison_statistics_recomputed": false,
+        "formal_comparison_status_at_registration": "running",
+        "formal_experiment_planned_complete_games": 1200,
+        "archive_sha256_matches_remote": true,
+        "gpu_experiment": {
+          "status": "passed",
+          "scope": "preparation only; formal matches remain in progress",
+          "job_id": 2349370,
+          "scheduler_state": "COMPLETED",
+          "exit_code": "0:0",
+          "scheduler_elapsed_seconds": 2630,
+          "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+          "device": "Tesla V100-SXM2-32GB",
+          "torch_version": "2.5.1+cu121",
+          "cuda_version": "12.1",
+          "gpu_tests": {
+            "passed": 86,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "joint_training_acceptance_status": "passed",
+          "marginal_training_acceptance_status": "passed",
+          "belief_smoke_resume_matches_uninterrupted_exactly": true,
+          "acceptance_scope": "Separate 40 short smoke games and temporary weights; excluded from the shared 2000-game dataset and 10-epoch model training."
+        },
+        "recovery_audit_limitations": [
+          "Preparation artifacts only; no formal comparison win rate is certified.",
+          "GPU evidence and recovered resume tensors are checked locally without rerunning CUDA kernels.",
+          "Held-out neural metrics are bound to selected weights and denominators; NLL and accuracy are not recomputed.",
+          "Conditional joint NLL and public-only marginal NLL are not directly comparable."
+        ],
+        "recovery_audit_status": "passed",
+        "recovery_audit_scope": "preparation_only",
+        "recovery_artifacts_checked": 4864,
+        "formal_match_games_audited": 0,
+        "postbuild_source_audit": {
+          "status": "passed",
+          "frozen_source_files_verified": 747,
+          "generated_build_files_verified": 9,
+          "frozen_source_files_modified": false,
+          "source_tree_sha256": "588fbc84a6bfbc96cbab4ce6e68f90d3f6f1b21f5fb599154af1b16d79829833",
+          "both_gpu_acceptance_source_digests_reconstructed_locally": true,
+          "supplemental_archive_sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        }
+      },
+      "notes": [
+        "The four models reuse the same 2000 complete parent-policy self-play games and 16000 observer positions; these are not additional policy training games or 8000 distinct collected games.",
+        "Inputs are facts-only 317/0 with known_only identities. Hard public constraints retain q12.v2 semantics; no handcrafted identity probabilities are restored.",
+        "The unchanged frozen parent policy receives sampled-world search results; learned identity probabilities are not inserted into its observation channels.",
+        "Matched marginal and joint networks differ only by the identity-prefix embedding and conditioning; both use the same public observations, history and exact constraints.",
+        "The 1200-game formal comparison is running at registration. No new formal win rate is available; the default remains facts-counted-g10017.",
+        "The e10 ID denotes completed epochs; validation selected epoch 10 in this run."
+      ]
+    },
+    {
+      "id": "facts-marginal-g2000-e10-s20261005",
+      "kind": "belief",
+      "belief_kind": "marginal",
+      "status": "validation_selected",
+      "experiment_id": "facts-belief-ablation-20261004-v1",
+      "parent_model_id": "facts-counted-g10017",
+      "architecture_id": "junqi.belief317.facts-marginal.v1",
+      "input_spec": {
+        "format_version": 1,
+        "identity_schema": "junqi.hidden-identity-facts.v1",
+        "knowledge_schema": "junqi.observer-facts.v1",
+        "identity_encoding": "known_only",
+        "observation_semantics_version": 5,
+        "input_layout_sha256": "6d9b4de51447d5c192ed6b2e7c814788d117a69678beffddaa9536501cd7a10b",
+        "spatial_channels": 317,
+        "global_dims": 0,
+        "board_tokens": 129,
+        "hidden_tokens": 75,
+        "types": 12,
+        "sequence": "relative-owner-then-initial-slot",
+        "mode": "DARK",
+        "includes_dead_pieces": true,
+        "neural_history_window": 64,
+        "full_history_constraints": true,
+        "history_features": "observer-relative-public-events.v1",
+        "constraint_semantics": "junqi.identity-domain-inventory-combat-q12.v2",
+        "neural_identity_conditioning": "observer-public-facts-only; no target or sampled identity prefixes",
+        "training_support": "public-type-domains-only; no teacher-prefix masks",
+        "sampling_distribution": "static-marginal-logits-sequential-feasible-prefix-renormalization.v1"
+      },
+      "config": {
+        "n_encoder_layer": 2,
+        "n_head": 4,
+        "embed_dim": 64,
+        "ff_factor": 2,
+        "dropout": 0.0,
+        "pos_emb_std": 0.1,
+        "cnn_channels": 32,
+        "cnn_layers": 2,
+        "use_seat_embedding": true,
+        "n_decoder_layer": 2,
+        "history_window": 64
+      },
+      "identity_encoding": "known_only",
+      "parent_policy_sha256": "ef60cd5f21086e77a61a4744b57b267d51590fae3df1d659fc87b09458661aa1",
+      "parameter_count": 326604,
+      "matched_parameter_counts": {
+        "joint": 327436,
+        "marginal": 326604,
+        "joint_minus_marginal": 832,
+        "difference": "Only the 13 by 64 identity-prefix embedding is absent in the marginal model."
+      },
+      "training": {
+        "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+        "job_id": 2349370,
+        "completed_collection_games": 2000,
+        "dataset_rows": 16000,
+        "positions_per_game": 8,
+        "split_games": {
+          "test": 207,
+          "train": 1595,
+          "validation": 198
+        },
+        "split_rows": {
+          "test": 1656,
+          "train": 12760,
+          "validation": 1584
+        },
+        "epochs_completed": 10,
+        "selected_epoch": 10,
+        "optimizer_updates": 3990,
+        "seed": 20261005,
+        "batch_size": 32,
+        "learning_rate": 0.0001,
+        "dataset_manifest_sha256": "b996c95f32f84649e43722d275ddb60677d0e50fda638047428e4e067673cde5",
+        "dataset_protocol_sha256": "1725c39c30b421a7668e6637f4b645291449647119de738eeeed3de852d50ad0",
+        "selection": "minimum validation marginal NLL; earliest epoch wins ties",
+        "test_fold_used_for_training_or_selection": false,
+        "training_seconds": 395.0196690270677,
+        "initial_validation": {
+          "marginal_accuracy": 0.1030058354388268,
+          "marginal_nll_per_unknown_piece": 2.412493271353806,
+          "rows": 1584,
+          "unknown_targets": 111217
+        },
+        "selected_validation": {
+          "marginal_accuracy": 0.3147000908134548,
+          "marginal_nll_per_unknown_piece": 1.9069846499762289,
+          "rows": 1584,
+          "unknown_targets": 111217
+        },
+        "heldout_test": {
+          "marginal_accuracy": 0.31589831232642596,
+          "marginal_nll_per_unknown_piece": 1.9170360024233604,
+          "rows": 1656,
+          "unknown_targets": 117025
+        },
+        "metric_scope": "Public-only per-piece marginal predictions; not gameplay strength or joint assignment probability"
+      },
+      "artifacts": [
+        {
+          "role": "belief_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/marginal-s20261005/marginal-belief.pt",
+          "sha256": "5e707bcead43b8d7587e5efb328616f03465b6831d9460f20315303c9d9d0231"
+        },
+        {
+          "role": "resume_checkpoint",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/marginal-s20261005/last.pt",
+          "sha256": "c09444ecd9b4be689fb31e65c1fa341705d090798cef358c450de3e34553848f"
+        },
+        {
+          "role": "training_report",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/marginal-s20261005/report.json",
+          "sha256": "3af54485c28ae8f8d8dbe28c54540f5fea64065b80559e8beeeb5838a0b447b8"
+        },
+        {
+          "role": "training_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/marginal-s20261005/training-protocol.json",
+          "sha256": "3db108f5fb31c83c36797e95459fb0948b7c3f3c2e95b1f89eb94f6fc3f23937"
+        },
+        {
+          "role": "heldout_test_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/training/marginal-s20261005/test-audit.json",
+          "sha256": "cec1d3ae557927bb9b7e3771be0386dad6ce235be1660f665c9979b360629ab5"
+        },
+        {
+          "role": "frozen_model_source",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source/junqi_rl/networks/facts_marginal_belief_net.py",
+          "sha256": "2ccbc44a3907ee619d3650f8dd3fac2c3be82be2c2107a9659c94e4758ad7bde"
+        },
+        {
+          "role": "dataset_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/dataset/dataset-manifest.json",
+          "sha256": "b996c95f32f84649e43722d275ddb60677d0e50fda638047428e4e067673cde5"
+        },
+        {
+          "role": "dataset_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-comparison-20261003-v2/recovered-final/facts-belief-comparison-20261003-v2/dataset/protocol.json",
+          "sha256": "4a54e3d856d1bd10411004ef8a6af779206956a79569a348cdcf1f70fa15a2d6"
+        },
+        {
+          "role": "experiment_protocol",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/protocol.json",
+          "sha256": "013ec34cb246dafb8c0205241743dc6ed33a2faf253e4fe6f824ddcc0da5e1ae"
+        },
+        {
+          "role": "training_source_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source-sha256.json",
+          "sha256": "9e63c2cfca94449f89a6f5cd3c306e2b8a1c7a06b833d221ed893de6efafb23c"
+        },
+        {
+          "role": "frozen_training_source",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/source/scripts/train_facts_joint_belief.py",
+          "sha256": "93c614e673e80f8a17394846c2b7817fa2b091d7859ca4fda19123474a8ffb0f"
+        },
+        {
+          "role": "training_upload_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/facts-belief-ablation-upload-20261004-v1.tar.gz",
+          "sha256": "58f7ea1e9de928655f57f1e1ff0edc0c8ab563d56598b9672029468f70080692"
+        },
+        {
+          "role": "preparation_recovery_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/facts-belief-ablation-preparation-2349370.tar.gz",
+          "sha256": "fc40ba695be8c321d07c8f25986060bc386166392ee5521fc26ab9f82f85c26a"
+        },
+        {
+          "role": "preparation_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/preparation-recovery.json",
+          "sha256": "6fdbeef3f6d819827341797a2f78e6b5f3df8b182b9684d74eccfced4b0bb71a"
+        },
+        {
+          "role": "joint_gpu_training_acceptance",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/acceptance-joint.json",
+          "sha256": "d414559e6bd5c466fd2c6f8de6afc465d90b64ac9e6d1845924deb6066e60b41"
+        },
+        {
+          "role": "marginal_gpu_training_acceptance",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/acceptance-marginal.json",
+          "sha256": "7ffc89b2440cd6e0099e8f8383783e123ca8d9397a9b6703eb6098f2ce487a13"
+        },
+        {
+          "role": "gpu_test_report",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/gpu-tests.xml",
+          "sha256": "fbac350f93ca839ca58beaf8c1fb5226833b86238c72295e31adf265598c1f72"
+        },
+        {
+          "role": "gpu_hardware_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/prepare-hardware.txt",
+          "sha256": "27292c45a20318897e37470690a9db0acf8d03a24fcc9983aebe6cd3420600e6"
+        },
+        {
+          "role": "scheduler_record",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/scheduler-initial-attempts.txt",
+          "sha256": "7fcbfb9f0dad9b5e86490d74da13156e6ef4e7b37cc674cf5753a9666cb5e1ce"
+        },
+        {
+          "role": "validation_development_benchmark",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/validation-benchmark.json",
+          "sha256": "936b838ba6f5c499d7ccb25367f4ca62fe880625fecc0b23a627ad4119f1a2f3"
+        },
+        {
+          "role": "development_analysis",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/development-analysis.json",
+          "sha256": "5b8495c575ffd87c77625d5aa935d6f4d3970b88ff2a23062af7c850ba684909"
+        },
+        {
+          "role": "constraint_parity_and_performance_benchmark",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-preparation/facts-belief-ablation-20261004-v1/evidence/constraint-benchmark.json",
+          "sha256": "1b33f73e69fd9fa9041f7f8bcd68c1e2c15f9b85096c6eb30a788a79b6c51c10"
+        },
+        {
+          "role": "preparation_recovery_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/preparation-audit-complete.json",
+          "sha256": "b66f8ff3f83ce397002cfc7ea0788d81de5907851bf4e9d16e1eadcb8a2bbec2"
+        },
+        {
+          "role": "postbuild_source_recovery_archive",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/postbuild-source-evidence-2349370.tar.gz",
+          "sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        },
+        {
+          "role": "postbuild_source_recovery_manifest",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/postbuild-source-recovery.json",
+          "sha256": "0aac6f563a9cbc43b5c9ec58ead7c2fd2d45f43c1b89cae5ae51a418f5b5393d"
+        },
+        {
+          "role": "postbuild_source_audit",
+          "root": "beijing-v100-preflight",
+          "path": "facts-belief-ablation-20261004-v1/recovered-postbuild/facts-belief-ablation-20261004-v1/evidence/postbuild-source-audit.json",
+          "sha256": "b2ab36dabe135b3ae44d2fc9c1824364e925783544a271ffe79dd3bd415d8bb6"
+        }
+      ],
+      "verification": {
+        "checked_on": "2026-10-04",
+        "strict_facts_belief_and_parent_load_cpu": true,
+        "finite_weights": true,
+        "validation_selection_and_test_binding_verified": true,
+        "selected_weights_equal_resume_best_weights": true,
+        "optimizer_and_rng_state_verified": true,
+        "formal_comparison_statistics_recomputed": false,
+        "formal_comparison_status_at_registration": "running",
+        "formal_experiment_planned_complete_games": 1200,
+        "archive_sha256_matches_remote": true,
+        "gpu_experiment": {
+          "status": "passed",
+          "scope": "preparation only; formal matches remain in progress",
+          "job_id": 2349370,
+          "scheduler_state": "COMPLETED",
+          "exit_code": "0:0",
+          "scheduler_elapsed_seconds": 2630,
+          "source_commit": "c2580f272f8edb59db3c7b7ac841608c20fe383f",
+          "device": "Tesla V100-SXM2-32GB",
+          "torch_version": "2.5.1+cu121",
+          "cuda_version": "12.1",
+          "gpu_tests": {
+            "passed": 86,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0
+          },
+          "joint_training_acceptance_status": "passed",
+          "marginal_training_acceptance_status": "passed",
+          "belief_smoke_resume_matches_uninterrupted_exactly": true,
+          "acceptance_scope": "Separate 40 short smoke games and temporary weights; excluded from the shared 2000-game dataset and 10-epoch model training."
+        },
+        "recovery_audit_limitations": [
+          "Preparation artifacts only; no formal comparison win rate is certified.",
+          "GPU evidence and recovered resume tensors are checked locally without rerunning CUDA kernels.",
+          "Held-out neural metrics are bound to selected weights and denominators; NLL and accuracy are not recomputed.",
+          "Conditional joint NLL and public-only marginal NLL are not directly comparable."
+        ],
+        "recovery_audit_status": "passed",
+        "recovery_audit_scope": "preparation_only",
+        "recovery_artifacts_checked": 4864,
+        "formal_match_games_audited": 0,
+        "postbuild_source_audit": {
+          "status": "passed",
+          "frozen_source_files_verified": 747,
+          "generated_build_files_verified": 9,
+          "frozen_source_files_modified": false,
+          "source_tree_sha256": "588fbc84a6bfbc96cbab4ce6e68f90d3f6f1b21f5fb599154af1b16d79829833",
+          "both_gpu_acceptance_source_digests_reconstructed_locally": true,
+          "supplemental_archive_sha256": "c357a2ffe9c8332bd8ed8e8f8b20c23926fd0b401bb7eb3fbbe5868020a20829"
+        }
+      },
+      "notes": [
+        "The four models reuse the same 2000 complete parent-policy self-play games and 16000 observer positions; these are not additional policy training games or 8000 distinct collected games.",
+        "Inputs are facts-only 317/0 with known_only identities. Hard public constraints retain q12.v2 semantics; no handcrafted identity probabilities are restored.",
+        "The unchanged frozen parent policy receives sampled-world search results; learned identity probabilities are not inserted into its observation channels.",
+        "Matched marginal and joint networks differ only by the identity-prefix embedding and conditioning; both use the same public observations, history and exact constraints.",
+        "The 1200-game formal comparison is running at registration. No new formal win rate is available; the default remains facts-counted-g10017.",
+        "The e10 ID denotes completed epochs; validation selected epoch 10 in this run."
       ]
     }
   ],
