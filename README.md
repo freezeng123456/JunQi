@@ -171,6 +171,11 @@ checkpoint 的完整局数未知，不能把 512 当作局数。模型、父模�
 [实测结果与证据](docs/FACTS_JOINT_COMPARISON_20261003.md)：联合信念＋搜索取得
 106 胜、92 负、2 和，胜率 53%；95% 配对区间包含 50%，默认模型继续保留 π₀。
 
+后续 [边缘与联合信念对照协议](docs/FACTS_BELIEF_ABLATION_20261004.md) 固定同一 π₀、
+同一 2,000 局数据和搜索预算，使用两个信念训练种子比较边缘、联合及直接策略。
+`train_facts_joint_belief.py --belief-kind marginal` 训练事实边缘模型；通用严格加载器
+按架构与输入契约识别模型。边缘 NLL 与联合 teacher-forced NLL 分开解释。
+
 历史信念原型使用 `scripts/legacy_train_joint_belief.py`、
 `scripts/legacy_compare_joint_search.py` 和 `scripts/legacy_pilot_joint_belief.py`。
 `train_joint_belief.py` 和 `compare_joint_search.py` 现已迁移到事实版本；

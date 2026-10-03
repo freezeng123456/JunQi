@@ -92,15 +92,20 @@ def history_features(inputs: IdentityConstraintInput, window: int = 64) -> np.nd
     return features
 
 
-class FactsJointBeliefNet(BeliefNet):
-    architecture_id = 'junqi.belief317.facts-autoregressive.v1'
+class _FactsBeliefNet(BeliefNet):
+    """Shared public-fact encoder; subclasses choose the identity decoder."""
     identity_encoding = 'known_only'
     uses_global_summary = False
 
-    def __init__(self, cfg: FactsJointBeliefNetConfig | None = None):
+    def __init__(self, cfg: FactsJointBeliefNetConfig | None = None, *, prefix_embedding: bool):
         super().__init__(cfg or FactsJointBeliefNetConfig())
         d = self.cfg.embed_dim
-        self.type_embedding = nn.Embedding(13, d)
+        if prefix_embedding:
+            self.type_embedding = nn.Embedding(13, d)
+        else:
+            # Keep common parameter initialization identical for matched seeds
+            # without registering an unused identity-prefix parameter/module.
+            torch.empty(13, d).normal_()
         self.owner_embedding = nn.Embedding(4, d)
         self.initial_embedding = nn.Embedding(289, d)
         self.alive_embedding = nn.Embedding(2, d)
@@ -114,10 +119,6 @@ class FactsJointBeliefNet(BeliefNet):
         self.register_buffer('on_board_cells', torch.tensor(COMPACT_TO_FLAT.copy(), dtype=torch.long),
                              persistent=False)
         self.last_sample_metrics = {}
-
-    @staticmethod
-    def prepare_teacher_masks(inputs, targets, *, constraints=None):
-        return prepare_teacher_masks(inputs, targets, constraints=constraints)
 
     def encode_facts(self, obs: Tensor, inputs: IdentityConstraintInput):
         _check_inputs(inputs, len(obs))
@@ -152,6 +153,18 @@ class FactsJointBeliefNet(BeliefNet):
                   + self.history_position(torch.arange(self.cfg.history_window, device=device))[None])
         tokens = tokens * history[..., -1:]
         return torch.cat((board, tokens), dim=1), context
+
+class FactsJointBeliefNet(_FactsBeliefNet):
+    architecture_id = 'junqi.belief317.facts-autoregressive.v1'
+    belief_kind = 'joint'
+    distribution_semantics = 'autoregressive neural conditionals under exact public-history prefix constraints'
+
+    def __init__(self, cfg: FactsJointBeliefNetConfig | None = None):
+        super().__init__(cfg, prefix_embedding=True)
+
+    @staticmethod
+    def prepare_teacher_masks(inputs, targets, *, constraints=None):
+        return prepare_teacher_masks(inputs, targets, constraints=constraints)
 
     def decode(self, memory: Tensor, context: Tensor, targets: Tensor) -> Tensor:
         prefix = F.pad(targets[:, :-1], (1, 0), value=12)

@@ -24,7 +24,11 @@ from junqi_core.rules import CAMP_INDICES, Event, PieceType, Seat
 from .joint import IDENTITY_INPUT_SCHEMA, IdentityConstraintInput
 
 CONSTRAINT_SCHEMA = "junqi.identity-domain-inventory-combat-q12.v2"
+CONSTRAINT_IMPLEMENTATION = "junqi.constraints.bit-table-matching-cache.v1"
 _N_TYPES = 12
+_BIT_VALUES = tuple(tuple(label for label in range(_N_TYPES) if bits & (1 << label))
+                    for bits in range(1 << _N_TYPES))
+_MATCHING_CACHE_LIMIT = 256
 
 
 class ConstraintBudgetExceeded(RuntimeError):
@@ -37,10 +41,7 @@ class _Budget:
 
 
 def _values(bits: int):
-    while bits:
-        bit = bits & -bits
-        yield bit.bit_length() - 1
-        bits ^= bit
+    return _BIT_VALUES[bits]
 
 
 def _immobility_domains(pieces, seat):
@@ -119,6 +120,7 @@ class CompiledIdentityConstraints:
     """
 
     schema = CONSTRAINT_SCHEMA
+    implementation = CONSTRAINT_IMPLEMENTATION
 
     def __init__(self, *, domains, owners, inventory, relations,
                  max_search_nodes=100_000):
@@ -140,6 +142,11 @@ class CompiledIdentityConstraints:
                 sum(1 << j for j in np.flatnonzero(row)) for row in matrix.T)))
         self._cache: dict[tuple[int, ...], tuple[int, ...] | None] = {}
         self._masks: dict[tuple[int, ...], np.ndarray] = {}
+        # Per-observer and bounded: no retention across states or games. The
+        # key contains every argument of the exact matching problem. Retaining
+        # its deterministic witness preserves branching and search-node counts.
+        self._matching_cache: dict[tuple, dict[int, int] | None] = {}
+        self.matching_cache_stats = {"hits": 0, "misses": 0, "evictions": 0}
         self.stats = {"queries": 0, "cache_hits": 0, "search_nodes": 0,
                       "budget_exhaustions": 0}
 
@@ -167,6 +174,21 @@ class CompiledIdentityConstraints:
                 raise ValueError("Assignment violates a public combat relation")
 
     def _matching_assignment(self, domains, group, inventory):
+        key = (group, inventory, tuple(domains[i] for i in group))
+        if key in self._matching_cache:
+            self.matching_cache_stats["hits"] += 1
+            result = self._matching_cache[key]
+        else:
+            self.matching_cache_stats["misses"] += 1
+            result = self._uncached_matching_assignment(domains, group, inventory)
+            if len(self._matching_cache) >= _MATCHING_CACHE_LIMIT:
+                del self._matching_cache[next(iter(self._matching_cache))]
+                self.matching_cache_stats["evictions"] += 1
+            self._matching_cache[key] = result
+        # Callers cannot mutate a retained witness and affect later queries.
+        return None if result is None else result.copy()
+
+    def _uncached_matching_assignment(self, domains, group, inventory):
         """Capacitated bipartite matching: exact within each army."""
         occupied = [[] for _ in range(_N_TYPES)]
 

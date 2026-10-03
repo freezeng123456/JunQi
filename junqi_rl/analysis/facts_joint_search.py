@@ -171,6 +171,7 @@ class FactsBlueprint:
         self.device = torch.device(device)
         self.builder = ObservationBuilder(**contract.observation_kwargs())
         self.capacity = 0
+        self.query_counts = dict(policy_calls=0, policy_positions=0, value_calls=0, value_positions=0)
 
     def inputs(self, worlds, *, include_legal=True):
         n = len(worlds)
@@ -199,6 +200,8 @@ class FactsBlueprint:
         obs, global_, legal = self.inputs(worlds)
         if not legal.any(-1).all():
             raise ValueError('Active blueprint world has no legal action')
+        self.query_counts['policy_calls'] += 1
+        self.query_counts['policy_positions'] += len(worlds)
         output = self.policy(obs, global_, legal, actions=legal.long().argmax(-1))
         log_probs = output['log_probs'].float()
         if log_probs.shape != legal.shape or not torch.isfinite(log_probs[legal]).all():
@@ -209,6 +212,8 @@ class FactsBlueprint:
     @torch.no_grad()
     def values(self, worlds):
         obs, global_, _ = self.inputs(worlds, include_legal=False)
+        self.query_counts['value_calls'] += 1
+        self.query_counts['value_positions'] += len(worlds)
         return scalar_value(self.policy.forward_value(obs, global_))
 
 
@@ -224,7 +229,7 @@ class FactsJointSearch:
     def __init__(self, blueprint: FactsBlueprint, joint, config=SearchConfig(), *, seed=0):
         if (getattr(joint, 'identity_encoding', None) != 'known_only'
                 or getattr(joint, 'uses_global_summary', None) is not False):
-            raise ValueError('Joint search requires a facts-only neural belief model')
+            raise ValueError('Search requires a facts-only neural belief model')
         self.blueprint, self.joint, self.config = blueprint, joint.eval(), config
         self.generator = torch.Generator(device=blueprint.device).manual_seed(seed)
         self.metrics = dict(decisions=0, successful_decisions=0, joint_refreshes=0,
@@ -235,6 +240,8 @@ class FactsJointSearch:
                             unique_accepted_assignments=0, constraint_seconds=0.0,
                             sampling_seconds=0.0, materialization_seconds=0.0,
                             simulation_seconds=0.0)
+        self.query_counts = dict.fromkeys(blueprint.query_counts, 0)
+        self.constraint_counts = {}
         self.rejection_reasons = {}
         self.latencies = []
         self.last_q = None
@@ -251,6 +258,7 @@ class FactsJointSearch:
         root_legal = root_legal[0].detach().cpu().numpy().copy()
         worlds, identities = [], set()
         self.metrics['joint_refreshes'] += 1
+        previous_solver_stats = dict(solver.stats)
         for _ in range(self.config.proposal_batches):
             count = self.config.particles - len(worlds)
             started = time.perf_counter()
@@ -262,6 +270,9 @@ class FactsJointSearch:
                 raise
             finally:
                 self.metrics['sampling_seconds'] += time.perf_counter() - started
+                for key, value in solver.stats.items():
+                    self.constraint_counts[key] = self.constraint_counts.get(key, 0) + value - previous_solver_stats.get(key, 0)
+                previous_solver_stats = dict(solver.stats)
             self.metrics['constraint_seconds'] += float(
                 getattr(self.joint, 'last_sample_metrics', {}).get('constraint_seconds', 0.0))
             if tuple(samples.shape) != (1, count, 75):
@@ -312,6 +323,7 @@ class FactsJointSearch:
     @torch.no_grad()
     def action(self, env, history):
         began = time.perf_counter()
+        queries_before = dict(self.blueprint.query_counts)
         self.metrics['decisions'] += 1
         if env.state.terminated or env.state.move_counter >= env.max_num_moves:
             raise ValueError('Cannot search a terminated or externally truncated game')
@@ -366,11 +378,15 @@ class FactsJointSearch:
         self.metrics['simulation_seconds'] += time.perf_counter() - began_simulation
         action = int(torch.multinomial(distribution.exp(), 1, generator=self.generator)[0, 0])
         self.metrics['successful_decisions'] += 1
+        for key, value in self.blueprint.query_counts.items():
+            self.query_counts[key] += value - queries_before[key]
         self.latencies.append(time.perf_counter() - began)
         return unrotate_compact_action_id(action, seat)
 
     def report(self):
         return {**self.metrics, 'config': asdict(self.config),
+                'blueprint_queries': dict(self.query_counts), 'constraint_queries': dict(self.constraint_counts),
+                'belief_kind': getattr(self.joint, 'belief_kind', 'unspecified'),
                 'rejection_reasons': dict(self.rejection_reasons),
                 'acceptance_rate': self.metrics['accepted_proposals'] / max(1, self.metrics['proposals']),
                 'action_coverage': self.metrics['candidate_actions'] / max(1, self.metrics['legal_actions']),
@@ -378,4 +394,9 @@ class FactsJointSearch:
                 'decision_seconds_p50': float(np.median(self.latencies)) if self.latencies else 0.0,
                 'decision_seconds_p95': float(np.quantile(self.latencies, .95)) if self.latencies else 0.0,
                 'backend': 'full-public-history CPU reconstruction; batched facts-only torch inference',
-                'proposal_semantics': 'fresh constrained neural autoregressive proposals, conditioned by full replay and root observation'}
+                'proposal_semantics': getattr(self.joint, 'distribution_semantics', 'neural proposals')
+                    + '; fresh samples conditioned by full replay and root observation'}
+
+
+# Architecture-neutral name for new callers; historical imports remain valid.
+FactsBeliefSearch = FactsJointSearch

@@ -1,4 +1,4 @@
-"""Train facts-only joint beliefs on complete-game data from frozen pi0.
+"""Train matched facts-only joint or marginal beliefs from frozen pi0.
 
 Collection defaults to 2,000 complete games and eight positions per game.
 This command validates that budget, trains only on the train fold and selects
@@ -24,17 +24,20 @@ from junqi_rl.belief.facts_dataset import (
     DATASET_SCHEMA, batch_inputs, concatenate_shards, file_sha256, protocol_sha256,
     split_for_setup, validate_constraint_schema,
 )
-from junqi_rl.belief.facts_joint_checkpoint import facts_joint_state, load_facts_joint_belief
+from junqi_rl.belief.facts_joint_checkpoint import facts_belief_state, load_facts_belief
 from junqi_rl.networks.facts_joint_belief_net import FactsJointBeliefNet, FactsJointBeliefNetConfig
+from junqi_rl.networks.facts_marginal_belief_net import FactsMarginalBeliefNet
 from junqi_rl.training._checkpoint_io import atomic_write
 from junqi_rl.training.checkpoint import load_evaluation_policy
 
 
 TRAINING_SCHEMA = 'junqi.facts-joint-training.v1'
+MARGINAL_TRAINING_SCHEMA = 'junqi.facts-marginal-training.v1'
 
 
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--belief-kind', choices=('joint', 'marginal'), default='joint')
     parser.add_argument('--policy', required=True, help='Frozen facts-only pi0 checkpoint')
     parser.add_argument('--dataset', required=True, help='Completed facts dataset directory')
     parser.add_argument('--output', required=True)
@@ -131,27 +134,51 @@ def unknown_targets(shard):
     return (shard['known_types'] < 0) & (shard['type_domains'].sum(-1) > 1)
 
 
-def _batch(shard, indices, device):
+def _batch(shard, indices, device, *, belief_kind='joint'):
     inputs = batch_inputs(shard, indices)
     obs = torch.as_tensor(np.array(shard['spatial'][indices], copy=True),
                           dtype=torch.float32, device=device)
     targets = torch.as_tensor(np.array(shard['targets'][indices], copy=True),
                               dtype=torch.long, device=device)
-    masks = torch.as_tensor(np.array(shard['teacher_masks'][indices], copy=True),
-                            dtype=torch.bool, device=device)
+    # The marginal path never reads prefix-label masks, even if cached in the
+    # shared dataset for joint training. Only public type domains enter logits.
+    masks = (torch.as_tensor(np.array(shard['teacher_masks'][indices], copy=True),
+                             dtype=torch.bool, device=device) if belief_kind == 'joint' else None)
     unknown = torch.as_tensor((shard['known_types'][indices] < 0)
         & (shard['type_domains'][indices].sum(-1) > 1), dtype=torch.bool, device=device)
     return inputs, obs, targets, masks, unknown
 
 
+def metric_names(belief_kind):
+    if belief_kind == 'marginal':
+        return 'marginal_nll_per_unknown_piece', 'marginal_accuracy'
+    return 'conditional_nll_per_unknown_piece', 'teacher_forced_accuracy'
+
+
+def metric_scope(belief_kind):
+    if belief_kind == 'marginal':
+        return 'Public-only per-piece marginal predictions; not gameplay strength or joint assignment probability'
+    return 'Teacher-forced conditional predictions; not gameplay strength or marginal accuracy'
+
+
+def _supervised_logits(net, obs, *, inputs, targets, masks):
+    if getattr(net, 'belief_kind', 'joint') == 'marginal':
+        if masks is not None:
+            raise ValueError('Marginal supervision must never receive teacher-prefix masks')
+        return net.marginal_logits(obs, inputs=inputs)
+    return net.teacher_logits(obs, inputs=inputs, targets=targets, teacher_masks=masks)
+
+
 @torch.no_grad()
 def evaluate(net, shard, *, batch_size, device):
     net.eval()
+    kind = getattr(net, 'belief_kind', 'joint')
+    nll_key, accuracy_key = metric_names(kind)
     total_nll = correct = count = 0.0
     for start in range(0, len(shard['targets']), batch_size):
         indices = np.arange(start, min(start + batch_size, len(shard['targets'])))
-        inputs, obs, targets, masks, unknown = _batch(shard, indices, device)
-        logits = net.teacher_logits(obs, inputs=inputs, targets=targets, teacher_masks=masks)
+        inputs, obs, targets, masks, unknown = _batch(shard, indices, device, belief_kind=kind)
+        logits = _supervised_logits(net, obs, inputs=inputs, targets=targets, masks=masks)
         nll = -logits.log_softmax(-1).gather(-1, targets[..., None]).squeeze(-1)
         values = nll[unknown]
         if not torch.isfinite(values).all():
@@ -161,8 +188,8 @@ def evaluate(net, shard, *, batch_size, device):
         count += int(unknown.sum())
     if not count:
         raise ValueError('Validation fold contains no unknown identities')
-    return {'conditional_nll_per_unknown_piece': total_nll / count,
-            'teacher_forced_accuracy': correct / count, 'unknown_targets': int(count),
+    return {nll_key: total_nll / count,
+            accuracy_key: correct / count, 'unknown_targets': int(count),
             'rows': len(shard['targets'])}
 
 
@@ -184,6 +211,11 @@ def _restore_rng(saved, rng):
 
 
 def train(args):
+    kind = args.belief_kind
+    model_type = FactsJointBeliefNet if kind == 'joint' else FactsMarginalBeliefNet
+    schema = TRAINING_SCHEMA if kind == 'joint' else MARGINAL_TRAINING_SCHEMA
+    nll_key, _ = metric_names(kind)
+    selected_name = f'{kind}-belief.pt'
     if min(args.games, args.positions_per_game, args.epochs, args.batch_size, args.num_threads) < 1:
         raise ValueError('Training and complete-game budgets must be positive')
     if not np.isfinite(args.learning_rate) or args.learning_rate <= 0:
@@ -209,7 +241,7 @@ def train(args):
         n_decoder_layer=args.decoder_layers, embed_dim=args.embed_dim, n_head=args.heads,
         ff_factor=args.ff_factor, cnn_channels=args.cnn_channels, cnn_layers=args.cnn_layers,
         dropout=args.dropout)
-    contract = {'schema': TRAINING_SCHEMA, 'dataset_manifest_sha256': manifest_hash,
+    contract = {'schema': schema, 'dataset_manifest_sha256': manifest_hash,
                 'dataset_protocol_sha256': manifest['protocol_sha256'],
                 'parent_policy_sha256': parent_hash, 'model_config': asdict(cfg),
                 'games': args.games, 'positions_per_game': args.positions_per_game,
@@ -221,6 +253,14 @@ def train(args):
                 'unknown_definition': 'known_types < 0 and public type-domain size > 1',
                 'selection': 'minimum validation conditional NLL; earliest epoch wins ties',
                 'test_fold_used': False}
+    if kind == 'marginal':
+        contract.update({
+            'belief_kind': kind, 'architecture_id': model_type.architecture_id,
+            'loss': 'unknown-only public-domain marginal cross entropy',
+            'selection': 'minimum validation marginal NLL; earliest epoch wins ties',
+            'training_support': 'public type_domains only; no teacher-prefix masks',
+            'sampling_distribution': model_type.distribution_semantics,
+        })
     output = Path(args.output)
     protocol_path = output / 'training-protocol.json'
     if (protocol_path.exists()
@@ -230,7 +270,7 @@ def train(args):
         raise ValueError('Existing training checkpoint requires explicit --resume')
     saved = None
     if args.resume:
-        net = load_facts_joint_belief(args.resume, policy_path=args.policy, device=device)
+        net = load_facts_belief(args.resume, policy_path=args.policy, device=device, expected_kind=kind)
         saved = torch.load(args.resume, map_location='cpu', weights_only=False)
         if (protocol_sha256(saved.get('training_contract')) != protocol_sha256(contract)
                 or type(saved.get('resume_schema')) is not int or saved['resume_schema'] != 1):
@@ -238,7 +278,7 @@ def train(args):
         if args.epochs <= saved['epochs_completed']:
             raise ValueError('Resume must advance the total epoch target')
     else:
-        net = FactsJointBeliefNet(cfg).to(device)
+        net = model_type(cfg).to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=args.learning_rate)
     # Hash verification and decompression happen once, before all epochs.
     # Only train/validation files are opened; test is reserved for final audit.
@@ -270,7 +310,7 @@ def train(args):
 
     def publish(epoch):
         seconds = elapsed_before + time.perf_counter() - started
-        state = facts_joint_state(net, parent_policy_sha256=parent_hash,
+        state = facts_belief_state(net, parent_policy_sha256=parent_hash,
             training_contract=contract, resume_schema=1, epochs_completed=epoch,
             updates=updates, optimizer=optimizer.state_dict(), rng=_capture_rng(rng),
             best_epoch=best_epoch, best_validation_nll=best_nll,
@@ -283,9 +323,9 @@ def train(args):
             'optimizer', 'rng', 'best_model_state', 'resume_schema')}
         selected['net'] = best_weights
         selected['selected_epoch'] = best_epoch
-        selected['artifact_role'] = 'validation-selected-facts-joint-belief'
-        atomic_write(output / 'joint-belief.pt', lambda handle: torch.save(selected, handle))
-        report = {'schema': TRAINING_SCHEMA, 'training_contract': contract,
+        selected['artifact_role'] = f'validation-selected-facts-{kind}-belief'
+        atomic_write(output / selected_name, lambda handle: torch.save(selected, handle))
+        report = {'schema': schema, 'training_contract': contract,
                   'epochs_completed': epoch, 'target_epochs': args.epochs,
                   'updates': updates, 'best_epoch': best_epoch,
                   'initial_validation': initial, 'final_validation': final_validation,
@@ -295,9 +335,9 @@ def train(args):
                   'split_games': manifest['split_games'], 'split_rows': manifest['split_rows'],
                   'test_fold_used': False, 'parameters': net.num_parameters(),
                   'last_checkpoint_sha256': file_sha256(output / 'last.pt'),
-                  'selected_checkpoint_sha256': file_sha256(output / 'joint-belief.pt'),
+                  'selected_checkpoint_sha256': file_sha256(output / selected_name),
                   'finished': epoch == args.epochs,
-                  'metric_scope': 'Teacher-forced conditional predictions; not gameplay strength or marginal accuracy'}
+                  'metric_scope': metric_scope(kind)}
         _json_write(output / 'report.json', report)
         return report
 
@@ -308,11 +348,11 @@ def train(args):
         epoch_start = time.perf_counter()
         for start in range(0, len(order), args.batch_size):
             indices = order[start:start + args.batch_size]
-            inputs, obs, targets, masks, unknown = _batch(training, indices, device)
+            inputs, obs, targets, masks, unknown = _batch(training, indices, device, belief_kind=kind)
             if not unknown.any():
                 skipped += 1
                 continue
-            logits = net.teacher_logits(obs, inputs=inputs, targets=targets, teacher_masks=masks)
+            logits = _supervised_logits(net, obs, inputs=inputs, targets=targets, masks=masks)
             nll = -logits.log_softmax(-1).gather(-1, targets[..., None]).squeeze(-1)
             loss = nll[unknown].mean()
             if not torch.isfinite(loss):
@@ -328,12 +368,12 @@ def train(args):
             count += int(unknown.sum())
         final_validation = evaluate(net, validation, batch_size=args.batch_size, device=device)
         item = {'epoch': epoch + 1, 'updates': updates,
-                'train_conditional_nll_per_unknown_piece': total_nll / count,
+                f'train_{nll_key}': total_nll / count,
                 'train_unknown_targets': count, 'skipped_fully_known_batches': skipped,
                 'validation': final_validation, 'epoch_seconds': time.perf_counter() - epoch_start}
         metrics.append(item)
-        if final_validation['conditional_nll_per_unknown_piece'] < best_nll:
-            best_nll = final_validation['conditional_nll_per_unknown_piece']
+        if final_validation[nll_key] < best_nll:
+            best_nll = final_validation[nll_key]
             best_epoch = epoch + 1
             best_weights = {key: value.detach().cpu().clone() for key, value in net.state_dict().items()}
         report = publish(epoch + 1)

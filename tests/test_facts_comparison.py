@@ -51,3 +51,50 @@ def test_worker_protocol_and_completed_game_provenance(tmp_path):
     write_json(path, {**record, 'protocol_sha256': 'c' * 64})
     with pytest.raises(ValueError, match='provenance'):
         validated_games(tmp_path, protocol, digest)
+
+
+def test_invalid_team_cannot_disappear_as_unpaired():
+    with pytest.raises(ValueError, match='team'):
+        paired_statistics([game(0, 2, 'win')])
+
+
+def test_prior_protocol_excludes_all_planned_layouts_and_binds_content(tmp_path):
+    from scripts.compare_facts_joint import excluded_layouts
+    manifest = {'raw_games': [{'initial_setup_sha256': setup_sha256(31)}]}
+    old = tmp_path / 'old'
+    old.mkdir()
+    write_json(old / 'protocol.json', {'schema': 'junqi.facts-joint-comparison.v1', 'seed': 42, 'pairs': 3})
+    forbidden, evidence = excluded_layouts(manifest, [old])
+    assert forbidden == {setup_sha256(s) for s in (31, 42, 43, 44)}
+    assert evidence[0]['layout_count'] == 3 and len(evidence[0]['sha256']) == 64
+
+
+def test_both_search_sides_require_exact_config_coverage_and_complete_moves():
+    from copy import deepcopy
+    import hashlib
+    import json
+    from scripts.compare_facts_joint import validate_side_metrics
+    config = {'particles': 2, 'depth': 1}
+    protocol = {'sides': {side: {'kind': 'belief_search', 'checkpoint_sha256': side}
+                         for side in ('candidate', 'opponent')}, 'search_config': config}
+    search = dict(decisions=3, successful_decisions=3, sample_budget_failures=0,
+                  constraint_budget_failures=0, candidate_actions=6, legal_actions=6, config=config)
+    record = {'sides_sha256': hashlib.sha256(json.dumps(protocol['sides'], sort_keys=True).encode()).hexdigest(),
+              'side_metrics': {'candidate': deepcopy(search), 'opponent': deepcopy(search)}, 'plies': 6}
+    validate_side_metrics(record, protocol)
+    wrong = deepcopy(record)
+    wrong['side_metrics']['opponent']['candidate_actions'] = 5
+    with pytest.raises(ValueError, match='coverage'):
+        validate_side_metrics(wrong, protocol)
+    wrong = deepcopy(record)
+    wrong['side_metrics']['opponent']['config']['particles'] = 1
+    with pytest.raises(ValueError, match='coverage'):
+        validate_side_metrics(wrong, protocol)
+    wrong = deepcopy(record)
+    wrong['plies'] = 7
+    with pytest.raises(ValueError, match='plies'):
+        validate_side_metrics(wrong, protocol)
+    wrong = deepcopy(protocol)
+    wrong['sides']['opponent']['checkpoint_sha256'] = 'changed'
+    with pytest.raises(ValueError, match='provenance'):
+        validate_side_metrics(record, wrong)

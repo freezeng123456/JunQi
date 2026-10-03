@@ -22,7 +22,7 @@ import numpy as np
 import torch
 
 from junqi_rl.belief.facts_dataset import batch_inputs, file_sha256, iter_shards
-from junqi_rl.belief.facts_joint_checkpoint import load_facts_joint_belief
+from junqi_rl.belief.facts_joint_checkpoint import load_facts_belief
 from scripts.train_facts_joint_belief import _json_write, build_parser as training_parser, train
 
 
@@ -115,7 +115,7 @@ def _smoke_protocol(dataset):
 
 def _training_audit(args, artifact_root):
     def run(name, epochs, resume=None):
-        argv = ['--policy', str(args.policy), '--dataset', str(args.dataset),
+        argv = ['--belief-kind', args.belief_kind, '--policy', str(args.policy), '--dataset', str(args.dataset),
                 '--output', str(artifact_root / name), '--device', 'cuda',
                 '--games', '40', '--positions-per-game', '2', '--epochs', str(epochs),
                 '--batch-size', '8', '--num-threads', '2', '--seed', '7300300']
@@ -140,11 +140,13 @@ def _training_audit(args, artifact_root):
     changed = [key for key in full['net'] if not torch.equal(partial['net'][key], full['net'][key])]
     if not changed or resumed['updates'] <= partial['updates']:
         raise AssertionError('Training resume made no finite parameter/optimizer progress')
-    selected = artifact_root / 'full' / 'joint-belief.pt'
-    net = load_facts_joint_belief(selected, policy_path=args.policy, device='cuda')
+    selected = artifact_root / 'full' / f'{args.belief_kind}-belief.pt'
+    net = load_facts_belief(selected, policy_path=args.policy, device='cuda',
+                           expected_kind=args.belief_kind)
     selected_state = torch.load(selected, map_location='cpu', weights_only=False)
     assert_exact(selected_state['net'], full['best_model_state'], 'selected_best_weights')
-    report = {'acceptance_only': True, 'executed_epochs': 4, 'unique_target_epochs': 2,
+    report = {'acceptance_only': True, 'belief_kind': args.belief_kind,
+              'architecture_id': net.architecture_id, 'executed_epochs': 4, 'unique_target_epochs': 2,
               'minibatch_size': 8, 'model_config': selected_state['config'],
               'updates_before_resume': partial['updates'], 'updates_after_resume': resumed['updates'],
               'resume_matches_uninterrupted_exactly': True, 'compared_tensors_or_arrays': comparisons,
@@ -205,6 +207,7 @@ def _search_audit(net, policy_path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--belief-kind', choices=('joint', 'marginal'), default='joint')
     parser.add_argument('--policy', '--checkpoint', dest='policy', type=Path, required=True)
     parser.add_argument('--dataset', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True, help='Acceptance JSON; outside source dataset')
@@ -215,7 +218,7 @@ def main(argv=None):
     if args.output.resolve() == args.policy.resolve():
         parser.error('acceptance output must not overwrite the parent checkpoint')
     report = {'schema': 'junqi.facts-belief-gpu-training-acceptance.v1', 'status': 'failed',
-              'acceptance_only': True}
+              'acceptance_only': True, 'belief_kind': args.belief_kind}
     phase = 'cuda_preflight'
     started = time.perf_counter()
     try:
