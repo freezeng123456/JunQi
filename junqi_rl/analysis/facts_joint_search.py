@@ -226,11 +226,17 @@ def _finished_value(world, root_seat):
 
 
 class FactsJointSearch:
-    def __init__(self, blueprint: FactsBlueprint, joint, config=SearchConfig(), *, seed=0):
+    def __init__(self, blueprint: FactsBlueprint, joint, config=SearchConfig(), *, seed=0,
+                 capture_diagnostics=False, inventory_backend='scan', overlap_constraints=False):
         if (getattr(joint, 'identity_encoding', None) != 'known_only'
                 or getattr(joint, 'uses_global_summary', None) is not False):
             raise ValueError('Search requires a facts-only neural belief model')
         self.blueprint, self.joint, self.config = blueprint, joint.eval(), config
+        if inventory_backend not in ('scan', 'incremental'):
+            raise ValueError('Unsupported constraint inventory backend')
+        if overlap_constraints and getattr(joint, 'belief_kind', None) != 'joint':
+            raise ValueError('Constraint overlap is supported only by the joint sampler')
+        self.inventory_backend, self.overlap_constraints = inventory_backend, bool(overlap_constraints)
         self.generator = torch.Generator(device=blueprint.device).manual_seed(seed)
         self.metrics = dict(decisions=0, successful_decisions=0, joint_refreshes=0,
                             proposals=0, accepted_proposals=0, rejected_proposals=0,
@@ -242,9 +248,16 @@ class FactsJointSearch:
                             simulation_seconds=0.0)
         self.query_counts = dict.fromkeys(blueprint.query_counts, 0)
         self.constraint_counts = {}
+        self.matching_cache_counts = {}
+        self.constraint_implementation = None
         self.rejection_reasons = {}
         self.latencies = []
         self.last_q = None
+        # Opt-in development telemetry. Match callers keep the original memory
+        # and transfer costs, and telemetry never supplies inference inputs.
+        self.capture_diagnostics = bool(capture_diagnostics)
+        self.last_decision = None
+        self.last_particle_diagnostics = None
 
     @torch.no_grad()
     def particles(self, env, history, obs, root_legal):
@@ -253,18 +266,25 @@ class FactsJointSearch:
         if snapshot.step != len(history) or env.state.move_counter != len(history):
             raise ValueError('Facts search requires the complete current public history')
         inputs = build_joint_input([snapshot])
-        solver = compile_constraints(inputs, max_search_nodes=self.config.max_constraint_nodes)
+        solver_kwargs = {'max_search_nodes': self.config.max_constraint_nodes}
+        if self.inventory_backend != 'scan':
+            solver_kwargs['inventory_backend'] = self.inventory_backend
+        solver = compile_constraints(inputs, **solver_kwargs)
+        self.constraint_implementation = getattr(solver, 'implementation', None)
         root_spatial = obs[0].detach().cpu().numpy().copy()
         root_legal = root_legal[0].detach().cpu().numpy().copy()
         worlds, identities = [], set()
+        accepted = [] if self.capture_diagnostics else None
         self.metrics['joint_refreshes'] += 1
         previous_solver_stats = dict(solver.stats)
+        previous_matching_stats = dict(getattr(solver, 'matching_cache_stats', {}))
         for _ in range(self.config.proposal_batches):
             count = self.config.particles - len(worlds)
             started = time.perf_counter()
             try:
+                sample_kwargs = {'overlap_constraints': True} if self.overlap_constraints else {}
                 samples = self.joint.sample(obs, inputs=inputs, n_samples=count,
-                                            generator=self.generator, constraints=[solver])
+                                            generator=self.generator, constraints=[solver], **sample_kwargs)
             except ConstraintBudgetExceeded:
                 self.metrics['constraint_budget_failures'] += 1
                 raise
@@ -273,6 +293,9 @@ class FactsJointSearch:
                 for key, value in solver.stats.items():
                     self.constraint_counts[key] = self.constraint_counts.get(key, 0) + value - previous_solver_stats.get(key, 0)
                 previous_solver_stats = dict(solver.stats)
+                for key, value in getattr(solver, 'matching_cache_stats', {}).items():
+                    self.matching_cache_counts[key] = self.matching_cache_counts.get(key, 0) + value - previous_matching_stats.get(key, 0)
+                previous_matching_stats = dict(getattr(solver, 'matching_cache_stats', {}))
             self.metrics['constraint_seconds'] += float(
                 getattr(self.joint, 'last_sample_metrics', {}).get('constraint_seconds', 0.0))
             if tuple(samples.shape) != (1, count, 75):
@@ -308,12 +331,27 @@ class FactsJointSearch:
                     self.rejection_reasons[reason] = self.rejection_reasons.get(reason, 0) + 1
                     continue
                 worlds.append(world)
+                if accepted is not None:
+                    accepted.append(assignment.tolist())
                 identity = tuple(int(x) for x in assignment)
                 if identity not in identities:
                     self.metrics['unique_accepted_assignments'] += 1
                     identities.add(identity)
                 self.metrics['accepted_proposals'] += 1
             if len(worlds) == self.config.particles:
+                if accepted is not None:
+                    self.last_particle_diagnostics = {
+                        'piece_ids': inputs.piece_ids[0].tolist(),
+                        'assignments': accepted,
+                        'support_validated': True,
+                        'public_replay_validated': True,
+                        'root_observation_validated': True,
+                        'root_legal_actions_validated': True,
+                        'constraint_stats': dict(solver.stats),
+                        'matching_cache_stats': dict(getattr(solver, 'matching_cache_stats', {})),
+                        'constraint_implementation': self.constraint_implementation,
+                        'inventory_backend': self.inventory_backend,
+                    }
                 return worlds
         self.metrics['sample_budget_failures'] += 1
         raise SamplingBudgetExceeded(
@@ -323,6 +361,8 @@ class FactsJointSearch:
     @torch.no_grad()
     def action(self, env, history):
         began = time.perf_counter()
+        if self.capture_diagnostics:
+            self.last_decision = self.last_particle_diagnostics = None
         queries_before = dict(self.blueprint.query_counts)
         self.metrics['decisions'] += 1
         if env.state.terminated or env.state.move_counter >= env.max_num_moves:
@@ -381,10 +421,30 @@ class FactsJointSearch:
         for key, value in self.blueprint.query_counts.items():
             self.query_counts[key] += value - queries_before[key]
         self.latencies.append(time.perf_counter() - began)
+        if self.capture_diagnostics:
+            # Save legal entries only: illegal Q is deliberately NaN and its
+            # log probability is -inf, neither belongs in portable JSON.
+            ids = candidates.cpu().tolist()
+            self.last_decision = {
+                'root_seat': int(seat), 'beta': self.config.beta,
+                'legal_compact_action_ids': ids,
+                'legal_world_action_ids': [unrotate_compact_action_id(aid, seat) for aid in ids],
+                'particle_returns': returns.reshape(len(ids), len(worlds)).tolist(),
+                'q': estimates.tolist(),
+                'pi0_log_probabilities': log_pi[0, candidates].cpu().tolist(),
+                'pi0_probabilities': log_pi[0, candidates].exp().cpu().tolist(),
+                'search_probabilities': distribution[0, candidates].exp().cpu().tolist(),
+                'selected_compact_action_id': action,
+                'particles': self.last_particle_diagnostics,
+            }
         return unrotate_compact_action_id(action, seat)
 
     def report(self):
         return {**self.metrics, 'config': asdict(self.config),
+                'inventory_backend': self.inventory_backend,
+                'constraint_implementation': self.constraint_implementation,
+                'joint_overlap_constraints': self.overlap_constraints,
+                'matching_cache_counts': dict(self.matching_cache_counts),
                 'blueprint_queries': dict(self.query_counts), 'constraint_queries': dict(self.constraint_counts),
                 'belief_kind': getattr(self.joint, 'belief_kind', 'unspecified'),
                 'rejection_reasons': dict(self.rejection_reasons),

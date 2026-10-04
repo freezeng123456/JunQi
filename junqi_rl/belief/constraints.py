@@ -25,6 +25,7 @@ from .joint import IDENTITY_INPUT_SCHEMA, IdentityConstraintInput
 
 CONSTRAINT_SCHEMA = "junqi.identity-domain-inventory-combat-q12.v2"
 CONSTRAINT_IMPLEMENTATION = "junqi.constraints.bit-table-matching-cache.v1"
+INCREMENTAL_IMPLEMENTATION = "junqi.constraints.incremental-inventory-bits.v2"
 _N_TYPES = 12
 _BIT_VALUES = tuple(tuple(label for label in range(_N_TYPES) if bits & (1 << label))
                     for bits in range(1 << _N_TYPES))
@@ -123,16 +124,22 @@ class CompiledIdentityConstraints:
     implementation = CONSTRAINT_IMPLEMENTATION
 
     def __init__(self, *, domains, owners, inventory, relations,
-                 max_search_nodes=100_000):
+                 max_search_nodes=100_000, inventory_backend="scan"):
         if type(max_search_nodes) is not int or max_search_nodes < 1:
             raise ValueError("max_search_nodes must be a positive integer")
         self.max_search_nodes = max_search_nodes
+        if inventory_backend not in ("scan", "incremental"):
+            raise ValueError("Inventory backend must be scan or incremental")
+        self.inventory_backend = inventory_backend
+        self.implementation = (INCREMENTAL_IMPLEMENTATION if inventory_backend == "incremental"
+                               else CONSTRAINT_IMPLEMENTATION)
         self.size = len(domains)
         self._domains = tuple(int(d) for d in domains)
         self._owners = tuple(int(o) for o in owners)
         self._inventory = tuple(tuple(int(n) for n in row) for row in inventory)
         self._groups = tuple(tuple(i for i, o in enumerate(self._owners) if o == owner)
                              for owner in range(len(self._inventory)))
+        self._piece_bits = tuple(1 << i for i in range(self.size))
         self._relations = tuple(relations)
         self._arcs = []
         for left, right, matrix in self._relations:
@@ -212,6 +219,9 @@ class CompiledIdentityConstraints:
         return {i: label for label, pieces in enumerate(occupied) for i in pieces}
 
     def _propagate(self, domains):
+        if self.inventory_backend == "incremental":
+            return self._propagate_incremental(domains)
+        # Production reference remains the default until device acceptance.
         changed = True
         while changed:
             changed = False
@@ -241,6 +251,72 @@ class CompiledIdentityConstraints:
                         for i in possible:
                             if domains[i] != bit:
                                 domains[i] = bit
+                                changed = True
+        return all(self._matching_assignment(domains, group, inventory) is not None
+                   for group, inventory in zip(self._groups, self._inventory))
+
+    def _propagate_incremental(self, domains):
+        # Rebuild once per propagation invocation. Domain changes below only
+        # remove types, so inventory support and singleton sets can be updated
+        # locally instead of scanning every army twelve times per fixed-point
+        # pass. Piece bits retain the original ascending group iteration order.
+        possible = [[0] * _N_TYPES for _ in self._inventory]
+        fixed = [[0] * _N_TYPES for _ in self._inventory]
+        for i, domain in enumerate(domains):
+            owner, piece_bit = self._owners[i], self._piece_bits[i]
+            for label in _values(domain):
+                possible[owner][label] |= piece_bit
+            if domain and not domain & (domain - 1):
+                fixed[owner][domain.bit_length() - 1] |= piece_bit
+
+        def narrow(i, domain):
+            previous = domains[i]
+            owner, piece_bit = self._owners[i], self._piece_bits[i]
+            for label in _values(previous ^ domain):
+                possible[owner][label] ^= piece_bit
+            if previous and not previous & (previous - 1):
+                fixed[owner][previous.bit_length() - 1] ^= piece_bit
+            if domain and not domain & (domain - 1):
+                fixed[owner][domain.bit_length() - 1] |= piece_bit
+            domains[i] = domain
+
+        changed = True
+        while changed:
+            changed = False
+            for left, right, supports in self._arcs:
+                narrowed = sum(1 << label for label in _values(domains[left])
+                               if supports[label] & domains[right])
+                if not narrowed:
+                    return False
+                if narrowed != domains[left]:
+                    narrow(left, narrowed)
+                    changed = True
+            for owner, inventory in enumerate(self._inventory):
+                for label, capacity in enumerate(inventory):
+                    bit = 1 << label
+                    candidates = possible[owner][label]
+                    singletons = fixed[owner][label]
+                    fixed_count = singletons.bit_count()
+                    if fixed_count > capacity or candidates.bit_count() < capacity:
+                        return False
+                    if fixed_count == capacity:
+                        remaining = candidates ^ singletons
+                        while remaining:
+                            piece_bit = remaining & -remaining
+                            remaining ^= piece_bit
+                            i = piece_bit.bit_length() - 1
+                            narrow(i, domains[i] ^ bit)
+                            if not domains[i]:
+                                return False
+                            changed = True
+                    elif candidates.bit_count() == capacity:
+                        remaining = candidates
+                        while remaining:
+                            piece_bit = remaining & -remaining
+                            remaining ^= piece_bit
+                            i = piece_bit.bit_length() - 1
+                            if domains[i] != bit:
+                                narrow(i, bit)
                                 changed = True
         return all(self._matching_assignment(domains, group, inventory) is not None
                    for group, inventory in zip(self._groups, self._inventory))
@@ -338,7 +414,8 @@ class CompiledIdentityConstraints:
         return masks
 
 
-def compile_constraints(inputs: IdentityConstraintInput, row=0, *, max_search_nodes=100_000
+def compile_constraints(inputs: IdentityConstraintInput, row=0, *, max_search_nodes=100_000,
+                        inventory_backend="scan"
                         ) -> CompiledIdentityConstraints:
     """Compile one facts-only row; simulator truth and probabilities are absent.
 
@@ -425,4 +502,4 @@ def compile_constraints(inputs: IdentityConstraintInput, row=0, *, max_search_no
     return CompiledIdentityConstraints(
         domains=bits, owners=owners, inventory=inventory,
         relations=[(left, right, matrix) for (left, right), matrix in relations.items()],
-        max_search_nodes=max_search_nodes)
+        max_search_nodes=max_search_nodes, inventory_backend=inventory_backend)

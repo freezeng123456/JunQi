@@ -40,9 +40,10 @@ def load_reference(path):
     return module
 
 
-def workload(module, inputs, targets, *, seed, max_search_nodes):
+def workload(module, inputs, targets, *, seed, max_search_nodes, compiler_options=None):
     start = time.perf_counter()
-    solver = module.compile_constraints(inputs, max_search_nodes=max_search_nodes)
+    solver = module.compile_constraints(inputs, max_search_nodes=max_search_nodes,
+                                        **(compiler_options or {}))
     teacher = solver.teacher_masks(targets)
     teacher_elapsed = time.perf_counter() - start
     teacher_witnesses = sorted((list(prefix), witness) for prefix, witness in solver._cache.items())
@@ -50,7 +51,8 @@ def workload(module, inputs, targets, *, seed, max_search_nodes):
     cache_stats = {"teacher": getattr(solver, "matching_cache_stats", None)}
     # Generation must start cold, as it does on a new search observer state.
     start = time.perf_counter()
-    solver = module.compile_constraints(inputs, max_search_nodes=max_search_nodes)
+    solver = module.compile_constraints(inputs, max_search_nodes=max_search_nodes,
+                                        **(compiler_options or {}))
     rng = np.random.default_rng(seed)
     generated, generation_masks = [], []
     for _ in range(solver.size):
@@ -83,6 +85,8 @@ def main(argv=None):
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--seed", type=int, default=20261004)
     parser.add_argument("--max-search-nodes", type=int, default=100_000)
+    parser.add_argument("--inventory-backend", choices=["scan", "incremental"], default="scan",
+                        help="Candidate only; reference source keeps its original backend")
     args = parser.parse_args(argv)
     if args.repeats < 1 or args.max_search_nodes < 1:
         parser.error("repeats and max-search-nodes must be positive")
@@ -92,7 +96,9 @@ def main(argv=None):
     report = dict(
         schema="junqi.constraint-cold-benchmark.v1", status="running",
         constraint_schema=current.CONSTRAINT_SCHEMA,
-        implementation=current.CONSTRAINT_IMPLEMENTATION,
+        implementation=(current.INCREMENTAL_IMPLEMENTATION if args.inventory_backend == "incremental"
+                        else current.CONSTRAINT_IMPLEMENTATION),
+        inventory_backend=args.inventory_backend,
         python=platform.python_version(), platform=platform.platform(),
         reference_source_sha256=file_sha256(args.reference_source),
         candidate_source_sha256=file_sha256(current.__file__),
@@ -127,7 +133,9 @@ def main(argv=None):
                     times, result, teacher, cache_stats = workload(
                         module, inputs, shard["targets"][row],
                         seed=args.seed + game * 100 + row,
-                        max_search_nodes=args.max_search_nodes)
+                        max_search_nodes=args.max_search_nodes,
+                        compiler_options=({"inventory_backend": args.inventory_backend}
+                                          if name == "candidate" else None))
                     if expected is None:
                         expected = result
                     if result != expected:

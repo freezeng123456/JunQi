@@ -195,11 +195,14 @@ class FactsJointBeliefNet(_FactsBeliefNet):
 
     @torch.no_grad()
     def sample(self, obs: Tensor, *, inputs: IdentityConstraintInput, n_samples: int,
-               generator: torch.Generator | None = None, constraints=None) -> Tensor:
+               generator: torch.Generator | None = None, constraints=None,
+               overlap_constraints: bool = False) -> Tensor:
         if self.training:
             raise ValueError('Joint sampling requires eval mode')
         if type(n_samples) is not int or n_samples < 1:
             raise ValueError('Sample count must be a positive integer')
+        if type(overlap_constraints) is not bool:
+            raise ValueError('Constraint overlap must be a boolean')
         _check_inputs(inputs, len(obs))
         began = time.perf_counter()
         compiled = _compile(inputs, constraints)
@@ -215,16 +218,26 @@ class FactsJointBeliefNet(_FactsBeliefNet):
         previous = torch.full((b * n_samples,), 12, dtype=torch.long, device=obs.device)
         constraint_seconds = 0.0
         for index in range(k):
+            if overlap_constraints:
+                # This token's neural scores depend on the previous label,
+                # but not on its feasibility mask. CUDA work can execute while
+                # the host solves that exact prefix. No RNG call moves across
+                # the boundary, and the finite/mask checks remain after it.
+                x = context[:, index:index + 1] + self.type_embedding(previous)[:, None]
+                for block, mem, state in zip(self.decoder, memory_kv, cache):
+                    x = block.step(x, mem, state, index)
+                logits = self.head(self.decoder_norm(x)).squeeze(1)
             start = time.perf_counter()
             allowed = np.stack([compiled[row // n_samples].allowed_next(prefixes[row, :index])
                                 for row in range(b * n_samples)])
             constraint_seconds += time.perf_counter() - start
             if not allowed.any(-1).all():
                 raise ValueError('Public history has no feasible complete assignment')
-            x = context[:, index:index + 1] + self.type_embedding(previous)[:, None]
-            for block, mem, state in zip(self.decoder, memory_kv, cache):
-                x = block.step(x, mem, state, index)
-            logits = self.head(self.decoder_norm(x)).squeeze(1)
+            if not overlap_constraints:
+                x = context[:, index:index + 1] + self.type_embedding(previous)[:, None]
+                for block, mem, state in zip(self.decoder, memory_kv, cache):
+                    x = block.step(x, mem, state, index)
+                logits = self.head(self.decoder_norm(x)).squeeze(1)
             mask = torch.tensor(allowed, dtype=torch.bool, device=obs.device)
             if not torch.isfinite(logits).all():
                 raise FloatingPointError('Nonfinite neural belief scores')
@@ -241,5 +254,9 @@ class FactsJointBeliefNet(_FactsBeliefNet):
             'total_seconds': time.perf_counter() - began,
             'constraint_backend': 'cpu-exact-public-history',
             'neural_device': str(obs.device), 'token_host_syncs': k,
+            'overlap_constraints': overlap_constraints,
+            'timing_scope': ('constraint CPU work overlaps submitted decoder work; '
+                             'do not add it to other GPU phase durations'
+                             if overlap_constraints else 'serial decoder and constraint work'),
         }
         return torch.tensor(prefixes, dtype=torch.long, device=obs.device).reshape(b, n_samples, k)
