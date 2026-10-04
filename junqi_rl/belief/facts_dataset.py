@@ -350,20 +350,121 @@ def iter_shards(root, split: str) -> Iterator[dict[str, np.ndarray]]:
 
 
 def concatenate_shards(root, split: str) -> dict[str, np.ndarray]:
-    """Convenience loader for small datasets, with correctly relocated offsets."""
-    shards = list(iter_shards(root, split))
-    if not shards:
+    """Load a fold with one output allocation and at most one decoded shard.
+
+    The planning pass reads only hash-verified NumPy headers; the copy pass
+    decodes each shard once into its final slices. This avoids holding the
+    complete decoded fold alongside another complete concatenated copy.
+    """
+    import ast
+    import math
+    import zipfile
+
+    root = Path(root)
+    manifest_path = root / "dataset-manifest.json"
+    manifest_hash = file_sha256(manifest_path)
+    manifest = json.loads(manifest_path.read_text())
+    selected_split = "validation" if split == "val" else split
+    if selected_split not in ("train", "validation", "test"):
+        raise ValueError("split must be train, validation, or test")
+    if manifest.get("schema") != DATASET_SCHEMA or manifest.get("status") != "complete":
+        raise ValueError("training requires a complete facts dataset manifest")
+    protocol = manifest.get("protocol")
+    validate_constraint_schema(protocol)
+    digest = protocol_sha256(protocol)
+    if manifest.get("protocol_sha256") != digest:
+        raise ValueError("dataset protocol hash mismatch")
+    plans, keys, totals, dtypes = [], None, {}, {}
+    offset_count = 1
+    for item in manifest["shards"]:
+        if item["split"] != selected_split:
+            continue
+        if item.get("protocol_sha256") != digest:
+            raise ValueError("supervised shard was cached under a different dataset protocol")
+        path = root / item["path"]
+        if file_sha256(path) != item["sha256"]:
+            raise ValueError("supervised shard hash mismatch")
+        plan = {}
+        with zipfile.ZipFile(path) as archive:
+            for member in archive.infolist():
+                if not member.filename.endswith(".npy"):
+                    raise ValueError("dataset shard contains a non-array member")
+                key = member.filename[:-4]
+                if key in plan:
+                    raise ValueError("dataset shard contains a duplicate array")
+                with archive.open(member) as handle:
+                    version = np.lib.format.read_magic(handle)
+                    if version not in ((1, 0), (2, 0), (3, 0)):
+                        raise ValueError("unsupported dataset NumPy header version")
+                    width = 2 if version == (1, 0) else 4
+                    length_bytes = handle.read(width)
+                    if len(length_bytes) != width:
+                        raise ValueError("truncated dataset NumPy header")
+                    length = int.from_bytes(length_bytes, "little")
+                    if length > 10000:
+                        raise ValueError("dataset NumPy header exceeds the safe load limit")
+                    raw = handle.read(length)
+                    if len(raw) != length:
+                        raise ValueError("truncated dataset NumPy header")
+                    header = ast.literal_eval(raw.decode("utf8" if version == (3, 0) else "latin1"))
+                    if set(header) != {"shape", "fortran_order", "descr"}:
+                        raise ValueError("invalid dataset NumPy header")
+                    shape = header["shape"]
+                    dtype = np.lib.format.descr_to_dtype(header["descr"])
+                    if (not isinstance(shape, tuple) or not shape
+                            or any(type(size) is not int or size < 0 for size in shape)
+                            or type(header["fortran_order"]) is not bool or dtype.hasobject):
+                        raise ValueError("invalid dataset NumPy array contract")
+                    if member.file_size - handle.tell() != math.prod(shape) * dtype.itemsize:
+                        raise ValueError("dataset NumPy shape disagrees with payload size")
+                    plan[key] = (shape, dtype)
+        if keys is None:
+            keys = set(plan)
+        if set(plan) != keys:
+            raise ValueError("dataset shards have different array contracts")
+        if not {"history_events", "event_offsets"} <= keys:
+            raise ValueError("dataset shard is missing public-history arrays")
+        for key, (shape, dtype) in plan.items():
+            if plans and shape[1:] != plans[0][key][0][1:]:
+                raise ValueError("dataset shards have different array shapes")
+            totals[key] = totals.get(key, 0) + shape[0]
+            dtypes[key] = np.result_type(dtypes.get(key, dtype), dtype)
+        shape, dtype = plan["event_offsets"]
+        if len(shape) != 1 or not shape[0] or dtype.kind not in "iu":
+            raise ValueError("dataset shard has invalid public-history offsets")
+        offset_count += shape[0] - 1
+        plans.append(plan)
+    if not plans:
         raise ValueError(f"dataset contains no {split} shards")
-    keys = set(shards[0])
-    if any(set(shard) != keys for shard in shards):
-        raise ValueError("dataset shards have different array contracts")
-    result = {key: np.concatenate([shard[key] for shard in shards], axis=0)
+    if file_sha256(manifest_path) != manifest_hash:
+        raise ValueError("dataset manifest changed during fold shape planning")
+    result = {key: np.empty((totals[key], *plans[0][key][0][1:]), dtype=dtypes[key])
               for key in keys if key != "event_offsets"}
-    offsets, base = [0], 0
-    for shard in shards:
-        offsets.extend((shard["event_offsets"][1:] + base).tolist())
-        base += len(shard["history_events"])
-    result["event_offsets"] = np.asarray(offsets, dtype=np.int64)
+    result["event_offsets"] = np.empty(offset_count, dtype=np.int64)
+    result["event_offsets"][0] = 0
+    positions = dict.fromkeys(result, 0)
+    offset_position, history_base, loaded = 1, 0, 0
+    for shard in iter_shards(root, split):
+        plan = {key: (array.shape, array.dtype) for key, array in shard.items()}
+        if loaded >= len(plans) or plan != plans[loaded]:
+            raise ValueError("dataset shard array contract changed between fold passes")
+        offsets = shard["event_offsets"]
+        if (offsets[0] != 0 or offsets[-1] != len(shard["history_events"])
+                or np.any(offsets[1:] < offsets[:-1])):
+            raise ValueError("dataset shard has invalid public-history offsets")
+        for key in keys - {"event_offsets"}:
+            end = positions[key] + len(shard[key])
+            np.copyto(result[key][positions[key]:end], shard[key], casting="same_kind")
+            positions[key] = end
+        end = offset_position + len(shard["event_offsets"]) - 1
+        np.add(shard["event_offsets"][1:], history_base,
+               out=result["event_offsets"][offset_position:end], casting="unsafe")
+        offset_position = end
+        history_base += len(shard["history_events"])
+        loaded += 1
+        del offsets, shard
+    if loaded != len(plans) or file_sha256(manifest_path) != manifest_hash:
+        raise ValueError("dataset manifest or shard coverage changed during fold loading")
     for array in result.values():
         array.setflags(write=False)
     return result
