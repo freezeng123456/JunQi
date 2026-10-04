@@ -28,7 +28,8 @@ from junqi_rl.belief.facts_dataset import batch_inputs, read_npz, validate_trace
 from junqi_rl.belief.facts_joint_checkpoint import load_facts_belief
 from junqi_rl.env import JunqiEnv, unrotate_compact_action_id
 from junqi_rl.training.checkpoint import load_evaluation_policy
-from scripts.compare_facts_joint import inference_source_sha256, selected_belief_provenance, sha256, write_json
+from scripts.compare_facts_joint import (add_inference_runtime_arguments, inference_source_sha256,
+                                       search_runtime_options, selected_belief_provenance, sha256, write_json)
 
 
 def validation_states(dataset, manifest, count, seed):
@@ -127,6 +128,7 @@ def main(argv=None):
     parser.add_argument('--proposal-batches', type=int, default=8)
     parser.add_argument('--seed', type=int, default=95000000)
     parser.add_argument('--device', default='cuda')
+    add_inference_runtime_arguments(parser)
     args = parser.parse_args(argv)
     if min(args.states, args.samples, args.repeats) < 1:
         raise ValueError('All diagnostic budgets must be positive')
@@ -149,11 +151,13 @@ def main(argv=None):
     chosen = validation_states(args.dataset, manifest, args.states, args.seed)
     blueprint = FactsBlueprint(load_evaluation_policy(args.policy, device=device), device)
     models = [(load_facts_belief(path, policy_path=args.policy, device=device), path) for path in args.belief]
+    runtimes = [search_runtime_options(args, model) for model, path in models]
     protocol = dict(schema='junqi.facts-belief-validation-benchmark.v1', phase='development', split='validation',
                     policy_sha256=sha256(args.policy), dataset_manifest_sha256=sha256(manifest_path),
                     models=[selected_belief_provenance(path, model, sha256(manifest_path)) for model, path in models],
                     states=args.states, samples=args.samples, repeats=args.repeats, seed=args.seed,
                     search_configs=[asdict(config) for config in budgets], device_type=device.type,
+                    inference_runtime=runtimes,
                     torch_version=str(torch.__version__), script_sha256=sha256(__file__),
                     inference_source_sha256=inference_source_sha256(), numpy_version=str(np.__version__),
                     selected_rows=[dict(game_id=item['game_id'], row=row, ply=int(shard['ply'][row]),
@@ -178,19 +182,20 @@ def main(argv=None):
             raise ValueError('Saved validation observation differs from replayed public root')
         inputs = batch_inputs(shard, np.asarray([row]))
         record = dict(game_id=item['game_id'], row=row, ply=int(shard['ply'][row]), models=[])
-        for model, path in models:
+        for (model, path), runtime in zip(models, runtimes):
             if index == 0:
                 # Exclude first-use kernels/allocations from serial search timing.
-                warmup = FactsBeliefSearch(blueprint, model, budgets[-1], seed=args.seed + 200000)
+                warmup = FactsBeliefSearch(blueprint, model, budgets[-1], seed=args.seed + 200000, **runtime)
                 warmup.action(env, history)
                 synchronize(device)
-            solver = compile_constraints(inputs)
+            solver = compile_constraints(inputs, inventory_backend=runtime['inventory_backend'])
             generator = torch.Generator(device=device).manual_seed(args.seed + index)
             synchronize(device)
             began = time.perf_counter()
             with torch.no_grad():
+                sample_kwargs = {'overlap_constraints': True} if runtime['overlap_constraints'] else {}
                 samples = model.sample(obs, inputs=inputs, n_samples=args.samples,
-                                       generator=generator, constraints=[solver])
+                                       generator=generator, constraints=[solver], **sample_kwargs)
             synchronize(device)
             free_seconds = time.perf_counter() - began
             labels = samples[0].cpu().numpy()
@@ -205,7 +210,7 @@ def main(argv=None):
             for config in budgets:
                 for repeat in range(args.repeats):
                     search = FactsBeliefSearch(blueprint, model, config,
-                        seed=args.seed + 100000 + index * args.repeats + repeat)
+                        seed=args.seed + 100000 + index * args.repeats + repeat, **runtime)
                     synchronize(device)
                     began = time.perf_counter()
                     action = search.action(env, history)

@@ -95,6 +95,19 @@ def bind_protocol(out, protocol):
     return hashlib.sha256(json.dumps(protocol, sort_keys=True).encode()).hexdigest()
 
 
+def add_inference_runtime_arguments(parser):
+    parser.add_argument('--inventory-backend', choices=('scan', 'incremental'), default='scan',
+                        help='Exact inventory propagation backend for every belief sampler')
+    parser.add_argument('--overlap-constraints', action='store_true',
+                        help='Opt-in GPU/CPU constraint overlap for joint samplers only')
+
+
+def search_runtime_options(args, model):
+    """Use the same inventory backend on both sides; overlap applies only to joint models."""
+    return dict(inventory_backend=args.inventory_backend,
+                overlap_constraints=args.overlap_constraints and model.belief_kind == 'joint')
+
+
 def validated_games(out, protocol, digest):
     games = []
     for path in sorted(out.glob('game-*.json')):
@@ -173,6 +186,11 @@ def validate_side_metrics(game, protocol):
                     or report.get('candidate_actions') != report.get('legal_actions')
                     or report.get('config') != protocol['search_config']):
                 raise ValueError('Completed match search coverage or no-fallback contract failed')
+            runtime = protocol.get('inference_runtime', {}).get(role)
+            if runtime is not None and (
+                    report.get('inventory_backend') != runtime['inventory_backend']
+                    or report.get('joint_overlap_constraints') != runtime['overlap_constraints']):
+                raise ValueError('Completed match inference runtime differs from the bound protocol')
     if moves != game.get('plies') or type(game.get('plies')) is not int or game['plies'] <= 0:
         raise ValueError('Completed match side counts must equal all game plies')
 
@@ -238,6 +256,7 @@ def main(argv=None):
     parser.add_argument('--worker-index', type=int, default=0)
     parser.add_argument('--workers', type=int, default=1)
     parser.add_argument('--resume', action='store_true')
+    add_inference_runtime_arguments(parser)
     args = parser.parse_args(argv)
     if args.pairs < 1 or args.wall_seconds <= 0 or not 0 <= args.worker_index < args.workers:
         raise ValueError('Invalid game/worker/time budget')
@@ -267,6 +286,9 @@ def main(argv=None):
                           if opponent_belief is not None else {'kind': 'direct_policy'})}
     for side in sides.values():
         side['policy_sha256'] = sha256(args.policy)
+    runtimes = {'candidate': search_runtime_options(args, belief),
+                'opponent': (search_runtime_options(args, opponent_belief)
+                             if opponent_belief is not None else None)}
     sides_hash = hashlib.sha256(json.dumps(sides, sort_keys=True).encode()).hexdigest()
     forbidden, exclusion_evidence = excluded_layouts(manifest, args.exclude_layouts)
     requested = [setup_sha256(args.seed + pair) for pair in range(args.pairs)]
@@ -277,6 +299,7 @@ def main(argv=None):
                     dataset_manifest_sha256=manifest_hash, sides=sides, phase=args.phase,
                     seed=args.seed, pairs=args.pairs, max_moves=MAX_NUM_MOVES,
                     search_config=asdict(config), workers=args.workers,
+                    inference_runtime=runtimes,
                     baseline=sides['opponent'], candidate=sides['candidate'],
                     team_assignments=[0, 1], action_selection='sample distribution',
                     torch_version=str(torch.__version__), device_type=torch.device(args.device).type,
@@ -321,8 +344,10 @@ def main(argv=None):
             if setup_hash in forbidden:
                 raise ValueError('Held-out evaluation layout overlaps belief dataset')
             game_seed = args.seed + pair * 2 + team
-            searches = {'candidate': FactsJointSearch(blueprint, belief, config, seed=game_seed),
-                        'opponent': (FactsJointSearch(blueprint, opponent_belief, config, seed=game_seed + 100000)
+            searches = {'candidate': FactsJointSearch(blueprint, belief, config, seed=game_seed,
+                                                      **runtimes['candidate']),
+                        'opponent': (FactsJointSearch(blueprint, opponent_belief, config, seed=game_seed + 100000,
+                                                     **runtimes['opponent'])
                                      if opponent_belief is not None else None)}
             base_rng = torch.Generator(device=args.device).manual_seed(game_seed + 100000)
             direct_decisions = 0

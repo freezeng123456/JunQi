@@ -98,3 +98,102 @@ def test_both_search_sides_require_exact_config_coverage_and_complete_moves():
     wrong['sides']['opponent']['checkpoint_sha256'] = 'changed'
     with pytest.raises(ValueError, match='provenance'):
         validate_side_metrics(record, wrong)
+
+
+@pytest.mark.parametrize('kinds,flags,backend,overlap', [
+    (('joint', 'marginal'), [], 'scan', (False, False)),
+    (('joint', 'marginal'), ['--inventory-backend', 'incremental', '--overlap-constraints'],
+     'incremental', (True, False)),
+    (('marginal', 'joint'), ['--inventory-backend', 'incremental', '--overlap-constraints'],
+     'incremental', (False, True)),
+])
+def test_comparison_runtime_reaches_both_sides_and_binds_resume(tmp_path, monkeypatch,
+                                                             kinds, flags, backend, overlap):
+    """Exercise the real CLI, protocol binding, match construction and side validation."""
+    from copy import deepcopy
+    from dataclasses import asdict
+    import hashlib
+    import json
+    from types import SimpleNamespace
+    import numpy as np
+    import scripts.compare_facts_joint as comparison
+    import junqi_core.state as state_module
+    import junqi_rl.analysis.facts_joint_search as search_module
+    import junqi_rl.belief.facts_joint_checkpoint as belief_module
+    import junqi_rl.env as env_module
+    import junqi_rl.training.checkpoint as checkpoint_module
+
+    layout = np.zeros(120, dtype=np.int64)
+    layout_hash = hashlib.sha256(layout.tobytes()).hexdigest()
+    monkeypatch.setattr(comparison, 'setup_sha256', lambda seed: layout_hash)
+    monkeypatch.setattr(comparison, 'sha256', lambda path: 'a' * 64)
+    monkeypatch.setattr(comparison, 'inference_source_sha256', lambda: 'b' * 64)
+    monkeypatch.setattr(comparison, 'selected_belief_provenance',
+                        lambda path, net, digest: dict(kind='belief_search', belief_kind=net.belief_kind))
+    monkeypatch.setattr(checkpoint_module, 'load_evaluation_policy', lambda *a, **kw: object())
+    models = dict(zip(('candidate.pt', 'opponent.pt'), kinds))
+    monkeypatch.setattr(belief_module, 'load_facts_belief',
+                        lambda path, **kw: SimpleNamespace(belief_kind=models[path]))
+    monkeypatch.setattr(search_module, 'FactsBlueprint', lambda *a: object())
+
+    constructed = []
+    class Search:
+        def __init__(self, blueprint, model, config, *, seed, **runtime):
+            constructed.append((model.belief_kind, runtime))
+            self.config, self.runtime, self.decisions = asdict(config), runtime, 0
+
+        def action(self, env, history):
+            self.decisions += 1
+            return 0
+
+        def report(self):
+            return dict(decisions=self.decisions, successful_decisions=self.decisions,
+                        sample_budget_failures=0, constraint_budget_failures=0,
+                        candidate_actions=self.decisions, legal_actions=self.decisions,
+                        config=self.config, inventory_backend=self.runtime['inventory_backend'],
+                        joint_overlap_constraints=self.runtime['overlap_constraints'])
+
+    class Env:
+        def __init__(self, **kwargs):
+            self.state = SimpleNamespace(piece_type_arr=layout, turn=0, terminated=False,
+                                         draw=False, winner_team=0)
+        def reset(self, seed):
+            pass
+
+    def step(env, action):
+        env.state.turn += 1
+        env.state.terminated = env.state.turn == 2
+        return env.state.turn
+
+    monkeypatch.setattr(search_module, 'FactsJointSearch', Search)
+    monkeypatch.setattr(search_module, 'step_world', step)
+    monkeypatch.setattr(search_module, 'public_result', lambda result: result)
+    monkeypatch.setattr(state_module, 'classify_termination', lambda state, result: 'test terminal')
+    monkeypatch.setattr(env_module, 'JunqiEnv', Env)
+    dataset, output = tmp_path / 'dataset', tmp_path / 'matches'
+    dataset.mkdir()
+    write_json(dataset / 'dataset-manifest.json',
+               dict(schema='junqi.facts-belief-dataset.v1', status='complete',
+                    raw_games=[{'initial_setup_sha256': 'f' * 64}]))
+    argv = ['--policy', 'pi0.pt', '--belief', 'candidate.pt', '--opponent-belief', 'opponent.pt',
+            '--dataset', str(dataset), '--output', str(output), '--device', 'cpu', '--pairs', '1']
+    comparison.main(argv + flags)
+    expected = {role: dict(inventory_backend=backend, overlap_constraints=enabled)
+                for role, enabled in zip(('candidate', 'opponent'), overlap)}
+    assert [runtime for kind, runtime in constructed] == list(expected.values()) * 2
+    protocol = json.loads((output / 'protocol.json').read_text())
+    assert protocol['inference_runtime'] == expected
+    digest = hashlib.sha256(json.dumps(protocol, sort_keys=True).encode()).hexdigest()
+    records = validated_games(output, protocol, digest)
+    assert len(records) == 2
+    wrong = deepcopy(records[0])
+    wrong['side_metrics']['opponent']['inventory_backend'] = (
+        'incremental' if backend == 'scan' else 'scan')
+    with pytest.raises(ValueError, match='inference runtime'):
+        comparison.validate_side_metrics(wrong, protocol)
+    # A completed output may resume only with the same effective per-side choices.
+    comparison.main(argv + flags + ['--resume'])
+    assert len(constructed) == 4
+    changed_flags = [] if flags else ['--inventory-backend', 'incremental']
+    with pytest.raises(ValueError, match='another protocol'):
+        comparison.main(argv + changed_flags + ['--resume'])
