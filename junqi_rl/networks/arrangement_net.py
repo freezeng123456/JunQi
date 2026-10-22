@@ -299,6 +299,7 @@ class ArrangementNet(nn.Module):
         suffix = allowed.flip(0).cumsum(0).flip(0) - allowed
         self.register_buffer("completion_groups", groups, persistent=False)
         self.register_buffer("completion_capacity", suffix, persistent=False)
+        self.register_buffer("prefix_sum", torch.ones(ARRANGEMENT_SIZE, ARRANGEMENT_SIZE).tril(), persistent=False)
 
         # Transformer trunk
         self.layers = nn.ModuleList([
@@ -416,7 +417,10 @@ class ArrangementNet(nn.Module):
         # Remaining counts AFTER placing rows 0..t-1 (for t = 0..T_prime-1).
         # remaining[b, 0] = piece_counts (no placements yet).
         # remaining[b, t] = piece_counts - sum_{i<t} seq[b, i]   for t >= 1.
-        cum = seq.cumsum(dim=1)                              # (B, T, V)
+        # Float CUDA cumsum is rejected by strict deterministic execution.
+        # Prefixes are at most 30 slots; this fixed triangular product has
+        # identical semantics and uses the deterministic configured GEMM.
+        cum = self.prefix_sum[:T, :T].to(seq.dtype) @ seq      # (B, T, V)
         pc = self.piece_counts.to(dtype=seq.dtype).view(1, 1, V)
         # We need remaining at positions 0..T_prime-1. Position 0 is "nothing
         # placed" — use piece_counts directly.
