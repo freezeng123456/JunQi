@@ -104,6 +104,7 @@ class TrainConfig:
     target_completed_games: int = 0
     save_every_games: int = 500
     eval_every_games: int = 2000
+    eval_enabled: bool = True
     save_every: int = 100
     eval_every: int = 50
     eval_num_games: int = 128

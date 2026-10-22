@@ -1246,7 +1246,7 @@ def train(cfg: TrainConfig) -> None:
 
         # ---- Periodic evaluation (rank-0 only; others wait) ----
         # Evaluate the actual learner policy used for collection.
-        eval_due = ((game_progress.completed_games >= next_game_eval or game_target_reached)
+        eval_due = cfg.eval_enabled and ((game_progress.completed_games >= next_game_eval or game_target_reached)
                     if game_progress is not None else (rollout_idx + 1) % cfg.eval_every == 0)
         if eval_due:
             if game_progress is not None:

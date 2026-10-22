@@ -72,14 +72,16 @@ def summarize_sources(probabilities, movable, cfg):
     source = int(np.argmax(np.where(supported, conditional, -1)))
     mass = float(conditional[source])
     mean_entropy = float(entropy.mean())
+    conditional_entropy = float(entropy[legal[:, source]].mean())
     return dict(decisions=int(len(probabilities)), eligible_decisions=int(len(p)),
         dominant_source=source, dominant_source_samples=int(available[source]),
         max_conditional_source_mass=mass, normalized_source_entropy=mean_entropy,
+        dominant_source_conditional_entropy=conditional_entropy,
         mean_largest_source_probability=float(p.max(1).mean()),
         conditional_source_probability=conditional.tolist(),
         source_available_samples=available.tolist(),
         source_probability_mean=p.mean(0).tolist(),
-        collapsed=bool(mass >= cfg.source_mass_limit and mean_entropy <= cfg.source_entropy_limit))
+        collapsed=bool(mass >= cfg.source_mass_limit and conditional_entropy <= cfg.source_entropy_limit))
 
 
 @contextmanager
@@ -112,14 +114,18 @@ class OpeningMonitor:
         return completed_games >= self.next_games
 
     def state_dict(self):
-        return dict(version=1, config=asdict(self.cfg), checks=self.checks,
+        return dict(version=2, config=asdict(self.cfg), checks=self.checks,
             streak=self.streak, next_games=self.next_games, last_result=self.last_result)
 
     def load_state_dict(self, state):
-        if state["version"] != 1 or state["config"] != asdict(self.cfg):
+        if state["version"] not in (1, 2) or state["config"] != asdict(self.cfg):
             raise ValueError("opening-monitor resume contract mismatch")
         for name in ("checks", "streak", "next_games", "last_result"):
             setattr(self, name, state[name])
+        if state["version"] == 1:
+            # Preserve cadence/RNG seed sequence while starting the refined
+            # conditional-entropy streak with observations under v2 only.
+            self.streak = 0
 
     def _bank(self, policy, seed):
         from junqi_core.rules import Seat
@@ -172,7 +178,7 @@ class OpeningMonitor:
         self.streak = self.streak + 1 if collapsed else 0
         self.checks += 1
         self.next_games = (completed_games // self.cfg.every_games + 1) * self.cfg.every_games
-        result = dict(schema="junqi.opening-monitor.v1", completed_games=completed_games,
+        result = dict(schema="junqi.opening-monitor.v2", completed_games=completed_games,
             rollout=rollout, check_index=self.checks, fixed=fixed, fresh=fresh,
             collapse_streak=self.streak, status="collapse" if self.streak >= self.cfg.patience
                 else ("warning" if collapsed else "healthy"))

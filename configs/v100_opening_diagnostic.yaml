@@ -1,0 +1,10 @@
+# Short completed-game study; training health is observed before full matches.
+extends: v100_facts_scratch_opening.yaml
+save_dir: exps/v100_opening_diagnostic
+target_completed_games: 20000
+save_every_games: 5000
+eval_enabled: false
+eval_baseline_ckpt: ''
+eval_baseline_games: 0
+opening:
+  every_games: 1000

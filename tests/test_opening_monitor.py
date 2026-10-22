@@ -42,6 +42,17 @@ def test_uniform_sources_and_state_dependent_choices_do_not_collapse():
     assert not varied["collapsed"]
 
 
+def test_entropy_uses_the_same_mobility_condition_as_source_probability():
+    legal = np.ones((20, 5), dtype=bool)
+    legal[::2, 2] = False
+    p = legal.astype(float) / legal.sum(1, keepdims=True)
+    p[1::2] = [0, 0, 1, 0, 0]
+    result = summarize_sources(p, legal, cfg())
+    assert result["normalized_source_entropy"] == pytest.approx(.5)
+    assert result["dominant_source_conditional_entropy"] == 0
+    assert result["collapsed"]
+
+
 def test_only_one_movable_piece_is_excluded():
     legal = np.ones((21, 5), dtype=bool)
     legal[-1] = [1, 0, 0, 0, 0]
@@ -118,3 +129,10 @@ def test_empty_or_unsupported_probe_cannot_report_healthy():
     config.min_source_samples = 100
     with pytest.raises(ValueError):
         config.validate()
+
+
+def test_short_diagnostic_counts_games_and_separates_distribution_from_matches():
+    config = load_config(Namespace(config="configs/v100_opening_diagnostic.yaml", extra=[]))
+    assert config.target_completed_games == 20000
+    assert config.save_every_games == 5000 and config.opening.every_games == 1000
+    assert not config.eval_enabled and config.opening.enabled
