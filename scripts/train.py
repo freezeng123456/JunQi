@@ -1237,6 +1237,12 @@ def train(cfg: TrainConfig) -> None:
                     belief_trainer=belief_trainer,
                 )
                 print(f"[train] Checkpoint saved: {ckpt_path}")
+                if game_progress is not None:
+                    with open(os.path.join(cfg.save_dir, "checkpoint_games.jsonl"), "a") as out:
+                        out.write(json.dumps(dict(completed_games=game_progress.completed_games,
+                            crossed_milestone=(game_progress.completed_games // cfg.save_every_games) * cfg.save_every_games,
+                            rollout=rollout_idx + 1, checkpoint=ckpt_path,
+                            opening_check=None if opening_monitor is None else opening_monitor.last_result)) + "\n")
                 # Log config text once on first save
                 if rollout_idx + 1 == cfg.save_every:
                     with open(cfg_path) as f:
