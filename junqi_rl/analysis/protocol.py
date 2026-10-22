@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 
-def paired_score_interval(records, *, seed=0, samples=5000):
+def paired_score_interval(records, *, seed=0, samples=5000, pair_key="setup_sha256"):
     """Bootstrap whole layout pairs, keeping both team assignments together."""
     import numpy as np
     pairs = {}
@@ -15,7 +15,7 @@ def paired_score_interval(records, *, seed=0, samples=5000):
         outcome = record["outcome"]
         if outcome not in {"win", "draw", "loss"}:
             raise ValueError("paired score requires all games to finish")
-        key = record["setup_sha256"]
+        key = record[pair_key]
         team = record["first_team"]
         if team not in (0, 1) or team in pairs.setdefault(key, {}):
             raise ValueError("duplicate or invalid team assignment in layout pair")
@@ -26,7 +26,8 @@ def paired_score_interval(records, *, seed=0, samples=5000):
     bootstrap = np.random.default_rng(seed).choice(scores, (samples, len(scores))).mean(axis=1)
     low, high = np.quantile(bootstrap, [0.025, 0.975])
     return dict(layout_pairs=len(scores), games=2 * len(scores), score=float(scores.mean()),
-        score_ci95_low=float(low), score_ci95_high=float(high), method="paired_layout_bootstrap")
+        score_ci95_low=float(low), score_ci95_high=float(high),
+        method="paired_layout_bootstrap" if pair_key == "setup_sha256" else "paired_scenario_bootstrap")
 
 
 @dataclass(frozen=True, slots=True)

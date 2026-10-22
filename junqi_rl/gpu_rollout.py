@@ -616,6 +616,7 @@ class GpuRollout:
         if not self.known_only or not getattr(_cuda, "FACTS_RUNTIME_CHECKPOINT", False):
             raise RuntimeError("facts runtime checkpoint requires known_only and a rebuilt native extension")
         return dict(version=1, identity_encoding=self.identity_encoding,
+            setup_pool_revision=getattr(self, "setup_pool_revision", 0),
             global_dims=self.global_dims, show_mode=self.show_mode.value,
             native=self.state.checkpoint_to_host(), setup_pool=_training_setup_pool.copy())
 
@@ -632,6 +633,7 @@ class GpuRollout:
         self.state.checkpoint_from_host(state["native"])
         _training_setup_pool = np.ascontiguousarray(pool).copy()
         _cuda.upload_setup_pool(_training_setup_pool)
+        self.setup_pool_revision = state.get("setup_pool_revision", 0)
         self._last_step_ptrs = {}
         self._last_result = None
 
@@ -639,6 +641,10 @@ class GpuRollout:
         """Hash the actual reset pool once per counted training segment."""
         import hashlib
         return [hashlib.sha256(row.tobytes()).hexdigest() for row in _training_setup_pool]
+
+    def setup_pool_snapshot(self):
+        """Host reset pool; no GPU readback or mutable engine state."""
+        return _training_setup_pool.copy()
 
     def move_counter_torch(self):
         import torch
@@ -757,7 +763,7 @@ class GpuRollout:
     # Episode lifecycle
     # ------------------------------------------------------------------
 
-    def reset(self, seed_base: int = 0) -> None:
+    def reset(self, seed_base: int = 0, *, setups=None) -> None:
         """Build N fresh games, upload to device, zero the result buffer.
 
         Three setup modes (precedence: mixed > canonical > random):
@@ -768,7 +774,12 @@ class GpuRollout:
           canonical lineup.
         * Otherwise — uniform-random for every seat.
         """
-        if self._mixed_setup:
+        if setups is not None:
+            from junqi_core.setup import validate_setup
+            if len(setups) != self.num_envs or any(not validate_setup(s).ok for s in setups):
+                raise ValueError("explicit evaluation setups must contain one legal board per environment")
+            states = [GameState.new_game(s, show_mode=self.show_mode) for s in setups]
+        elif self._mixed_setup:
             from junqi_core.rules import Seat
             from junqi_core.setup import generate_random_lineup
             own_seats = {Seat.SOUTH.value, Seat.NORTH.value}
@@ -1180,6 +1191,7 @@ class GpuRollout:
         refresh_gpu_setup_pool(pool)
         _training_setup_pool = pool
         self.last_setup_pool_unique = int(np.unique(pool, axis=0).shape[0])
+        self.setup_pool_revision = getattr(self, "setup_pool_revision", 0) + 1
         return int(pool.shape[0])
 
     def snapshot_env_arrangements(self) -> "np.ndarray":

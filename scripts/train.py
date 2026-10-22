@@ -662,6 +662,20 @@ def train(cfg: TrainConfig) -> None:
                   f"train_step={trainer.num_train_step}")
 
     # ---- Signal handling (graceful stop on SIGINT/SIGTERM) ----
+    if arr_trainer is not None and is_rank0:
+        import hashlib
+        initial_hash = hashlib.sha256()
+        initial_policy_hash = hashlib.sha256()
+        for name, tensor in sorted(arr_trainer.net.state_dict().items()):
+            initial_hash.update(name.encode())
+            initial_hash.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+            if name.startswith("policy_out."):
+                initial_policy_hash.update(name.encode())
+                initial_policy_hash.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+        with open(os.path.join(cfg.save_dir, "arrangement_initialization.json"), "w") as out:
+            json.dump(dict(parameter_sha256=initial_hash.hexdigest(), policy_head_sha256=initial_policy_hash.hexdigest(), resume=cfg.resume,
+                init_policy=cfg.init_policy, optimizer_updates=arr_trainer._total_batches), out, indent=2)
+
     _stop_requested = [False]
 
     def _handle_signal(sig, frame):
@@ -717,10 +731,10 @@ def train(cfg: TrainConfig) -> None:
     legacy_environment_steps = start_rollout * cfg.env.num_envs * cfg.env.steps_per_env
     if cfg.target_completed_games:
         from junqi_rl.training.game_progress import GameProgress, capture_runtime, restore_runtime
-        game_progress = GameProgress(cfg.env.num_envs, device)
+        game_progress = GameProgress(cfg.env.num_envs, device, track_arrangements=arr_enabled)
         if resume_sd is not None and "runtime_state" in resume_sd:
             legacy_environment_steps = restore_runtime(
-                resume_sd["runtime_state"], env, game_progress, rng, cfg)
+                resume_sd["runtime_state"], env, game_progress, rng, cfg, arr_buffer=arr_buffer)
             restored_world = True
             print(f"[games] Restored live games and RNG; completed={game_progress.completed_games}")
         elif resume_sd is not None:
@@ -728,7 +742,8 @@ def train(cfg: TrainConfig) -> None:
             legacy_environment_steps = start_rollout * old_cfg.get("num_envs", cfg.env.num_envs) * old_cfg.get("steps_per_env", cfg.env.steps_per_env)
             print("[games] Legacy checkpoint: completed-game history unknown; starting a new tracked lineage with fresh games")
         trainer.runtime_state_provider = lambda: capture_runtime(
-            env, game_progress, rng, cfg, legacy_environment_steps, saved_rng=eval_rng_state)
+            env, game_progress, rng, cfg, legacy_environment_steps, saved_rng=eval_rng_state,
+            arr_buffer=arr_buffer)
         next_game_save = (game_progress.completed_games // cfg.save_every_games + 1) * cfg.save_every_games
         next_game_eval = (game_progress.completed_games // cfg.eval_every_games + 1) * cfg.eval_every_games
         print(f"[games] Target={cfg.target_completed_games}; legacy environment steps={legacy_environment_steps}")
@@ -742,7 +757,7 @@ def train(cfg: TrainConfig) -> None:
         mc.step = rollout_idx
 
         # ---- P0 arrangement-net refresh (before collect) ----
-        if arr_enabled and (rollout_idx - start_rollout) % cfg.arr.refresh_every == 0:
+        if arr_enabled and (rollout_idx % cfg.arr.refresh_every == 0 or arr_buffer.need_arrangements):
             t_arr0 = time.time()
             # Ensure old rows are dropped so new ones can be tracked.
             arr_buffer.filter(current_step=rollout_idx)
@@ -755,6 +770,8 @@ def train(cfg: TrainConfig) -> None:
             # Random-lineup fallback rows have placeholder old-policy
             # statistics, so they are neither rollout-policy setups nor PPO data.
             trainable_arr = ~arr_gen.fallback_mask
+            if game_progress is not None and not bool(trainable_arr.all()):
+                raise RuntimeError("Counted arrangement training requires neural samples without random fallback")
             pool_size = env.refresh_setup_pool_from_arrangements(
                 arr_gen.samples[trainable_arr],
                 arr_gen.seat_idx[trainable_arr],
@@ -783,7 +800,7 @@ def train(cfg: TrainConfig) -> None:
         # Per-rollout cache of env arrangement snapshots (for the on_termination
         # callback). Grabbed once here and re-sliced as envs terminate.
         env_arr_snapshot = None
-        if arr_enabled:
+        if arr_enabled and game_progress is None:
             # (N, 4, 30) int64 vocab-idx
             env_arr_snapshot = env.snapshot_env_arrangements()
 
@@ -912,7 +929,7 @@ def train(cfg: TrainConfig) -> None:
             # If belief training is also on, compose both callbacks.
             callbacks = []
             needs_arr_snapshot_refresh = False
-            if arr_enabled and _collect is collect_rollout_gpu_v2:
+            if arr_enabled and game_progress is None and _collect is collect_rollout_gpu_v2:
                 callbacks.append(_arr_on_termination)
                 needs_arr_snapshot_refresh = True
             if belief_sampler is not None and _collect is collect_rollout_gpu_v2:
@@ -958,6 +975,14 @@ def train(cfg: TrainConfig) -> None:
         final_rollout = rollout_idx + 1
         if game_progress is not None:
             records = game_progress.finish(final_rollout)
+            if arr_enabled:
+                from junqi_rl.arrangement.credits import credit_completed_games
+                matched = credit_completed_games(arr_buffer, game_progress.completed_setups, records,
+                    random_opponent=cfg.random_opponent)
+                expected = len(records) * (2 if cfg.random_opponent else 4)
+                if matched != expected:
+                    raise RuntimeError(f"Lost layout rewards: matched {matched}/{expected}")
+                mc.inc("arr/terminal_credits", float(matched))
             with open(os.path.join(cfg.save_dir, "training_games.jsonl"), "a") as out:
                 for record in records:
                     out.write(json.dumps(record) + "\n")
@@ -1020,6 +1045,14 @@ def train(cfg: TrainConfig) -> None:
                 )
             if arr_metrics:
                 mc.update(arr_metrics)
+                if arr_metrics.get("arr_train/n_batches", 0) and game_progress is not None:
+                    arr_buffer.ready_flags.zero_()
+            if game_progress is not None:
+                with open(os.path.join(cfg.save_dir, "arrangement_progress.jsonl"), "a") as out:
+                    json.dump(dict(rollout=final_rollout, completed_games=game_progress.completed_games,
+                        terminal_credits=matched, optimizer_updates=arr_trainer._total_batches,
+                        buffer_rows=len(arr_buffer), metrics=arr_metrics), out)
+                    out.write("\n")
             mc.inc("time/arr_train_s", time.time() - t_arr_train0)
 
         # ---- BeliefNet (P1) train + refresh ----
@@ -1291,6 +1324,22 @@ def train(cfg: TrainConfig) -> None:
                             with open(os.path.join(cfg.save_dir, f"paired_h2h_{rollout_idx+1:06d}.json"), "w") as out:
                                 json.dump(paired, out, indent=2)
                             print(f"[h2h-paired] score={paired['score']:.3f} ci95=[{paired['score_ci95_low']:.3f}, {paired['score_ci95_high']:.3f}] layouts={paired['layout_pairs']}")
+                        if arr_enabled:
+                            from junqi_rl.analysis.arrangement_eval import evaluate_arrangement_agent
+                            agent_result, agent_records = evaluate_arrangement_agent(
+                                eval_policy, _eval_baseline_policy, arr_net,
+                                num_games=baseline_games, num_envs=cfg.env.num_envs, device=device,
+                                seed=eval_seed + 100_019, max_moves=cfg.env.max_num_moves,
+                                autocast_dtype=cfg.ppo.get_dtype())
+                            agent_result.update(completed_training_games=game_progress.completed_games
+                                if game_progress is not None else None,
+                                baseline_checkpoint=cfg.eval_baseline_ckpt, rollout=rollout_idx + 1)
+                            with open(os.path.join(cfg.save_dir, f"agent_h2h_{rollout_idx+1:06d}.json"), "w") as out:
+                                json.dump(agent_result, out, indent=2)
+                            write_game_records(os.path.join(cfg.save_dir,
+                                f"agent_h2h_{rollout_idx+1:06d}_games.jsonl"), agent_records)
+                            print(f"[agent-h2h] score={agent_result['score']:.3f} "
+                                  f"commander_hq_rate={agent_result['commander_hq_rate']:.3f}")
                         h2h_score = completed_evaluation_score(h2h, prefix="h2h")
                         if h2h_score is not None and h2h_score > _best_h2h_score:
                             _best_h2h_score = h2h_score

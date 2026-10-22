@@ -288,6 +288,17 @@ class ArrangementNet(nn.Module):
             torch.zeros(1, 1, N_PIECE_TYPE_WITH_NONE),
             persistent=False,
         )
+        # Nested legal regions: flag HQs ⊂ mine rows ⊂ bomb rows.
+        # Reserve sufficient suffix capacity for each restricted group.
+        # This only rules out prefixes with no legal completion.
+        groups = torch.zeros(N_PIECE_TYPE_WITH_NONE, 3)
+        groups[JUNQI_IDX] = 1
+        groups[DILEI_IDX, 1:] = 1
+        groups[ZHADAN_IDX, 2] = 1
+        allowed = _build_slot_type_allowed()[:, [JUNQI_IDX, DILEI_IDX, ZHADAN_IDX]].float()
+        suffix = allowed.flip(0).cumsum(0).flip(0) - allowed
+        self.register_buffer("completion_groups", groups, persistent=False)
+        self.register_buffer("completion_capacity", suffix, persistent=False)
 
         # Transformer trunk
         self.layers = nn.ModuleList([
@@ -419,6 +430,10 @@ class ArrangementNet(nn.Module):
         static = self.slot_type_allowed[:T_prime].unsqueeze(0)  # (1, T_prime, V)
 
         mask = count_ok & static                             # (B, T_prime, V)
+        required = remaining @ self.completion_groups.to(remaining.dtype)
+        after_choice = required[:, :, None, :] - self.completion_groups[None, None]
+        feasible = (after_choice <= self.completion_capacity[None, :T_prime, None]).all(-1)
+        mask &= feasible
 
         # NOTE: We do NOT raise here even when some prefix has zero legal
         # choices. Dead-end prefixes are a legitimate state during

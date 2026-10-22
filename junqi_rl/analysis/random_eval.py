@@ -140,7 +140,7 @@ def _setup_hashes(rollout, batch_size):
 def _evaluate_gpu_games(
     first_policy, second_policy, *, num_envs, num_games, device, seed,
     max_moves, autocast_dtype, first_team, greedy, prefix, game_records, setup_seed,
-    belief_net=None, belief_refresh_steps=128, belief_options=None,
+    belief_net=None, belief_refresh_steps=128, belief_options=None, setup_factory=None,
 ):
     """Run fixed seeded games in bounded waves; never replace an unfinished game.
 
@@ -177,7 +177,11 @@ def _evaluate_gpu_games(
             )
         rollout = _GPU_ROLLOUT_CACHE[cache_key]
         setup_base = seed if setup_seed is None else setup_seed
-        rollout.reset(seed_base=setup_base + first_id)
+        if setup_factory is None:
+            rollout.reset(seed_base=setup_base + first_id)
+        else:
+            rollout.reset(seed_base=setup_base + first_id,
+                setups=[setup_factory(first_id + i, first_team) for i in range(batch_size)])
         hashes = _setup_hashes(rollout, batch_size)
         seeds = torch.arange(seed + first_id, seed + first_id + batch_size, device=dev)
         active = np.ones(batch_size, dtype=bool)
@@ -242,7 +246,8 @@ def _evaluate_gpu_games(
                 game_records.append({
                     "game_id": first_id + i, "setup_seed": setup_base + first_id + i,
                     "random_seed": seed + first_id + i, "setup_sha256": hashes[i],
-                    "setup_source": "uniform_seeded_game", "first_team": first_team,
+                    "setup_source": "explicit_agent_setups" if setup_factory else "uniform_seeded_game",
+                    "scenario_pair_id": first_id + i, "first_team": first_team,
                     "opponent": "random" if second_policy is None else "policy",
                     "outcome": outcomes[i], "moves": int(game_moves[i]),
                     "termination_reason": reason, "backend": "gpu",
@@ -503,6 +508,7 @@ def evaluate_head_to_head_gpu(
     first_team: int = 0, greedy: bool = True, game_records: list[dict] | None = None,
     setup_seed: int | None = None,
     belief_net=None, belief_refresh_steps: int = 128, belief_options: dict | None = None,
+    setup_factory=None,
 ) -> dict[str, float]:
     """Evaluate fixed seeded games, from first_policy's point of view."""
     return _evaluate_gpu_games(
@@ -510,6 +516,7 @@ def evaluate_head_to_head_gpu(
         device=device, seed=seed, max_moves=max_moves, autocast_dtype=autocast_dtype,
         first_team=first_team, greedy=greedy, prefix="h2h", game_records=game_records, setup_seed=setup_seed,
         belief_net=belief_net, belief_refresh_steps=belief_refresh_steps, belief_options=belief_options,
+        setup_factory=setup_factory,
     )
 
 
@@ -527,6 +534,7 @@ def evaluate_paired_head_to_head(
     game_records: list[dict] | None = None,
     setup_seed: int | None = None,
     belief_net=None, belief_refresh_steps: int = 128, belief_options: dict | None = None,
+    setup_factory=None,
 ) -> dict[str, float]:
     """Both team assignments on paired seeds; metrics from first_policy."""
 
@@ -547,6 +555,7 @@ def evaluate_paired_head_to_head(
             first_team=0,
             greedy=greedy, game_records=game_records, setup_seed=setup_seed,
             belief_net=belief_net, belief_refresh_steps=belief_refresh_steps, belief_options=belief_options,
+            setup_factory=setup_factory,
         )
     ]
     if team_one_games > 0:
@@ -563,6 +572,7 @@ def evaluate_paired_head_to_head(
                 first_team=1,
                 greedy=greedy, game_records=game_records, setup_seed=setup_seed,
                 belief_net=belief_net, belief_refresh_steps=belief_refresh_steps, belief_options=belief_options,
+                setup_factory=setup_factory,
             )
         )
     metrics = merge_evaluations(*shards, prefix="h2h")

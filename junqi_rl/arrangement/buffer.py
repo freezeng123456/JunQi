@@ -191,12 +191,12 @@ class ArrangementBuffer:
 
         # Tensors sized against the buffer current-size, re-allocated inside
         # add_arrangements(). Kept as attrs so callers can introspect.
-        self.counts: Tensor
-        self.rewards: Tensor
-        self.ready_flags: Tensor
-        self.adv_est: Tensor
-        self.val_est: Tensor
-        self.reg_val_est: Tensor
+        self.counts = torch.zeros((0, *self.count_shape), device=device)
+        self.rewards = torch.zeros((0, *self.reward_shape), device=device)
+        self.ready_flags = torch.zeros(0, dtype=torch.bool, device=device)
+        self.adv_est = torch.zeros((0, ARRANGEMENT_SIZE), device=device)
+        self.val_est = torch.zeros((0, *self.value_shape), device=device)
+        self.reg_val_est = torch.zeros((0, ARRANGEMENT_SIZE), device=device)
 
         self._lookup_index: dict[int, int] = {}  # row_id → row in buffer
 
@@ -310,6 +310,8 @@ class ArrangementBuffer:
                 self.ents = self.ents[keep]
                 self.log_probs = self.log_probs[keep]
                 self.step_added = self.step_added[keep]
+                for name in self._reward_fields:
+                    setattr(self, name, getattr(self, name)[keep])
                 self._row_ids = [rid for rid, k in zip(self._row_ids, old_keep_cpu) if k]
 
         # ---- 3. Prepend new rows (Ataraxos convention: newest at idx 0) --
@@ -321,18 +323,11 @@ class ArrangementBuffer:
         self.step_added = torch.cat([new_step, self.step_added], dim=0)
         self._row_ids = new_ids_kept + self._row_ids
 
-        # --- Re-allocate per-row state for reward collection / post-processing.
-        cur_N = self.arrangements.size(0)
-        self.counts = torch.zeros((cur_N, *self.count_shape), device=self.device)
-        self.rewards = torch.zeros(cur_N, *self.reward_shape,
-                                   device=self.device, dtype=torch.float32)
-        self.ready_flags = torch.zeros(cur_N, dtype=torch.bool, device=self.device)
-        self.adv_est = torch.zeros((cur_N, ARRANGEMENT_SIZE),
-                                   device=self.device, dtype=torch.float32)
-        self.val_est = torch.zeros((cur_N, *self.value_shape),
-                                   device=self.device, dtype=torch.float32)
-        self.reg_val_est = torch.zeros((cur_N, ARRANGEMENT_SIZE),
-                                       device=self.device, dtype=torch.float32)
+        # Preserve outcomes for older layouts still used by live games.
+        for name in self._reward_fields:
+            old = getattr(self, name)
+            fresh = torch.zeros((N_kept, *old.shape[1:]), device=self.device, dtype=old.dtype)
+            setattr(self, name, torch.cat([fresh, old], dim=0))
 
         # Update the id→row lookup (used by add_rewards).
         self._lookup_index = {rid: i for i, rid in enumerate(self._row_ids)}
@@ -348,7 +343,7 @@ class ArrangementBuffer:
         env_seats: Tensor,            # (E,) int64 seat index in [0, 4)
         is_newly_terminal: Tensor,    # (E,) bool
         rewards: Tensor,              # (E,) float in {-1, 0, 1}
-    ) -> None:
+    ) -> int:
         """Record the terminal reward for each env that just finished.
 
         ``env_arrangements[e]`` is the (integer-index) lineup that env ``e``
@@ -383,7 +378,7 @@ class ArrangementBuffer:
             raise ValueError(f"rewards must be ({E},), got {rewards.shape}")
 
         if not bool(is_newly_terminal.any()):
-            return
+            return 0
 
         term_mask = is_newly_terminal
         arr_term = env_arrangements[term_mask].to(torch.uint8)
@@ -406,17 +401,23 @@ class ArrangementBuffer:
                 rows.append(row)
                 kept.append(i)
         if not rows:
-            return
+            return 0
 
         idx = torch.tensor(rows, device=self.device, dtype=torch.long)
         kept_idx = torch.tensor(kept, device=self.device, dtype=torch.long)
 
-        # Running-mean reward update (matches Ataraxos).
-        r_in = rewards_term[kept_idx]                                  # (K, *reward_shape)
-        c = self.counts[idx]                                           # (K, *count_shape)
-        self.rewards[idx] = (c * self.rewards[idx] + r_in) / (c + 1)
-        self.counts[idx] = c + 1
-        self.ready_flags[idx] = True
+        # Several games can finish with the same layout in one batch.
+        # Advanced-index assignment would silently keep only one outcome.
+        unique, inverse = torch.unique(idx, return_inverse=True)
+        sums = torch.zeros((len(unique), *self.reward_shape), device=self.device)
+        sums.index_add_(0, inverse, rewards_term[kept_idx])
+        added = torch.bincount(inverse, minlength=len(unique)).to(self.counts.dtype)
+        added = added.reshape(len(unique), *self.count_shape)
+        c = self.counts[unique]
+        self.rewards[unique] = (c * self.rewards[unique] + sums) / (c + added)
+        self.counts[unique] = c + added
+        self.ready_flags[unique] = True
+        return len(rows)
 
     # --------------------------------------------------------------- process_data
 
@@ -595,6 +596,8 @@ class ArrangementBuffer:
         self.ents = self.ents[keep]
         self.log_probs = self.log_probs[keep]
         self.step_added = self.step_added[keep]
+        for name in self._reward_fields:
+            setattr(self, name, getattr(self, name)[keep])
 
         # Rebuild row_ids and lookup with the kept rows.
         keep_cpu = keep.cpu().tolist()
@@ -614,6 +617,27 @@ class ArrangementBuffer:
             torch.cuda.empty_cache()
 
         self.need_arrangements = True
+
+    _reward_fields = ("counts", "rewards", "ready_flags", "adv_est", "val_est", "reg_val_est")
+    _sample_fields = ("arrangements", "seat_idx", "values", "ents", "log_probs", "step_added")
+
+    def state_dict(self):
+        """Persist sampled-policy statistics and outstanding terminal credits."""
+        return dict(version=1, storage_duration=self.storage_duration,
+            use_cat_vf=self.use_cat_vf, n_vf_cat=self.n_vf_cat,
+            need_arrangements=self.need_arrangements,
+            tensors={name: getattr(self, name).detach().cpu().clone()
+                     for name in self._sample_fields + self._reward_fields})
+
+    def load_state_dict(self, state):
+        if (state["version"] != 1 or state["storage_duration"] != self.storage_duration
+                or state["use_cat_vf"] != self.use_cat_vf or state["n_vf_cat"] != self.n_vf_cat):
+            raise ValueError("arrangement buffer contract mismatch")
+        for name in self._sample_fields + self._reward_fields:
+            setattr(self, name, state["tensors"][name].to(self.device).clone())
+        self.need_arrangements = state["need_arrangements"]
+        self._row_ids = _arrangement_ids(self.arrangements.argmax(-1), self.seat_idx)
+        self._lookup_index = {rid: i for i, rid in enumerate(self._row_ids)}
 
     # --------------------------------------------------------------- internals
 

@@ -317,8 +317,13 @@ def validate_config(cfg: TrainConfig) -> None:
     if cfg.target_completed_games < 0 or min(cfg.save_every_games, cfg.eval_every_games) <= 0:
         raise ValueError("game budget must be nonnegative and game cadences positive")
     if cfg.target_completed_games and (not cfg.env.use_gpu_rollout or
-            cfg.net.identity_encoding != "known_only" or cfg.arr.enabled or cfg.belief.enabled):
-        raise ValueError("completed-game training currently requires the GPU facts-only move baseline")
+            cfg.net.identity_encoding != "known_only" or cfg.belief.enabled):
+        raise ValueError("completed-game training requires GPU facts-only observations with legacy belief disabled")
+    if cfg.target_completed_games and cfg.arr.enabled:
+        if cfg.arr.storage_duration < (cfg.env.max_num_moves + cfg.env.steps_per_env - 1) // cfg.env.steps_per_env + cfg.arr.refresh_every:
+            raise ValueError("arr.storage_duration must retain layouts until every in-flight game can finish")
+        if cfg.fixed_setup_styles or cfg.mixed_setup:
+            raise ValueError("learned arrangements cannot be combined with fixed or mixed setups")
     resolve_policy_features(cfg.net)
     from junqi_core.observation import validate_identity_encoding
     validate_identity_encoding(cfg.net.identity_encoding, cfg.net.use_global_summary)
