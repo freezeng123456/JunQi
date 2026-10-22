@@ -1,0 +1,28 @@
+# Fresh move and setup networks; completed-game budget starts at zero.
+extends: v100_facts_arrangement.yaml
+save_dir: exps/v100_facts_scratch_opening
+target_completed_games: 10000000
+resume: ''
+init_policy: ''
+seed: 20261023
+env:
+  seed: 20261023
+ppo:
+  # Every valid controlled transition receives policy/value/entropy updates.
+  adv_filt_rate: 1.0
+  adv_filt_thresh: 0.0
+  temperature_coef: 0.1
+  temperature_ceil: 0.1
+  temperature_floor: 0.1
+  temperature_decay: 0.0
+opening:
+  enabled: true
+  every_games: 1000
+  boards_per_bank: 128
+  batch_size: 64
+  seed: 93102201
+  min_movable_pieces: 4
+  min_source_samples: 64
+  source_mass_limit: 0.95
+  source_entropy_limit: 0.2
+  patience: 3

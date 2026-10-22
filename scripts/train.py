@@ -330,6 +330,15 @@ def train(cfg: TrainConfig) -> None:
     n_params = sum(p.numel() for p in policy.parameters())
     if is_rank0:
         print(f"[train] JunqiNet parameters: {n_params:,}")
+        if cfg.opening.enabled and not cfg.resume:
+            import hashlib
+            digest = hashlib.sha256()
+            for name, tensor in sorted(policy.state_dict().items()):
+                digest.update(name.encode())
+                digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+            with open(os.path.join(cfg.save_dir, "policy_initialization.json"), "w") as out:
+                json.dump(dict(parameter_sha256=digest.hexdigest(), init_policy=cfg.init_policy,
+                    resume=cfg.resume, seed=cfg.seed, completed_games=0), out, indent=2)
 
     # ---- Trainer (handles optimiser and AMP) ----
     trainer = PPOTrainer(policy, cfg.ppo, device=device)
@@ -749,6 +758,19 @@ def train(cfg: TrainConfig) -> None:
         print(f"[games] Target={cfg.target_completed_games}; legacy environment steps={legacy_environment_steps}")
     final_rollout = start_rollout
     game_target_reached = bool(game_progress is not None and game_progress.completed_games >= cfg.target_completed_games)
+    opening_monitor = None
+    opening_collapse = False
+    if cfg.opening.enabled:
+        from junqi_rl.training.opening_monitor import OpeningMonitor
+        opening_monitor = OpeningMonitor(cfg.opening, cfg.save_dir)
+        trainer.opening_monitor = opening_monitor
+        if resume_sd is not None:
+            if "opening_monitor" not in resume_sd:
+                raise ValueError("resume checkpoint is missing the opening-monitor state")
+            opening_monitor.load_state_dict(resume_sd["opening_monitor"])
+        if opening_monitor.due(game_progress.completed_games):
+            opening_monitor.check(trainer.policy, completed_games=game_progress.completed_games,
+                rollout=start_rollout)
 
     for rollout_idx in range(start_rollout, cfg.total_rollouts):
         if game_target_reached:
@@ -1184,6 +1206,24 @@ def train(cfg: TrainConfig) -> None:
             t_rollout_start = time.time()
             mc.reset()
 
+        # Probe full opening probabilities at game boundaries, never per move.
+        if opening_monitor is not None and opening_monitor.due(game_progress.completed_games):
+            opening_result = opening_monitor.check(trainer.policy,
+                completed_games=game_progress.completed_games, rollout=rollout_idx + 1)
+            print(f"[opening] games={game_progress.completed_games} "
+                f"mass={opening_result['fixed']['max_conditional_source_mass']:.5f} "
+                f"Hsrc={opening_result['fixed']['normalized_source_entropy']:.5f} "
+                f"streak={opening_result['collapse_streak']} status={opening_result['status']}")
+            if opening_result["status"] == "collapse":
+                opening_collapse = True
+                _stop_requested[0] = True
+                path = save_checkpoint(trainer, cfg, rollout_idx + 1, cfg.save_dir,
+                    arr_trainer=arr_trainer, belief_trainer=belief_trainer)
+                with open(os.path.join(cfg.save_dir, "opening_collapse.json"), "w") as out:
+                    json.dump(dict(opening_result, checkpoint=path), out, indent=2, allow_nan=False)
+                print(f"[opening] COLLAPSE: evidence and checkpoint saved: {path}")
+                break
+
         # ---- Periodic checkpoint (rank-0 only; others wait at barrier) ----
         save_due = ((game_progress.completed_games >= next_game_save or game_target_reached)
                     if game_progress is not None else (rollout_idx + 1) % cfg.save_every == 0)
@@ -1466,7 +1506,7 @@ def train(cfg: TrainConfig) -> None:
             dist.barrier()
 
     if game_progress is not None:
-        status = "target_reached" if game_target_reached else ("interrupted" if _stop_requested[0] else "rollout_ceiling")
+        status = "opening_collapse" if opening_collapse else ("target_reached" if game_target_reached else ("interrupted" if _stop_requested[0] else "rollout_ceiling"))
         result = dict(game_progress.summary(), status=status,
             target_completed_games=cfg.target_completed_games, rollout=final_rollout,
             optimizer_updates=trainer.num_train_step,

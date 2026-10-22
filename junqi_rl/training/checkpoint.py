@@ -52,6 +52,9 @@ def save_checkpoint(
         }
     if belief_trainer is not None:
         state["belief"] = belief_trainer.state_dict()
+    opening_monitor = getattr(trainer, "opening_monitor", None)
+    if opening_monitor is not None:
+        state["opening_monitor"] = opening_monitor.state_dict()
 
     atomic_write(checkpoint_path, lambda handle: torch.save(state, handle))
     update_checkpoint_alias(

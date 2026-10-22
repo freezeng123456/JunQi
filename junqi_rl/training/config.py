@@ -19,6 +19,7 @@ from junqi_rl.networks.junqi_net import JunqiNetConfig
 from junqi_rl.training.arr_ppo import ArrangementPPOConfig
 from junqi_rl.training.belief_ppo import BeliefPPOConfig
 from junqi_rl.training.ppo import PPOConfig
+from junqi_rl.training.opening_monitor import OpeningMonitorConfig
 
 
 @dataclass
@@ -94,6 +95,7 @@ class TrainConfig:
     arr: ArrangementTrainConfig = field(default_factory=ArrangementTrainConfig)
     belief: BeliefTrainConfig = field(default_factory=BeliefTrainConfig)
     rollout: RolloutTrainConfig = field(default_factory=RolloutTrainConfig)
+    opening: OpeningMonitorConfig = field(default_factory=OpeningMonitorConfig)
 
     save_dir: str = "exps/default"
     total_rollouts: int = 10_000
@@ -310,6 +312,9 @@ _NON_CONFIG_ARGS = {"config", "extra", "resume_cli", "validate_only"}
 
 def validate_config(cfg: TrainConfig) -> None:
     """Fail before allocating models when a configuration is inconsistent."""
+    cfg.opening.validate()
+    if cfg.opening.enabled and not cfg.target_completed_games:
+        raise ValueError("opening monitoring requires counted GPU training")
     if type(cfg.net.use_global_summary) is not bool:
         raise ValueError("net.use_global_summary must be a boolean")
     if cfg.resume and cfg.init_policy:
