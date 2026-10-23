@@ -1,5 +1,5 @@
-# Ataraxos-aligned run: self-play from scratch, setup net and move net
-# trained in tandem from the first rollout.
+# Strict Ataraxos-style run: tabula-rasa self-play from scratch, with the
+# setup net and move net trained in tandem from the first rollout.
 #
 # Deliberate alignment choices, each a departure from the vs-random baseline:
 #   * random_opponent: false  — self-play from rollout 0, no warm start.
@@ -52,15 +52,16 @@ ppo:
   # torch.compile under self-play is a documented crash path (DDP_DEPLOYMENT.md).
   torch_compile: false
   lr_schedule_unit: rollout
-  # Exploration-preserving departure from the paper coefficient:
-  # alpha(t) = 0.1 / t^0.3 on the rollout index, with no floor.
+  # Strict move-policy magnet from Ataraxos Appendix D.4:
+  # alpha(t) = 0.05 / t^0.3 on the rollout index, with no floor.
   temperature_schedule_unit: rollout
-  temperature_coef: 0.1
+  temperature_coef: 0.05
   temperature_decay: 0.3
   temperature_floor: 0.0
-  # Keep the current exploration target explicit. This is the public-code
-  # style flat legal-action magnet, not the paper's piece-then-destination rho.
-  magnet_shape: uniform_legal
+  # The paper's rho: choose a movable source uniformly, then choose one of
+  # that source's legal destinations uniformly. A flat legal-action uniform
+  # prior overweights sources with many destinations.
+  magnet_shape: piece_then_dest
   # Split collect ``policy.act`` so 2048 envs fit the ~10M net.
   act_chunk_size: 256
   max_grad_norm: 0.267

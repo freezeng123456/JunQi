@@ -874,6 +874,12 @@ def collect_rollout_gpu_v2(
                 # source biased by the policy's confidence in actions it
                 # never actually took.
 
+        # Capture the action that was actually applied to the live game. This
+        # is used only for completed-game opening diagnostics and has no
+        # influence on the policy loss.
+        if game_progress is not None:
+            game_progress.record_action(actions_can, ~done_t)
+
         # ---- Store pre-step data in GPU buffer ----------------------------
         # Note (2026-05-11 audit): we considered zeroing values/log_probs for
         # envs that were ALREADY terminated at start of step t ("stale rows"),

@@ -94,10 +94,10 @@ def test_ataraxos_config_uses_rollout_quantile_with_timestep_batches() -> None:
     assert cfg.ppo.adv_filt_rate == pytest.approx(0.25)
     assert cfg.ppo.adv_filt_thresh == pytest.approx(0.01)
     assert cfg.ppo.temperature_schedule_unit == "rollout"
-    assert cfg.ppo.temperature_coef == pytest.approx(0.1)
+    assert cfg.ppo.temperature_coef == pytest.approx(0.05)
     assert cfg.ppo.temperature_decay == pytest.approx(0.3)
     assert cfg.ppo.temperature_floor == pytest.approx(0.0)
-    assert cfg.ppo.magnet_shape == "uniform_legal"
+    assert cfg.ppo.magnet_shape == "piece_then_dest"
 
 
 def test_value_all_config_only_decouples_value_sampling() -> None:

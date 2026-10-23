@@ -21,15 +21,19 @@ def test_terminal_accounting_survives_reset_and_resume():
     games.begin(world, 2, reset_seed=3000)
     result = {'draw': torch.tensor([False, True, True]), 'winner_team': torch.tensor([1, -1, -1])}
     fired = torch.tensor([True, True, False])
+    games.record_action(torch.tensor([11, 22, 33]), torch.ones(3, dtype=torch.bool))
     games.record(world, result, fired, 0)
     games.after_reset(world, fired, reset_seed=3001)
     moves[:] = torch.tensor([1, 1, 4000])
     fired = torch.tensor([False, False, True])
+    games.record_action(torch.tensor([44, 55, 66]), torch.ones(3, dtype=torch.bool))
     games.record(world, result, fired, 1)
     games.after_reset(world, fired, reset_seed=3002)
     records = games.finish(1)
     assert [r['moves'] for r in records] == [40, 200, 4000]
     assert [r['termination_reason'] for r in records] == ['team_victory','no_combat_limit','total_move_limit']
+    assert [r['first_action'] for r in records] == [11, 22, 33]
+    assert [r['first_source'] for r in records] == [0, 0, 0]
     assert [r['setup_reset_seed'] for r in records] == [3000, 3000, 3000]
     assert [r['initial_setup_sha256'] for r in records] == [hashes[setup_pool_index(i, 3000, len(hashes))] for i in range(3)]
     assert games.completed_games == 3 and games.environment_steps == 6

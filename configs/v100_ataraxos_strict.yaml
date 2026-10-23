@@ -1,0 +1,102 @@
+# V100 resource profile for the strict Ataraxos-style JunQi run.
+# The algorithmic settings come from ataraxos_selfplay.yaml; this child only
+# lowers the parallelism and uses float32 because the verified V100 path does
+# not rely on native bfloat16 support.
+extends: ataraxos_selfplay.yaml
+
+save_dir: exps/v100_ataraxos_strict_v1
+target_completed_games: 10000000
+total_rollouts: 10000000
+save_every_games: 5000
+eval_every_games: 100000
+eval_num_games: 128
+eval_baseline_games: 0
+eval_enabled: true
+save_every: 100
+eval_every: 100
+log_every: 10
+resume: ''
+init_policy: ''
+device: cuda
+seed: 20261024
+torch_deterministic: false
+random_opponent: false
+train_value_on_random_seats: false
+reward_shaping: false
+mixed_setup: false
+belief:
+  enabled: false
+  warmup_rollouts: 0
+  neural_weight: 0.0
+  neural_ramp_rollouts: 0
+disable_belief_train: true
+opening:
+  # The old OpeningMonitor probes a random synthetic board. The strict run
+  # records first actions from completed games instead, so this probe is off.
+  enabled: false
+
+env:
+  num_envs: 128
+  steps_per_env: 256
+  max_num_moves: 4000
+  seed: 20261024
+  use_gpu_rollout: true
+
+ppo:
+  dtype: float32
+  torch_compile: false
+  minibatch_size: 256
+  act_chunk_size: 32
+  # Explicit copies of the strict Ataraxos move settings for auditability.
+  clip_range: 0.2
+  kl_coef: 0.1
+  num_epochs_per_rollout: 1
+  minibatch_group: timestep
+  adv_filter_scope: rollout
+  adv_filt_rate: 0.25
+  adv_filt_thresh: 0.01
+  lr_schedule_unit: rollout
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_floor: 0.000005
+  lr_ceil: 0.0001
+  max_grad_norm: 0.267
+  temperature_schedule_unit: rollout
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.0
+  temperature_ceil: 0.1
+  magnet_shape: piece_then_dest
+
+arr:
+  enabled: true
+  refresh_every: 8
+  n_arr: 512
+  pool_size: 4096
+  storage_duration: 40
+  reg_temp_init: 0.1
+  reg_temp_decay: 0.3
+  reg_temp_floor: 0.0
+  reg_norm: 10.0
+  ppo:
+    lr: 0.00005
+    weight_decay: 0.0
+    clip_range: 0.2
+    policy_coef: 1.0
+    vf_coef: 0.5
+    ent_pred_coef: 1.0
+    kl_coef: 0.1
+    max_grad_norm: 0.5
+    batch_size: 256
+    num_epoch_per_train: 5
+    autocast_dtype: float32
+
+rollout:
+  storage_mode: compact_history
+  csr_legal_mask: true
+  csr_k_max: 256
+
+eval_setup_seed: 20261024
+eval_game_seed: 20261024
+eval_fixed_setup_pool: true
+eval_baseline_ckpt: ''
