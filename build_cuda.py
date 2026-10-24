@@ -11,6 +11,7 @@ Requires:
     nvcc         (/usr/local/cuda/bin/nvcc)
 """
 import os
+import shutil
 import subprocess
 import sys
 import sysconfig
@@ -22,8 +23,19 @@ BUILD_DIR  = os.path.join(CUDA_SRC, "build")
 INSTALL_TO = os.path.join(REPO_ROOT, "junqi_rl")   # so 'import junqi_cuda' works
 
 # ---- Locate cmake ---------------------------------------------------------
-import cmake as _cmake_pkg
-CMAKE_BIN = os.path.join(os.path.dirname(_cmake_pkg.__file__), "data", "bin", "cmake")
+# Prefer the pinned Python wheel when present, but allow cluster modules or a
+# system CMake to satisfy the build.  Beijing BSCC provides a validated CMake
+# module; downloading a second 30 MB wheel on the login node is unnecessary.
+try:
+    import cmake as _cmake_pkg
+except ImportError:
+    _cmake_pkg = None
+if _cmake_pkg is not None:
+    CMAKE_BIN = os.path.join(os.path.dirname(_cmake_pkg.__file__), "data", "bin", "cmake")
+else:
+    CMAKE_BIN = shutil.which("cmake")
+    if not CMAKE_BIN:
+        raise RuntimeError("CMake is required; install the cmake Python package or load a CMake module")
 
 # ---- pybind11 cmake dir ---------------------------------------------------
 import pybind11
