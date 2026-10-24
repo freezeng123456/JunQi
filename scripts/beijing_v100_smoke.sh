@@ -7,6 +7,7 @@ set -euo pipefail
 
 source /etc/profile
 module load gcc/11.4.0 cuda/12.1
+module load cmake/3.23.4
 
 RUN_ROOT="${RUN_ROOT:-/data02/home/${USER}/JunQi_ataraxos_strict_20261024}"
 VENV="${VENV:-/data02/home/${USER}/venvs/junqi-atx}"
