@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
+
+# BSCC's login profile reads a few optional terminal variables. Load it before
+# enabling nounset so a non-interactive Slurm batch shell starts reliably.
+source /etc/profile
 set -euo pipefail
 
 # One-card Beijing BSCC acceptance run. The allocation is deliberately
 # bounded by completed games, not by an assistant-invented wall-clock cap.
 # The long campaign uses the same environment variables and build gate.
 
-source /etc/profile
 module load gcc/11.4.0 cuda/12.1
 module load cmake/3.23.4
 
