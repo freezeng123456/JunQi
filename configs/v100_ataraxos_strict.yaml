@@ -42,6 +42,14 @@ env:
   seed: 20261024
   use_gpu_rollout: true
 
+net:
+  # Strict facts-only input: observed identities are exposed directly and
+  # hidden identities are left for the later BeliefNet phase. Disable the
+  # legacy 28-scalar probability summary for this new run.
+  identity_encoding: known_only
+  use_global_summary: false
+  policy_features: {}
+
 ppo:
   dtype: float32
   torch_compile: false
