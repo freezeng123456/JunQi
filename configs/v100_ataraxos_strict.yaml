@@ -7,7 +7,11 @@ extends: ataraxos_selfplay.yaml
 save_dir: exps/v100_ataraxos_strict_v1
 target_completed_games: 10000000
 total_rollouts: 10000000
-save_every_games: 5000
+# Long runs use sparse checkpoints and aggregate first-action counters. The
+# short opening-validation child overrides this to 5,000 games.
+save_every_games: 100000
+checkpoint_keep: 4
+write_training_games: false
 eval_every_games: 100000
 eval_num_games: 128
 eval_baseline_games: 0

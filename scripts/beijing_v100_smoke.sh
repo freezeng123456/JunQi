@@ -71,6 +71,7 @@ python scripts/train.py \
     arr__pool_size=64 \
     arr__refresh_every=2 \
     save_every_games=64 \
+    write_training_games=true \
     eval_every_games=64 \
     eval_num_games=8 \
     eval_enabled=false \

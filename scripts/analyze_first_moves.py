@@ -24,17 +24,33 @@ def summarize(path: Path) -> dict[str, object]:
     counts: Counter[int] = Counter()
     total = 0
     missing = 0
-    with path.open(encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            source = int(row.get("first_source", -1))
-            if source < 0:
-                missing += 1
-                continue
-            counts[source] += 1
-            total += 1
+    # A long run can disable per-game JSON records. In that mode use the
+    # cumulative first_action_counts written into game_progress.jsonl.
+    with path.open(encoding="utf-8") as probe:
+        first_line = next((line for line in probe if line.strip()), "")
+    first_row = json.loads(first_line) if first_line else {}
+    if "first_action_counts" in first_row:
+        last = first_row
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    last = json.loads(line)
+        counts.update({int(k): int(v) for k, v in last["first_action_counts"].items()})
+        total = sum(counts.values())
+    else:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                action = int(row.get("first_action", -1))
+                if action < 0:
+                    missing += 1
+                    continue
+                counts[action] += 1
+                total += 1
+
+    source_counts = Counter({action // 129: n for action, n in counts.items()})
 
     entropy = 0.0
     if total:
@@ -44,11 +60,14 @@ def summarize(path: Path) -> dict[str, object]:
             if n
         )
     top = []
-    for source, n in counts.most_common(10):
+    for action, n in counts.most_common(10):
+        source, destination = divmod(action, 129)
         flat = int(COMPACT_TO_FLAT[source])
         x, y = flat_to_xy(flat)
         top.append({
+            "action": action,
             "source": source,
+            "destination": destination,
             "canonical_xy": [x, y],
             "count": n,
             "mass": n / total if total else 0.0,
@@ -56,9 +75,10 @@ def summarize(path: Path) -> dict[str, object]:
     return {
         "games_with_first_move": total,
         "games_missing_first_move": missing,
-        "unique_sources": len(counts),
+        "unique_actions": len(counts),
+        "unique_sources": len(source_counts),
         "entropy_nats": entropy,
-        "top_sources": top,
+        "top_actions": top,
     }
 
 

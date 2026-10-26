@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import asdict, replace
 from typing import Any
@@ -25,6 +26,36 @@ def update_checkpoint_alias(
     """Point ``alias_path`` at a checkpoint, optionally copying if needed."""
 
     atomic_alias(checkpoint_path, alias_path, copy_fallback=copy_fallback)
+
+
+def prune_numbered_checkpoints(save_dir: str | os.PathLike[str], keep: int) -> list[str]:
+    """Remove old numbered checkpoints while preserving aliases.
+
+    ``keep=0`` disables pruning. Only files matching ``ckpt_<rollout>.pt``
+    are eligible, so ``ckpt_latest.pt`` and best-evaluation aliases remain
+    intact. The newest files are selected by rollout number, not mtime.
+    """
+    keep = int(keep)
+    if keep < 0:
+        raise ValueError("checkpoint retention must be nonnegative")
+    if keep == 0:
+        return []
+    root = os.fspath(save_dir)
+    pattern = re.compile(r"^ckpt_(\d{6})\.pt$")
+    numbered: list[tuple[int, str]] = []
+    for name in os.listdir(root) if os.path.isdir(root) else ():
+        match = pattern.match(name)
+        if match:
+            numbered.append((int(match.group(1)), os.path.join(root, name)))
+    numbered.sort()
+    removed = []
+    for _rollout, path in numbered[:-keep]:
+        try:
+            os.unlink(path)
+            removed.append(path)
+        except FileNotFoundError:
+            pass
+    return removed
 
 
 def save_checkpoint(
@@ -62,6 +93,7 @@ def save_checkpoint(
         os.path.join(save_dir, "ckpt_latest.pt"),
         copy_fallback=True,
     )
+    prune_numbered_checkpoints(save_dir, cfg.checkpoint_keep)
     return checkpoint_path
 
 
@@ -176,5 +208,6 @@ __all__ = [
     "export_evaluation_policy",
     "migrate_policy_without_global_summary",
     "save_checkpoint",
+    "prune_numbered_checkpoints",
     "update_checkpoint_alias",
 ]

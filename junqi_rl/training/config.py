@@ -103,6 +103,13 @@ class TrainConfig:
     # total_rollouts remains a safety ceiling, never a successful game target.
     target_completed_games: int = 0
     save_every_games: int = 500
+    # Keep only the newest numbered checkpoints when nonzero. Symlink aliases
+    # (latest/best) are not counted. Zero preserves historical unlimited save.
+    checkpoint_keep: int = 0
+    # Per-game JSON is useful for short diagnostics but grows without bound in
+    # million-game runs. GameProgress summaries retain aggregate first-action
+    # counts when this stream is disabled.
+    write_training_games: bool = True
     eval_every_games: int = 2000
     eval_enabled: bool = True
     save_every: int = 100
@@ -320,7 +327,7 @@ def validate_config(cfg: TrainConfig) -> None:
         raise ValueError("net.use_global_summary must be a boolean")
     if cfg.resume and cfg.init_policy:
         raise ValueError("resume and init_policy are mutually exclusive")
-    if cfg.target_completed_games < 0 or min(cfg.save_every_games, cfg.eval_every_games) <= 0:
+    if cfg.target_completed_games < 0 or cfg.checkpoint_keep < 0 or min(cfg.save_every_games, cfg.eval_every_games) <= 0:
         raise ValueError("game budget must be nonnegative and game cadences positive")
     if cfg.target_completed_games and (not cfg.env.use_gpu_rollout or
             cfg.net.identity_encoding != "known_only" or cfg.belief.enabled):

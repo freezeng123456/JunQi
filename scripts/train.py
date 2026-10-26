@@ -1005,9 +1005,10 @@ def train(cfg: TrainConfig) -> None:
                 if matched != expected:
                     raise RuntimeError(f"Lost layout rewards: matched {matched}/{expected}")
                 mc.inc("arr/terminal_credits", float(matched))
-            with open(os.path.join(cfg.save_dir, "training_games.jsonl"), "a") as out:
-                for record in records:
-                    out.write(json.dumps(record) + "\n")
+            if cfg.write_training_games:
+                with open(os.path.join(cfg.save_dir, "training_games.jsonl"), "a") as out:
+                    for record in records:
+                        out.write(json.dumps(record) + "\n")
             progress_row = dict(game_progress.summary(), rollout=final_rollout,
                 optimizer_updates=trainer.num_train_step,
                 total_environment_steps=legacy_environment_steps + game_progress.environment_steps,

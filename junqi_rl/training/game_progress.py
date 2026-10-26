@@ -49,6 +49,7 @@ class GameProgress:
         self.first_actions = torch.full(
             (num_envs,), -1, dtype=torch.int64, device=self.device,
         )
+        self.first_action_counts = Counter()
         self.first_source_counts = Counter()
 
     def begin(self, world, steps, *, reset_seed):
@@ -142,6 +143,7 @@ class GameProgress:
             self.winners[str(winner)] += 1
             self.total_game_moves += moves
             if first_source >= 0:
+                self.first_action_counts[first_action] += 1
                 self.first_source_counts[first_source] += 1
         self.completed_games += len(records)
         self.environment_steps += self.events.shape[0] * self.num_envs
@@ -157,10 +159,11 @@ class GameProgress:
             total_completed_game_moves=self.total_game_moves,
             mean_completed_game_moves=self.total_game_moves / max(1, self.completed_games),
             termination_reasons=dict(self.reasons), winners=dict(self.winners),
+            first_action_counts=dict(self.first_action_counts),
             first_source_counts=dict(self.first_source_counts))
 
     def state_dict(self):
-        return dict(version=4, num_envs=self.num_envs, lineage_id=self.lineage_id,
+        return dict(version=5, num_envs=self.num_envs, lineage_id=self.lineage_id,
             serial=self.serial.cpu().clone(), initial_seed=self.initial_seed.cpu().clone(),
             initialized=self.initialized, completed_games=self.completed_games,
             environment_steps=self.environment_steps, total_game_moves=self.total_game_moves,
@@ -171,10 +174,11 @@ class GameProgress:
             first_actions=getattr(self, "first_actions", torch.full(
                 (self.num_envs,), -1, dtype=torch.int64, device=self.device,
             )).cpu().clone(),
+            first_action_counts=dict(self.first_action_counts),
             first_source_counts=dict(self.first_source_counts))
 
     def load_state_dict(self, state):
-        if state["version"] not in (2, 3, 4) or state["num_envs"] != self.num_envs:
+        if state["version"] not in (2, 3, 4, 5) or state["num_envs"] != self.num_envs:
             raise ValueError("game progress schema or environment count mismatch")
         for key in ("lineage_id", "initialized", "completed_games", "environment_steps", "total_game_moves"):
             setattr(self, key, state[key])
@@ -197,6 +201,7 @@ class GameProgress:
                 self.pool_hashes = self.pool_history[self.current_generation]["hashes"]
         self.reasons = Counter(state["reasons"])
         self.winners = Counter(state["winners"])
+        self.first_action_counts = Counter(state.get("first_action_counts", {}))
         self.first_source_counts = Counter(state.get("first_source_counts", {}))
         if sum(self.reasons.values()) != self.completed_games or sum(self.winners.values()) != self.completed_games:
             raise ValueError("inconsistent completed game counters")

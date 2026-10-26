@@ -34,6 +34,7 @@ def test_terminal_accounting_survives_reset_and_resume():
     assert [r['termination_reason'] for r in records] == ['team_victory','no_combat_limit','total_move_limit']
     assert [r['first_action'] for r in records] == [11, 22, 33]
     assert [r['first_source'] for r in records] == [0, 0, 0]
+    assert games.first_action_counts == {11: 1, 22: 1, 33: 1}
     assert [r['setup_reset_seed'] for r in records] == [3000, 3000, 3000]
     assert [r['initial_setup_sha256'] for r in records] == [hashes[setup_pool_index(i, 3000, len(hashes))] for i in range(3)]
     assert games.completed_games == 3 and games.environment_steps == 6
@@ -48,6 +49,7 @@ def test_terminal_accounting_survives_reset_and_resume():
     assert rows[0]['setup_reset_seed'] == 3001
     assert rows[0]['game_id'] == 3 and rows[0]['lineage_id'] == 'fixture'
     assert resumed.completed_games == 4 and resumed.environment_steps == 9
+    assert resumed.first_action_counts[11] == 1
 
 
 def test_rng_restores_all_host_streams():
