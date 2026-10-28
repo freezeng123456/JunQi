@@ -33,7 +33,9 @@ binary = pathlib.Path(junqi_cuda.__file__)
 print(json.dumps(dict(gpu=torch.cuda.get_device_name(), torch=torch.__version__,
     cuda=torch.version.cuda, binary=str(binary), binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest())))
 PY
-python -m pytest -q tests/test_first_move_metrics.py tests/test_game_progress.py \
+# Resume parity explicitly enables deterministic algorithms. cuBLAS requires
+# this setting before Python imports torch; production keeps its own mode.
+CUBLAS_WORKSPACE_CONFIG=:4096:8 python -m pytest -q tests/test_first_move_metrics.py tests/test_game_progress.py \
   tests/test_game_progress_gpu.py tests/test_timestep_minibatches.py \
   > "$GATE/tests.log" 2>&1
 
