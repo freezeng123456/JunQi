@@ -3,7 +3,6 @@
 source /etc/profile
 set -euo pipefail
 module load gcc/11.4.0 cuda/12.1 cmake/3.23.4
-ARM=control
 # Slurm executes a copy in /var/spool, so BASH_SOURCE is not the repo path.
 REPO_ROOT="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 VENV="${VENV:-/data02/home/${USER}/venvs/junqi-atx}"
@@ -11,11 +10,17 @@ export PATH="${VENV}/bin:${PATH}"
 export PYTHONPATH="${REPO_ROOT}:${REPO_ROOT}/junqi_rl:${PYTHONPATH:-}"
 export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 PYTHONUNBUFFERED=1
 cd "$REPO_ROOT"
-CFG="configs/v100_same_seat_raw_validation.yaml"
+CFG="${1:-configs/v100_same_seat_raw_validation.yaml}"
 test -f "$CFG"
-ROOT="${REPO_ROOT}/exps/same_seat_raw_20261028"
+RUN="$(python - "$CFG" <<'PY'
+import os, sys
+from junqi_rl.training.config import load_yaml_config
+print(os.path.abspath(load_yaml_config(sys.argv[1])['save_dir']))
+PY
+)"
+ROOT="$(dirname "$RUN")"
+ARM="$(basename "$RUN")"
 GATE="${ROOT}/acceptance_${ARM}"
-RUN="${ROOT}/${ARM}"
 # Refuse to overwrite any earlier training or test attempt.
 mkdir -p "$ROOT"
 mkdir "$GATE"
@@ -59,18 +64,26 @@ assert metrics['cumulative']['missing_first_policy'] == 0
 print(json.dumps(dict(status='PASS', completed_games=result['completed_games'])))
 PY
 python scripts/train.py --config "$CFG" > "$ROOT/${ARM}.train.log" 2>&1
-python - "$RUN" <<'PY' > "$ROOT/${ARM}.completion.json"
+python - "$RUN" "$CFG" <<'PY' > "$ROOT/${ARM}.completion.json"
 import hashlib, json, pathlib, sys
+from junqi_rl.training.config import load_yaml_config
 root = pathlib.Path(sys.argv[1])
+cfg = load_yaml_config(sys.argv[2])
+target = cfg['target_completed_games']
 r = json.loads((root / 'training_result.json').read_text())
-assert r['status'] == 'target_reached' and r['completed_games'] >= 20000
-for milestone in (5000, 10000, 20000):
+assert r['status'] == 'target_reached' and r['completed_games'] >= target
+for milestone in sorted({5000, 10000, 20000, target}):
     m = json.loads((root / f'first_move_{milestone:06d}.json').read_text())
-    assert pathlib.Path(m['checkpoint']).is_file()
+    assert m['completed_games'] >= milestone
+    assert m['cumulative']['missing_first_actions'] == 0
     assert m['cumulative']['missing_first_policy'] == 0
+# Earlier weights can be pruned by checkpoint_keep; their metrics survive.
+assert pathlib.Path(m['checkpoint']).is_file()
 names = ['training_games.jsonl', 'game_progress.jsonl', 'checkpoint_games.jsonl',
-         'training_result.json', 'first_move_005000.json', 'first_move_010000.json',
-         'first_move_020000.json']
-print(json.dumps(dict(status='COMPLETE', completed_games=r['completed_games'],
+         'training_result.json']
+names += sorted(p.name for p in root.glob('first_move_*.json'))
+print(json.dumps(dict(status='COMPLETE', target_completed_games=target,
+    completed_games=r['completed_games'], checkpoint_retention=cfg['checkpoint_keep'],
+    final_checkpoint=m['checkpoint'],
     sha256={n:hashlib.sha256((root/n).read_bytes()).hexdigest() for n in names}), indent=2))
 PY

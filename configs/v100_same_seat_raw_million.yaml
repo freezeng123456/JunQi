@@ -1,0 +1,8 @@
+# Fresh single-V100 run; complete-game target is the stopping condition.
+extends: v100_same_seat_raw_validation.yaml
+save_dir: exps/same_seat_raw_million_20261028/control
+target_completed_games: 1000000
+total_rollouts: 10000000
+# Keep every 5k distribution and per-game record; bound full-weight storage.
+save_every_games: 5000
+checkpoint_keep: 4
