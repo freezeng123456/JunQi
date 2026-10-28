@@ -826,6 +826,10 @@ class JunqiNet(nn.Module):
         # Mean entropy over legal actions, for collect-wide H (not the
         # advantage-filtered training batch). Illegal logits are -inf.
         log_p = logits_f - lse.unsqueeze(-1)
+        if getattr(self, "track_behavior_policy", False):
+            # Pending same-seat transitions may outlive the current learner
+            # snapshot. Retain the distribution that actually sampled them.
+            self._last_behavior_log_probs = log_p.detach()
         safe_p = torch.where(legal_mask, log_p.exp(), torch.zeros_like(log_p))
         safe_log_p = torch.where(legal_mask, log_p, torch.zeros_like(log_p))
         self._last_entropy_t = -(safe_p * safe_log_p).sum(dim=-1)

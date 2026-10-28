@@ -278,7 +278,7 @@ def _policy_act(policy, sp, gl, lm, chunk_size: int = 0):
     cs = int(chunk_size or 0)
     if cs <= 0 or n <= cs:
         return policy.act(sp, gl, lm)
-    actions, log_probs, values, ents, first_stats = [], [], [], [], []
+    actions, log_probs, values, ents, first_stats, behavior_logs = [], [], [], [], [], []
     for start in range(0, n, cs):
         sl = slice(start, min(start + cs, n))
         action, log_prob, value = policy.act(sp[sl], gl[sl], lm[sl])
@@ -290,10 +290,14 @@ def _policy_act(policy, sp, gl, lm, chunk_size: int = 0):
             ents.append(ent)
         if getattr(policy, "track_first_policy", False):
             first_stats.append(policy._last_first_policy_stats)
+        if getattr(policy, "track_behavior_policy", False):
+            behavior_logs.append(policy._last_behavior_log_probs)
     if ents:
         policy._last_entropy_t = torch.cat(ents, dim=0)
     if first_stats:
         policy._last_first_policy_stats = torch.cat(first_stats, dim=0)
+    if behavior_logs:
+        policy._last_behavior_log_probs = torch.cat(behavior_logs, dim=0)
     return (
         torch.cat(actions, dim=0),
         torch.cat(log_probs, dim=0),
@@ -742,6 +746,13 @@ def collect_rollout_gpu_v2(
         autocast_dtype = torch.bfloat16
 
     policy.eval()
+    same_seat = getattr(buffer, "same_seat", False)
+    if same_seat:
+        if reward_shaping or random_opponent or use_compile:
+            raise ValueError("same-seat collection requires terminal-only self-play without compile")
+        policy.track_behavior_policy = True
+        if reset_at_start:
+            buffer.pending.clear()
     buffer.reset()
 
     # O-1: torch.compile the full act() method for maximum cross-op fusion.
@@ -885,6 +896,12 @@ def collect_rollout_gpu_v2(
             game_progress.record_action(actions_can, ~done_t,
                 policy_stats=getattr(policy, "_last_first_policy_stats", None))
 
+        if same_seat:
+            buffer.pending.record(obs_spatial=obs_sp_t, obs_global=obs_gl_t,
+                legal_mask=lm_t, actions=actions_can.detach().to(torch.int32),
+                log_probs=log_probs_t, values=values_t, seats=acting_t,
+                behavior_log_probs=policy._last_behavior_log_probs)
+
         # ---- Store pre-step data in GPU buffer ----------------------------
         # Note (2026-05-11 audit): we considered zeroing values/log_probs for
         # envs that were ALREADY terminated at start of step t ("stale rows"),
@@ -972,8 +989,11 @@ def collect_rollout_gpu_v2(
             rewards_t = rewards_t + killed_pen + mutual_pen
 
         # Patch rewards into the buffer
-        buffer.rewards[t] = rewards_t
-        buffer.dones[t] = fired_t
+        storage_t = t + getattr(buffer, "prefix_steps", 0)
+        buffer.rewards[storage_t] = rewards_t
+        buffer.dones[storage_t] = fired_t
+        if same_seat:
+            buffer.pending.terminal(fired_t)
 
         # ---- Arrangement-net termination hook ----------------------------
         # Fires BEFORE reset_terminated_device so the callback can snapshot
@@ -1013,6 +1033,13 @@ def collect_rollout_gpu_v2(
     buffer._collect_combat_metrics = combat_metrics.finish()
     if collect_ent_n:
         buffer._collect_entropy = float((collect_ent_sum / collect_ent_n).item())
+
+    if same_seat:
+        # Unclosed final decisions stay in the bounded pending cache. Their
+        # own value can bootstrap earlier same-seat decisions; never use
+        # another player's value or a synthetic off-turn observation.
+        buffer.compute_returns()
+        return
 
     # ---- Bootstrap values for last state ----------------------------------
     turn_t = rollout_world.turn_torch()

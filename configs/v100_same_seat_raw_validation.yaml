@@ -1,0 +1,8 @@
+# Isolate the two learning-target corrections against the previous control.
+extends: v100_opening_factorial_control.yaml
+save_dir: exps/same_seat_raw_20261028/control
+resume: ''
+init_policy: ''
+ppo:
+  advantage_normalization: raw
+  return_perspective: same_seat

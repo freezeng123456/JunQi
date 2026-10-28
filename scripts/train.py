@@ -496,6 +496,8 @@ def train(cfg: TrainConfig) -> None:
             gamma=cfg.ppo.gamma,
             gae_lambda=cfg.ppo.gae_lambda,
             td_lambda=cfg.ppo.td_lambda,
+            advantage_normalization=cfg.ppo.advantage_normalization,
+            return_perspective=cfg.ppo.return_perspective,
             adv_filt_thresh=cfg.ppo.adv_filt_thresh,
             adv_filt_rate=cfg.ppo.adv_filt_rate,
             adv_filter_scope=cfg.ppo.adv_filter_scope,
@@ -527,6 +529,8 @@ def train(cfg: TrainConfig) -> None:
                 f"{rollout.storage_bytes() / 1024**3:.2f} GiB"
             )
     else:
+        if cfg.ppo.return_perspective != "next_actor" or cfg.ppo.advantage_normalization != "standardize":
+            raise ValueError("raw/same-seat training requires the CUDA rollout buffer")
         rollout = RolloutBuffer(
             num_envs=cfg.env.num_envs,
             obs_global_dims=trainer.policy.observation_global_dims,
@@ -745,7 +749,8 @@ def train(cfg: TrainConfig) -> None:
         trainer.policy.track_first_policy = cfg.track_first_policy
         if resume_sd is not None and "runtime_state" in resume_sd:
             legacy_environment_steps = restore_runtime(
-                resume_sd["runtime_state"], env, game_progress, rng, cfg, arr_buffer=arr_buffer)
+                resume_sd["runtime_state"], env, game_progress, rng, cfg, arr_buffer=arr_buffer,
+                rollout_buffer=rollout)
             restored_world = True
             print(f"[games] Restored live games and RNG; completed={game_progress.completed_games}")
         elif resume_sd is not None:
@@ -754,7 +759,7 @@ def train(cfg: TrainConfig) -> None:
             print("[games] Legacy checkpoint: completed-game history unknown; starting a new tracked lineage with fresh games")
         trainer.runtime_state_provider = lambda: capture_runtime(
             env, game_progress, rng, cfg, legacy_environment_steps, saved_rng=eval_rng_state,
-            arr_buffer=arr_buffer)
+            arr_buffer=arr_buffer, rollout_buffer=rollout)
         next_game_save = (game_progress.completed_games // cfg.save_every_games + 1) * cfg.save_every_games
         next_game_eval = (game_progress.completed_games // cfg.eval_every_games + 1) * cfg.eval_every_games
         print(f"[games] Target={cfg.target_completed_games}; legacy environment steps={legacy_environment_steps}")

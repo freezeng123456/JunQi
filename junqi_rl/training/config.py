@@ -406,6 +406,19 @@ def validate_config(cfg: TrainConfig) -> None:
         raise ValueError(
             "ppo.adv_filter_scope must be 'timestep' or 'rollout'"
         )
+    if cfg.ppo.advantage_normalization not in {"standardize", "raw"}:
+        raise ValueError("ppo.advantage_normalization must be 'standardize' or 'raw'")
+    if cfg.ppo.return_perspective not in {"next_actor", "same_seat"}:
+        raise ValueError("ppo.return_perspective must be 'next_actor' or 'same_seat'")
+    if cfg.ppo.advantage_normalization == "raw" and not cfg.env.use_gpu_rollout:
+        raise ValueError("raw advantages currently require the GPU rollout buffer")
+    if cfg.ppo.return_perspective == "same_seat":
+        if (not cfg.env.use_gpu_rollout or not cfg.target_completed_games or
+                cfg.random_opponent or cfg.reward_shaping or cfg.ppo.gamma != 1.0 or
+                cfg.ppo.minibatch_group != "timestep" or cfg.ppo.value_sample_scope != "policy" or
+                cfg.ppo.torch_compile or cfg.eval_enabled):
+            raise ValueError("same_seat requires counted GPU self-play, terminal-only rewards, "
+                             "gamma=1, timestep policy batches, no compile and no interleaved evaluation")
     if cfg.ppo.value_sample_scope not in {"policy", "all_valid"}:
         raise ValueError(
             "ppo.value_sample_scope must be 'policy' or 'all_valid'"

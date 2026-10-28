@@ -210,12 +210,19 @@ class PPOConfig:
     td_lambda: float = 0.8
     """λ for TD-return mixture (0 = TD, 1 = MC)."""
 
+    advantage_normalization: str = "standardize"
+    """Actor advantage scale: historical standardize or original reward-unit raw."""
+
+    return_perspective: str = "next_actor"
+    """Historical team-sign next actor, or closed same-seat decision transitions."""
+
     adv_filt_thresh: float = 0.01
     """Minimum |advantage| to train on.
 
     Legacy row-local/global filters apply this after advantage normalisation.
     Ataraxos rollout-scope filtering applies it to raw ``|A|``, matching the
-    official buffer; PPO still receives normalised advantages.
+    official buffer; ``advantage_normalization`` independently controls the
+    actor scale.
     """
 
     adv_filt_rate: float = 0.75
@@ -1216,17 +1223,24 @@ class PPOTrainer:
 
         evaluated_actions = batch.actions.to(self.device)
 
-        with torch.inference_mode(), autocast(
-            device_type=ctx_device,
-            dtype=self._amp_dtype,
-            enabled=self._use_amp,
-        ):
-            old_log_probs_all = self._collect_policy(
-                obs_sp_in,
-                obs_gl_in,
-                legal_mask,
-                actions=evaluated_actions,
-            )["log_probs"]
+        if batch.behavior_log_probs is not None:
+            # Same-seat carry can contain actions sampled before the current
+            # frozen snapshot. Use their exact behaviour distribution for KL.
+            old_log_probs_all = batch.behavior_log_probs.detach().to(self.device)
+            if old_log_probs_all.shape != legal_mask.shape:
+                raise ValueError("behavior_log_probs must match the full legal-mask shape")
+        else:
+            with torch.inference_mode(), autocast(
+                device_type=ctx_device,
+                dtype=self._amp_dtype,
+                enabled=self._use_amp,
+            ):
+                old_log_probs_all = self._collect_policy(
+                    obs_sp_in,
+                    obs_gl_in,
+                    legal_mask,
+                    actions=evaluated_actions,
+                )["log_probs"]
 
         with autocast(device_type=ctx_device, dtype=self._amp_dtype, enabled=self._use_amp):
             out = self._policy_for_train(
@@ -1302,9 +1316,9 @@ class PPOTrainer:
             # Old log-probs (scalar per action, stored in buffer)
             old_log_prob = batch.old_log_probs.to(self.device)
 
-            # Reverse KL uses the frozen collection snapshot's full legal
-            # distribution (``old_log_probs_all``). ``old_log_prob`` is the
-            # stored sampled log-prob for the PPO ratio.
+            # Reverse KL uses the actual behaviour distribution when carried,
+            # otherwise the frozen collection snapshot. ``old_log_prob`` is
+            # always the stored sampled log-prob for the PPO ratio.
             adv = batch.advantages.to(self.device)
             ret = batch.returns.to(self.device)
 

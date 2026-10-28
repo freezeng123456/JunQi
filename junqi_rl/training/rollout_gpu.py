@@ -201,8 +201,8 @@ def _csr_to_dense_selected(
 class RolloutBufferGPU:
     """Fully GPU-resident drop-in replacement for :class:`RolloutBuffer`.
 
-    All per-slot storage lives on ``device`` as torch tensors.  GAE
-    computation runs on-device too (no host-side Python loop).
+    All per-slot storage lives on ``device`` as torch tensors. Return
+    computation is vectorized over environments and scans time in Python.
 
     Parameters mirror :class:`RolloutBuffer`.  The only addition is that
     ``device`` must be a CUDA device.
@@ -216,6 +216,8 @@ class RolloutBufferGPU:
         gamma: float = 1.0,
         gae_lambda: float = 0.5,
         td_lambda: float = 0.8,
+        advantage_normalization: str = "standardize",
+        return_perspective: str = "next_actor",
         adv_filt_thresh: float = 0.01,
         adv_filt_rate: float = 0.75,
         adv_filter_scope: str = "timestep",
@@ -233,6 +235,18 @@ class RolloutBufferGPU:
     ) -> None:
         self.num_envs = num_envs
         self.steps_per_env = steps_per_env
+        if advantage_normalization not in {"standardize", "raw"}:
+            raise ValueError("advantage_normalization must be 'standardize' or 'raw'")
+        if return_perspective not in {"next_actor", "same_seat"}:
+            raise ValueError("return_perspective must be 'next_actor' or 'same_seat'")
+        self.advantage_normalization = advantage_normalization
+        self.return_perspective = return_perspective
+        self.same_seat = return_perspective == "same_seat"
+        if self.same_seat and (random_opponent or gamma != 1.0 or
+                minibatch_group != "timestep" or value_sample_scope != "policy"):
+            raise ValueError("same_seat needs self-play, gamma=1 and timestep policy batches")
+        self.prefix_steps = 4 if self.same_seat else 0
+        self.storage_steps = steps_per_env + self.prefix_steps
         if obs_global_dims not in (0, OBS_GLOBAL_DIMS):
             raise ValueError("obs_global_dims must be 0 or 28")
         self.obs_global_dims = int(obs_global_dims)
@@ -309,7 +323,7 @@ class RolloutBufferGPU:
             )
 
         N = num_envs
-        T = steps_per_env
+        T = self.storage_steps
         dev = self.device
 
         if self.uses_compact_history:
@@ -373,8 +387,17 @@ class RolloutBufferGPU:
         # Computed by compute_returns()
         self.returns_ = torch.zeros((T, N), dtype=torch.float32, device=dev)
         self.advantages_ = torch.zeros((T, N), dtype=torch.float32, device=dev)
+        self.ready_mask = torch.ones((T, N), dtype=torch.bool, device=dev)
+        self.input_valid = torch.ones_like(self.ready_mask)
+        self.pending = None
+        self._carried = None
+        if self.same_seat:
+            from .seat_pending import PendingSeatTransitions
+            self.pending = PendingSeatTransitions(num_envs=N, device=dev,
+                obs_dtype=obs_storage_dtype, obs_global_dims=self.obs_global_dims)
+            self.input_valid[:4] = False
 
-        self._ptr: int = 0
+        self._ptr: int = self.prefix_steps
         self._full: bool = False
 
     def snapshot_history(
@@ -417,6 +440,12 @@ class RolloutBufferGPU:
                 total += value.numel() * value.element_size()
         if self.uses_compact_history:
             total += int(self.history.history_bytes)
+        if getattr(self, "pending", None) is not None:
+            total += sum(getattr(self.pending, k).numel() * getattr(self.pending, k).element_size()
+                         for k in self.pending.TENSOR_FIELDS)
+            if self._carried is not None:
+                total += sum(v.numel() * v.element_size() for v in self._carried.values())
+        total += self.ready_mask.numel() + self.input_valid.numel()
         return total
 
     # -------------------------------------------------------------------------
@@ -478,13 +507,21 @@ class RolloutBufferGPU:
             )
         self.seats[t]       = _to_tensor(seats,       device=dev, dtype=torch.int8)
         self._ptr += 1
-        if self._ptr == self.steps_per_env:
+        if self._ptr == self.storage_steps:
             self._ptr = 0
             self._full = True
 
     def reset(self) -> None:
-        self._ptr = 0
+        self._ptr = self.prefix_steps
         self._full = False
+        if self.same_seat:
+            self._carried = self.pending.begin_rollout()
+            for name in ("actions", "log_probs", "values", "seats"):
+                getattr(self, name)[:4].copy_(self._carried[name])
+            self.rewards[:4].zero_()
+            self.dones[:4].zero_()
+            self.input_valid[:4].copy_(self._carried["valid"])
+            self.input_valid[4:].fill_(True)
 
     @property
     def is_ready(self) -> bool:
@@ -494,7 +531,7 @@ class RolloutBufferGPU:
     # GAE
     # -------------------------------------------------------------------------
 
-    def compute_returns(self, last_values, *, last_seats=None) -> None:
+    def compute_returns(self, last_values=None, *, last_seats=None) -> None:
         """GAE(λ) and TD(λ) — all on-device in a Python loop over T.
 
         Multi-seat perspective handling
@@ -544,6 +581,17 @@ class RolloutBufferGPU:
         previous return formula. GPU performance must be measured on target
         hardware rather than inferred from the number of Python operations.
         """
+        if self.same_seat:
+            from .seat_returns import same_seat_returns
+            advantages, returns, ready, pending_indices = same_seat_returns(
+                self.values, self.rewards, self.dones, self.seats, self.input_valid,
+                gamma=self.gamma, gae_lambda=self.gae_lambda, td_lambda=self.td_lambda)
+            self.advantages_.copy_(advantages)
+            self.returns_.copy_(returns)
+            self.ready_mask.copy_(ready)
+            if not torch.equal(pending_indices.T >= 0, self.pending.valid):
+                raise RuntimeError("same-seat pending cache and successor accounting disagree")
+            return
         T = self.steps_per_env
         last_val_t = _to_tensor(last_values, device=self.device,
                                 dtype=torch.float32)
@@ -629,7 +677,7 @@ class RolloutBufferGPU:
         All heavy tensors are device-side views (no H2D here).  Index arrays
         are built on-device using ``torch.randperm``.
         """
-        T = self.steps_per_env
+        T = getattr(self, "storage_steps", self.steps_per_env)
         N = self.num_envs
         total = T * N
         dev = self.device
@@ -684,30 +732,45 @@ class RolloutBufferGPU:
             own_mask = (seats_flat == 0) | (seats_flat == 2)
         else:
             own_mask = torch.ones_like(adv, dtype=torch.bool)
-        if own_mask.any():
-            own_adv  = adv[own_mask]
-            adv_mean = own_adv.mean()
-            adv_std  = own_adv.std(unbiased=False) + 1e-8
+        if getattr(self, "same_seat", False):
+            own_mask &= self.ready_mask.view(total)
+        if getattr(self, "advantage_normalization", "standardize") == "raw":
+            # Keep the reward-unit scale used by Ataraxos. Centering or
+            # rescaling here changes the actor's weight relative to value,
+            # magnet and old-policy KL objectives.
+            policy_adv = adv
         else:
-            adv_mean = adv.mean()
-            adv_std  = adv.std(unbiased=False) + 1e-8
-        adv_norm = (adv - adv_mean) / adv_std
+            if own_mask.any():
+                own_adv = adv[own_mask]
+                adv_mean = own_adv.mean()
+                adv_std = own_adv.std(unbiased=False) + 1e-8
+            else:
+                adv_mean = adv.mean()
+                adv_std = adv.std(unbiased=False) + 1e-8
+            policy_adv = (adv - adv_mean) / adv_std
 
-        # Magnitude filter — keep policy-controlled transitions with
-        # |A_norm| >= thresh. In vs-random mode this still excludes the
-        # zeroed enemy transitions; in self-play it trims the bottom
-        # (1 - adv_filt_rate) of |advantage| as the paper does.
-        abs_adv = adv_norm.abs()
+        # Legacy filters follow the configured actor-advantage scale. The
+        # rollout-scope timestep filter below always selects by raw |A|,
+        # independently of whether the actor receives standardised values.
+        abs_adv = policy_adv.abs()
         thresh = self.adv_filt_thresh
         keep = own_mask & (abs_adv >= thresh)
 
-        def _emit(idx: Tensor, vo: Tensor):
+        def _emit(idx: Tensor, vo: Tensor, row: int | None = None):
             if idx.numel() == 0:
                 return
             seats_batch = seats_flat.index_select(0, idx)
-            if self.uses_compact_history:
+            carried = getattr(self, "same_seat", False) and row is not None and row < 4
+            behavior_log_probs = None
+            if carried:
+                env_idx = idx % N
+                obs_sp_batch = self._carried["obs_spatial"][row].index_select(0, env_idx)
+                obs_gl_batch = self._carried["obs_global"][row].index_select(0, env_idx)
+                lm_batch = self._carried["legal_mask"][row].index_select(0, env_idx)
+                behavior_log_probs = self._carried["behavior_log_probs"][row].index_select(0, env_idx)
+            elif self.uses_compact_history:
                 obs_sp_batch, obs_gl_batch, lm_batch = self.history.reconstruct(
-                    idx,
+                    idx - getattr(self, "prefix_steps", 0) * N,
                     seats_batch,
                     dtype=self.obs_storage_dtype,
                 )
@@ -727,11 +790,12 @@ class RolloutBufferGPU:
                 legal_mask=lm_batch,
                 actions=act.index_select(0, idx).to(torch.int64),
                 old_log_probs=lp.index_select(0, idx),
-                advantages=adv_norm.index_select(0, idx),
+                advantages=policy_adv.index_select(0, idx),
                 returns=ret.index_select(0, idx),
                 values=val.index_select(0, idx),
                 adv_mask=torch.ones(idx.numel(), dtype=torch.bool, device=dev),
                 value_only_mask=vo,
+                behavior_log_probs=behavior_log_probs,
             )
 
         def _emit_all_valid_row(t: int, policy_env: Tensor):
@@ -763,7 +827,7 @@ class RolloutBufferGPU:
                 legal_mask=lm_all.index_select(0, policy_env),
                 actions=act.index_select(0, policy_flat).to(torch.int64),
                 old_log_probs=lp.index_select(0, policy_flat),
-                advantages=adv_norm.index_select(0, policy_flat),
+                advantages=policy_adv.index_select(0, policy_flat),
                 returns=ret.index_select(0, policy_flat),
                 values=val.index_select(0, policy_flat),
                 adv_mask=torch.ones(
@@ -784,7 +848,7 @@ class RolloutBufferGPU:
             if self.adv_filter_scope == "rollout":
                 # Match Ataraxos's buffer-level selection: the threshold is
                 # computed once from raw |A| over this rank's valid samples.
-                # The emitted PPO advantages remain globally normalised.
+                # The actor receives raw or standardised advantages as configured.
                 keep, thresh = _rollout_advantage_keep_mask(
                     adv,
                     own_mask,
@@ -833,7 +897,7 @@ class RolloutBufferGPU:
                 else:
                     continue
                 if self.value_sample_scope != "all_valid":
-                    yield from _emit(flat, vo)
+                    yield from _emit(flat, vo, row=t)
             return
 
         # --- Avoid per-call .item() syncs ---
@@ -952,7 +1016,7 @@ class RolloutBufferGPU:
                 legal_mask=lm_batch,
                 actions=act.index_select(0, idx).to(torch.int64),
                 old_log_probs=lp.index_select(0, idx),
-                advantages=adv_norm.index_select(0, idx),
+                advantages=policy_adv.index_select(0, idx),
                 returns=ret.index_select(0, idx),
                 values=val.index_select(0, idx),
                 adv_mask=torch.ones(idx.numel(), dtype=torch.bool, device=dev),
@@ -965,22 +1029,31 @@ class RolloutBufferGPU:
 
     def num_valid_transitions(self) -> int:
         adv = self.advantages_.view(-1)
-        adv_std = adv.std(unbiased=False) + 1e-8
-        adv_norm = (adv - adv.mean()) / adv_std
-        return int((adv_norm.abs() >= self.adv_filt_thresh).sum().item())
+        ready = self.ready_mask.view(-1) if getattr(self, "same_seat", False) else torch.ones_like(adv, dtype=torch.bool)
+        selected = adv[ready]
+        if selected.numel() == 0:
+            return 0
+        scaled = selected if self.advantage_normalization == "raw" else (selected - selected.mean()) / (selected.std(unbiased=False) + 1e-8)
+        return int((scaled.abs() >= self.adv_filt_thresh).sum().item())
 
     def stats(self) -> dict[str, float]:
         adv = self.advantages_.view(-1)
         ret = self.returns_.view(-1)
         rew = self.rewards.view(-1)
+        if getattr(self, "same_seat", False):
+            ready = self.ready_mask.view(-1)
+            adv = adv[ready]
+            ret = ret[ready]
+            rew = self.rewards[self.prefix_steps:].view(-1)
         # Single synchronisation — compute all scalars on-device, stack,
         # then D2H once.  Avoids 5 separate .item() syncs.
-        adv_std = (adv.std(unbiased=False) + 1e-8)
-        adv_mean = adv.mean()
-        adv_norm_abs = ((adv - adv_mean) / adv_std).abs()
+        adv_std = (adv.std(unbiased=False) + 1e-8) if adv.numel() else adv.new_tensor(1e-8)
+        adv_mean = adv.mean() if adv.numel() else adv.new_zeros(())
+        adv_norm_abs = (adv.abs() if getattr(self, "advantage_normalization", "standardize") == "raw"
+                        else ((adv - adv_mean) / adv_std).abs())
         n_valid = (adv_norm_abs >= self.adv_filt_thresh).sum().to(torch.float32)
         stacked = torch.stack([
-            rew.mean(), ret.mean(), adv_mean, adv_std, n_valid,
+            rew.mean(), ret.mean() if ret.numel() else ret.new_zeros(()), adv_mean, adv_std, n_valid,
         ]).cpu().tolist()
         out = {
             "rollout/mean_reward":    float(stacked[0]),

@@ -113,6 +113,9 @@ class RolloutBatch:
     value_obs_global: Tensor | None = None
     value_returns: Tensor | None = None
     policy_value_indices: Tensor | None = None
+    # Full legal distribution that actually generated each action. Needed
+    # when a pending transition spans more than one learner snapshot.
+    behavior_log_probs: Tensor | None = None
 
 
 

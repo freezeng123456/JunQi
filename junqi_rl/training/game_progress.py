@@ -266,20 +266,28 @@ def runtime_contract(cfg):
     if cfg.arr.enabled:
         contract["arrangement"] = asdict(cfg.arr)
         contract["disable_arr_train"] = cfg.disable_arr_train
+    if cfg.ppo.return_perspective == "same_seat":
+        contract["return_learning"] = dict(perspective="same_seat",
+            advantage_normalization=cfg.ppo.advantage_normalization,
+            gamma=cfg.ppo.gamma, gae_lambda=cfg.ppo.gae_lambda, td_lambda=cfg.ppo.td_lambda)
     return contract
 
 
-def capture_runtime(world, progress, minibatch_rng, cfg, legacy_environment_steps, *, saved_rng=None, arr_buffer=None):
+def capture_runtime(world, progress, minibatch_rng, cfg, legacy_environment_steps, *, saved_rng=None, arr_buffer=None, rollout_buffer=None):
     state = dict(version=1, contract=runtime_contract(cfg), world=world.state_dict(),
         games=progress.state_dict(), rng=capture_rng(minibatch_rng) if saved_rng is None else saved_rng,
         legacy_environment_steps=legacy_environment_steps,
         legacy_completed_games=None, boundary="after_optimizer_update")
     if arr_buffer is not None:
         state["arrangement_buffer"] = arr_buffer.state_dict()
+    if cfg.ppo.return_perspective == "same_seat":
+        if rollout_buffer is None:
+            raise ValueError("same-seat runtime requires its pending rollout buffer")
+        state["seat_pending"] = rollout_buffer.pending.state_dict()
     return state
 
 
-def restore_runtime(state, world, progress, minibatch_rng, cfg, *, arr_buffer=None):
+def restore_runtime(state, world, progress, minibatch_rng, cfg, *, arr_buffer=None, rollout_buffer=None):
     if state["version"] != 1 or state["contract"] != runtime_contract(cfg):
         raise ValueError("runtime contract mismatch; resume requires the same environment and input config")
     world.load_state_dict(state["world"])
@@ -288,5 +296,9 @@ def restore_runtime(state, world, progress, minibatch_rng, cfg, *, arr_buffer=No
         if "arrangement_buffer" not in state:
             raise ValueError("arrangement runtime is missing its reward buffer")
         arr_buffer.load_state_dict(state["arrangement_buffer"])
+    if cfg.ppo.return_perspective == "same_seat":
+        if rollout_buffer is None or "seat_pending" not in state:
+            raise ValueError("same-seat resume is missing pending decisions")
+        rollout_buffer.pending.load_state_dict(state["seat_pending"])
     restore_rng(state["rng"], minibatch_rng)
     return state["legacy_environment_steps"]
