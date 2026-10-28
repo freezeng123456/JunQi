@@ -1,0 +1,5 @@
+extends: v100_opening_factorial_control.yaml
+save_dir: exps/opening_factorial_20261028/all_samples
+ppo:
+  adv_filt_rate: 1.0
+  adv_filt_thresh: 0.0

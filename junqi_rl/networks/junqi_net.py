@@ -829,6 +829,11 @@ class JunqiNet(nn.Module):
         safe_p = torch.where(legal_mask, log_p.exp(), torch.zeros_like(log_p))
         safe_log_p = torch.where(legal_mask, log_p, torch.zeros_like(log_p))
         self._last_entropy_t = -(safe_p * safe_log_p).sum(dim=-1)
+        if getattr(self, "track_first_policy", False):
+            from junqi_rl.training.first_move_metrics import policy_statistics
+            self._last_first_policy_stats = policy_statistics(
+                safe_p, legal_mask, self._last_entropy_t,
+            )
 
         values = self._value(cls)
         return actions.int(), log_probs, values

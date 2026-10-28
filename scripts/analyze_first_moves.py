@@ -50,7 +50,9 @@ def summarize(path: Path) -> dict[str, object]:
                 counts[action] += 1
                 total += 1
 
-    source_counts = Counter({action // 129: n for action, n in counts.items()})
+    source_counts = Counter()
+    for action, n in counts.items():
+        source_counts[action // 129] += n
 
     entropy = 0.0
     if total:

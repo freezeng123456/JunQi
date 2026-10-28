@@ -278,7 +278,7 @@ def _policy_act(policy, sp, gl, lm, chunk_size: int = 0):
     cs = int(chunk_size or 0)
     if cs <= 0 or n <= cs:
         return policy.act(sp, gl, lm)
-    actions, log_probs, values, ents = [], [], [], []
+    actions, log_probs, values, ents, first_stats = [], [], [], [], []
     for start in range(0, n, cs):
         sl = slice(start, min(start + cs, n))
         action, log_prob, value = policy.act(sp[sl], gl[sl], lm[sl])
@@ -288,8 +288,12 @@ def _policy_act(policy, sp, gl, lm, chunk_size: int = 0):
         ent = getattr(policy, "_last_entropy_t", None)
         if ent is not None:
             ents.append(ent)
+        if getattr(policy, "track_first_policy", False):
+            first_stats.append(policy._last_first_policy_stats)
     if ents:
         policy._last_entropy_t = torch.cat(ents, dim=0)
+    if first_stats:
+        policy._last_first_policy_stats = torch.cat(first_stats, dim=0)
     return (
         torch.cat(actions, dim=0),
         torch.cat(log_probs, dim=0),
@@ -878,7 +882,8 @@ def collect_rollout_gpu_v2(
         # is used only for completed-game opening diagnostics and has no
         # influence on the policy loss.
         if game_progress is not None:
-            game_progress.record_action(actions_can, ~done_t)
+            game_progress.record_action(actions_can, ~done_t,
+                policy_stats=getattr(policy, "_last_first_policy_stats", None))
 
         # ---- Store pre-step data in GPU buffer ----------------------------
         # Note (2026-05-11 audit): we considered zeroing values/log_probs for

@@ -110,6 +110,9 @@ class TrainConfig:
     # million-game runs. GameProgress summaries retain aggregate first-action
     # counts when this stream is disabled.
     write_training_games: bool = True
+    # Record raw policy concentration at the first move of each real game.
+    # Diagnostic only: no action replacement or extra model forward.
+    track_first_policy: bool = False
     eval_every_games: int = 2000
     eval_enabled: bool = True
     save_every: int = 100
@@ -337,6 +340,10 @@ def validate_config(cfg: TrainConfig) -> None:
             raise ValueError("arr.storage_duration must retain layouts until every in-flight game can finish")
         if cfg.fixed_setup_styles or cfg.mixed_setup:
             raise ValueError("learned arrangements cannot be combined with fixed or mixed setups")
+    if cfg.track_first_policy and (not cfg.target_completed_games or
+            not cfg.write_training_games or not cfg.env.use_gpu_rollout or
+            cfg.random_opponent or cfg.ppo.torch_compile):
+        raise ValueError("track_first_policy requires completed-game GPU self-play, game JSON, and no compile")
     resolve_policy_features(cfg.net)
     from junqi_core.observation import validate_identity_encoding
     validate_identity_encoding(cfg.net.identity_encoding, cfg.net.use_global_summary)

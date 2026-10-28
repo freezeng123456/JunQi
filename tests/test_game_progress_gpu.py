@@ -21,10 +21,12 @@ def components():
     cfg = PPOConfig(net=net_cfg, dtype='float32', minibatch_size=16,
         value_minibatch_size=16, adv_filt_rate=1.0, adv_filt_thresh=0.0)
     trainer = PPOTrainer(policy, cfg, device='cuda')
+    trainer.policy.track_first_policy = True
     world = GpuRollout(4, include_global=False, identity_encoding='known_only', max_num_moves=17)
     buf = RolloutBufferGPU(num_envs=4, steps_per_env=9, device='cuda', obs_global_dims=0, random_opponent=False,
         storage_mode='compact_history', history=world.create_rollout_history(9))
-    return world, trainer, buf, GameProgress(4, 'cuda', lineage_id='resume-test'), np.random.default_rng(89)
+    return world, trainer, buf, GameProgress(4, 'cuda', lineage_id='resume-test',
+        track_first_policy=True), np.random.default_rng(89)
 
 
 def advance(world, trainer, buf, progress, rng, index, reset=False):

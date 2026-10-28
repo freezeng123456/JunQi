@@ -6,6 +6,7 @@ per-move path; only completed rows are downloaded at a rollout boundary.
 from __future__ import annotations
 
 import copy
+import math
 import random
 import uuid
 from collections import Counter
@@ -27,7 +28,8 @@ def setup_pool_index(env, seed, pool_size):
 class GameProgress:
     REASONS = {0: "team_victory", 1: "total_move_limit", 2: "no_combat_limit", 3: "other_draw"}
 
-    def __init__(self, num_envs, device, *, lineage_id=None, track_arrangements=False):
+    def __init__(self, num_envs, device, *, lineage_id=None, track_arrangements=False,
+                 track_first_policy=False):
         self.num_envs = num_envs
         self.device = torch.device(device)
         self.lineage_id = lineage_id or uuid.uuid4().hex
@@ -51,6 +53,8 @@ class GameProgress:
         )
         self.first_action_counts = Counter()
         self.first_source_counts = Counter()
+        self.track_first_policy = track_first_policy
+        self.first_policy_stats = torch.zeros((num_envs, 10), device=self.device)
 
     def begin(self, world, steps, *, reset_seed):
         revision = getattr(world, "setup_pool_revision", 0)
@@ -76,8 +80,10 @@ class GameProgress:
                 (self.num_envs,), -1, dtype=torch.int64, device=self.device,
             )
         self.events = torch.zeros((steps, self.num_envs, 9), dtype=torch.int64, device=self.device)
+        if self.track_first_policy:
+            self.policy_events = torch.empty((steps, self.num_envs, 10), device=self.device)
 
-    def record_action(self, actions, live):
+    def record_action(self, actions, live, *, policy_stats=None):
         """Remember the first action of each live game before it advances."""
         if not hasattr(self, "first_actions"):
             self.first_actions = torch.full(
@@ -86,6 +92,11 @@ class GameProgress:
         actions = actions.to(device=self.device, dtype=torch.int64)
         live = live.to(device=self.device, dtype=torch.bool)
         fresh = live & (self.first_actions < 0)
+        if self.track_first_policy:
+            if policy_stats is None or policy_stats.shape != self.first_policy_stats.shape:
+                raise ValueError("first policy statistics missing or wrong shape")
+            self.first_policy_stats.copy_(torch.where(
+                fresh[:, None], policy_stats, self.first_policy_stats))
         self.first_actions.copy_(torch.where(fresh, actions, self.first_actions))
 
     def record(self, world, result, fired, step):
@@ -106,6 +117,8 @@ class GameProgress:
             self, "first_actions",
             torch.full((self.num_envs,), -1, dtype=torch.int64, device=self.device),
         )
+        if self.track_first_policy:
+            self.policy_events[step].copy_(self.first_policy_stats)
         self.serial.add_(fired.to(torch.int64))
 
     def after_reset(self, world, fired, *, reset_seed):
@@ -117,12 +130,17 @@ class GameProgress:
                 torch.full_like(self.first_actions, -1),
                 self.first_actions,
             ))
+        if self.track_first_policy:
+            self.first_policy_stats.masked_fill_(fired[:, None], 0.0)
 
     def finish(self, rollout):
         rows = self.events[self.events[:, :, 0].bool()].cpu().tolist()
         records = []
         setups = []
-        for _, game_id, moves, winner, reason, initial_seed, env_steps, generation, first_action in rows:
+        if self.track_first_policy:
+            policy_rows = self.policy_events[self.events[:, :, 0].bool()].cpu().tolist()
+            from .first_move_metrics import POLICY_FIELDS
+        for row_index, (_, game_id, moves, winner, reason, initial_seed, env_steps, generation, first_action) in enumerate(rows):
             label = self.REASONS[reason]
             pool = self.pool_history[generation]
             pool_index = setup_pool_index(game_id % self.num_envs, initial_seed, len(pool["hashes"]))
@@ -136,6 +154,11 @@ class GameProgress:
                 tracked_environment_steps=env_steps, ending_rollout=rollout,
                 first_action=first_action, first_source=first_source,
                 first_destination=first_destination))
+            if self.track_first_policy:
+                stats = policy_rows[row_index]
+                if first_action < 0 or stats[-2] < 1 or not all(math.isfinite(v) for v in stats):
+                    raise ValueError("completed game has missing/nonfinite first policy statistics")
+                records[-1]["first_policy"] = dict(zip(POLICY_FIELDS, stats))
             if self.track_arrangements:
                 setups.append(pool["setups"][pool_index])
                 records[-1].update(setup_source="arrangement_policy", setup_generation=generation)
@@ -151,6 +174,8 @@ class GameProgress:
         live_generations = set(self.pool_generation.cpu().tolist()) | {self.current_generation}
         self.pool_history = {k: v for k, v in self.pool_history.items() if k in live_generations}
         del self.events
+        if self.track_first_policy:
+            del self.policy_events
         return records
 
     def summary(self):
@@ -163,7 +188,9 @@ class GameProgress:
             first_source_counts=dict(self.first_source_counts))
 
     def state_dict(self):
-        return dict(version=5, num_envs=self.num_envs, lineage_id=self.lineage_id,
+        return dict(version=6, num_envs=self.num_envs, lineage_id=self.lineage_id,
+            track_first_policy=self.track_first_policy,
+            first_policy_stats=self.first_policy_stats.cpu().clone(),
             serial=self.serial.cpu().clone(), initial_seed=self.initial_seed.cpu().clone(),
             initialized=self.initialized, completed_games=self.completed_games,
             environment_steps=self.environment_steps, total_game_moves=self.total_game_moves,
@@ -178,7 +205,7 @@ class GameProgress:
             first_source_counts=dict(self.first_source_counts))
 
     def load_state_dict(self, state):
-        if state["version"] not in (2, 3, 4, 5) or state["num_envs"] != self.num_envs:
+        if state["version"] not in (2, 3, 4, 5, 6) or state["num_envs"] != self.num_envs:
             raise ValueError("game progress schema or environment count mismatch")
         for key in ("lineage_id", "initialized", "completed_games", "environment_steps", "total_game_moves"):
             setattr(self, key, state[key])
@@ -190,7 +217,7 @@ class GameProgress:
         if state["version"] >= 4 and "first_actions" in state:
             self.first_actions.copy_(state["first_actions"])
         self.pool_hashes = None
-        if state["version"] in (3, 4):
+        if state["version"] >= 3:
             if state["track_arrangements"] != self.track_arrangements:
                 raise ValueError("arrangement accounting mode mismatch")
             self.pool_generation.copy_(state["pool_generation"])
@@ -199,6 +226,10 @@ class GameProgress:
             self.pool_history = copy.deepcopy(state["pool_history"])
             if self.current_generation in self.pool_history:
                 self.pool_hashes = self.pool_history[self.current_generation]["hashes"]
+        if state.get("track_first_policy", False) != self.track_first_policy:
+            raise ValueError("first policy tracking resume mode mismatch")
+        if self.track_first_policy:
+            self.first_policy_stats.copy_(state["first_policy_stats"])
         self.reasons = Counter(state["reasons"])
         self.winners = Counter(state["winners"])
         self.first_action_counts = Counter(state.get("first_action_counts", {}))

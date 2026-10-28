@@ -1,0 +1,6 @@
+extends: v100_opening_factorial_control.yaml
+save_dir: exps/opening_factorial_20261028/low_lr
+ppo:
+  lr_coef: 0.125
+  lr_ceil: 0.000025
+  lr_floor: 0.00000125

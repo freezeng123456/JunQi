@@ -1,0 +1,5 @@
+# 2x2 screening: advantage-filter coverage x Adam step size.
+# Same initialization and game budget; each arm gets its own single GPU.
+extends: v100_ataraxos_opening_validation.yaml
+save_dir: exps/opening_factorial_20261028/control
+track_first_policy: true

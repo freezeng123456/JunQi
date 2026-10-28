@@ -740,7 +740,9 @@ def train(cfg: TrainConfig) -> None:
     legacy_environment_steps = start_rollout * cfg.env.num_envs * cfg.env.steps_per_env
     if cfg.target_completed_games:
         from junqi_rl.training.game_progress import GameProgress, capture_runtime, restore_runtime
-        game_progress = GameProgress(cfg.env.num_envs, device, track_arrangements=arr_enabled)
+        game_progress = GameProgress(cfg.env.num_envs, device, track_arrangements=arr_enabled,
+            track_first_policy=cfg.track_first_policy)
+        trainer.policy.track_first_policy = cfg.track_first_policy
         if resume_sd is not None and "runtime_state" in resume_sd:
             legacy_environment_steps = restore_runtime(
                 resume_sd["runtime_state"], env, game_progress, rng, cfg, arr_buffer=arr_buffer)
@@ -1244,6 +1246,10 @@ def train(cfg: TrainConfig) -> None:
                             crossed_milestone=(game_progress.completed_games // cfg.save_every_games) * cfg.save_every_games,
                             rollout=rollout_idx + 1, checkpoint=ckpt_path,
                             opening_check=None if opening_monitor is None else opening_monitor.last_result)) + "\n")
+                    if cfg.track_first_policy:
+                        from junqi_rl.training.first_move_metrics import write_milestone
+                        write_milestone(cfg.save_dir, ckpt_path, game_progress.completed_games,
+                            (game_progress.completed_games // cfg.save_every_games) * cfg.save_every_games)
                 # Log config text once on first save
                 if rollout_idx + 1 == cfg.save_every:
                     with open(cfg_path) as f:
