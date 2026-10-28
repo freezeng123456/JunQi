@@ -6,7 +6,9 @@ save_dir: exps/v100_ataraxos_opening_validation_v1
 target_completed_games: 20000
 total_rollouts: 5000
 save_every_games: 5000
-checkpoint_keep: 3
+# Every 5k also produces a 15k checkpoint. Keep all four boundaries so the
+# requested 5k weights survive publication of the final 20k checkpoint.
+checkpoint_keep: 4
 write_training_games: true
 eval_enabled: false
 eval_every_games: 20000
