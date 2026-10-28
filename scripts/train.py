@@ -754,6 +754,9 @@ def train(cfg: TrainConfig) -> None:
             restored_world = True
             print(f"[games] Restored live games and RNG; completed={game_progress.completed_games}")
         elif resume_sd is not None:
+            if cfg.ppo.return_perspective == "same_seat":
+                raise ValueError("same-seat resume requires live runtime and pending decisions; "
+                                 "use init_policy for an explicitly fresh lineage")
             old_cfg = resume_sd.get("train_cfg", {}).get("env", {})
             legacy_environment_steps = start_rollout * old_cfg.get("num_envs", cfg.env.num_envs) * old_cfg.get("steps_per_env", cfg.env.steps_per_env)
             print("[games] Legacy checkpoint: completed-game history unknown; starting a new tracked lineage with fresh games")
