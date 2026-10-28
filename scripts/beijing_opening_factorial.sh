@@ -5,13 +5,15 @@ set -euo pipefail
 module load gcc/11.4.0 cuda/12.1 cmake/3.23.4
 ARM="${1:?Pass control, low_lr, all_samples, or all_samples_low_lr}"
 case "$ARM" in control|low_lr|all_samples|all_samples_low_lr) ;; *) exit 2 ;; esac
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Slurm executes a copy in /var/spool, so BASH_SOURCE is not the repo path.
+REPO_ROOT="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 VENV="${VENV:-/data02/home/${USER}/venvs/junqi-atx}"
 export PATH="${VENV}/bin:${PATH}"
 export PYTHONPATH="${REPO_ROOT}:${REPO_ROOT}/junqi_rl:${PYTHONPATH:-}"
 export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 PYTHONUNBUFFERED=1
 cd "$REPO_ROOT"
 CFG="configs/v100_opening_factorial_${ARM}.yaml"
+test -f "$CFG"
 ROOT="${REPO_ROOT}/exps/opening_factorial_20261028"
 GATE="${ROOT}/acceptance_${ARM}"
 RUN="${ROOT}/${ARM}"
