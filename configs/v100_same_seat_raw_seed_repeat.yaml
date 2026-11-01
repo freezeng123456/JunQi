@@ -1,0 +1,7 @@
+# Independent-seed replication after the original million-game run.
+# Keep all learning settings fixed; inspect 5k/10k/20k complete games.
+extends: v100_same_seat_raw_validation.yaml
+save_dir: exps/same_seat_raw_seed20261101/control
+seed: 20261101
+env:
+  seed: 20261101
