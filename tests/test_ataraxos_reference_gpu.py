@@ -8,9 +8,23 @@ cuda=pytest.importorskip('junqi_cuda')
 pytestmark=pytest.mark.skipif(not torch.cuda.is_available(),reason='CUDA required')
 
 
-def test_independent_seat_reset_is_product_of_banks_and_resumes():
-    from junqi_rl.gpu_rollout import GpuRollout,_build_setup_pool
+@pytest.fixture
+def isolated_world():
+    from junqi_rl.gpu_rollout import GpuRollout
     world=GpuRollout(128,include_global=False,identity_encoding='known_only')
+    world.reset(seed=11)
+    original=copy.deepcopy(world.state_dict())
+    try:
+        yield world
+    finally:
+        # Native reset banks are process-wide, including for later legacy
+        # tests which explicitly exercise the default paired-bank hash.
+        world.load_state_dict(original)
+
+
+def test_independent_seat_reset_is_product_of_banks_and_resumes(isolated_world):
+    from junqi_rl.gpu_rollout import GpuRollout,_build_setup_pool
+    world=isolated_world
     pool=_build_setup_pool(8,seed=221)
     from junqi_rl.networks.arrangement_net import PIECE_TYPE_VALUE_TO_VOCAB_IDX
     vocab=np.vectorize(PIECE_TYPE_VALUE_TO_VOCAB_IDX.__getitem__)(pool.reshape(32,30))
