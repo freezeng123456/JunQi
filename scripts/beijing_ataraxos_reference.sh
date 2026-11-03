@@ -65,7 +65,9 @@ assert s['num_train_step']>0 and arr['total_batches']>0
 assert s['nan_skip_count']==s['grad_skip_count']==arr['grad_nan_skip_count']==0
 assert 'advantage_history' in s['runtime_state']
 assert s['runtime_state']['world']['independent_setup_seats']
-m=json.loads((run/'first_move_001536.json').read_text())
+milestone=(r['completed_games']//1536)*1536
+m=json.loads((run/f'first_move_{milestone:06d}.json').read_text())
+assert m['completed_games']==r['completed_games']
 assert m['cumulative']['missing_first_actions']==m['cumulative']['missing_first_policy']==0
 result=dict(status='PASS',games=r['completed_games'],num_envs=1536,rows=400,
     move_updates=s['num_train_step'],setup_updates=arr['total_batches'],
