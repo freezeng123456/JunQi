@@ -498,6 +498,7 @@ def train(cfg: TrainConfig) -> None:
             td_lambda=cfg.ppo.td_lambda,
             advantage_normalization=cfg.ppo.advantage_normalization,
             return_perspective=cfg.ppo.return_perspective,
+            outcome_td=(cfg.net.use_cat_vf and cfg.ppo.return_perspective == "same_seat"),
             adv_filt_thresh=cfg.ppo.adv_filt_thresh,
             adv_filt_rate=cfg.ppo.adv_filt_rate,
             adv_filter_scope=cfg.ppo.adv_filter_scope,

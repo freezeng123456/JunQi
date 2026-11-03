@@ -1,0 +1,23 @@
+# One-factor follow-up to the raw-advantage / same-seat experiment.
+# Same architecture, seeds, exploration and sampling; categorical same-seat
+# critics now preserve full loss/draw/win distributions through TD(lambda).
+extends: v100_same_seat_raw_validation.yaml
+save_dir: exps/outcome_td_baseline_20261103/control
+resume: ''
+init_policy: ''
+target_completed_games: 20000
+save_every_games: 5000
+checkpoint_keep: 4
+write_training_games: true
+track_first_policy: true
+eval_enabled: false
+
+net:
+  use_cat_vf: true
+
+ppo:
+  advantage_normalization: raw
+  return_perspective: same_seat
+  gamma: 1.0
+  gae_lambda: 0.5
+  td_lambda: 0.8

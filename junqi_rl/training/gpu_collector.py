@@ -816,7 +816,12 @@ def collect_rollout_gpu_v2(
             )
         log_probs_t = log_probs.detach().to(torch.float32)
         values_t = values.detach().to(torch.float32)
-        values_t = _categorical_value_to_scalar(values_t)
+        if getattr(buffer, "outcome_td", False):
+            if values_t.shape != (N, 3):
+                raise ValueError("outcome TD requires loss/draw/win log probabilities")
+            values_t = values_t.exp()
+        else:
+            values_t = _categorical_value_to_scalar(values_t)
         ent_t = getattr(policy, "_last_entropy_t", None)
         if ent_t is not None:
             m = ent_t.detach().to(torch.float32).mean()

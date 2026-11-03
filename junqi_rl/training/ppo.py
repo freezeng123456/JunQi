@@ -563,34 +563,24 @@ class PPOTrainer:
     def _value_loss(
         self,
         values: Tensor,     # (B,) or (B, N_VF_CAT) — log_softmax output for cat-vf
-        returns: Tensor,    # (B,) scalar return ∈ [-1, 1]
+        returns: Tensor,    # (B, 3) outcome distribution, or legacy (B,) scalar
         *,
         reduction: str = "mean",
     ) -> Tensor:
-        """Value function loss.
+        """Cross-entropy against full same-seat outcome TD targets.
 
-        For ``use_cat_vf=True`` we use Ataraxos's **soft** cross-entropy
-        formulation (paper Appendix D.4 / `pyengine/core/rl.py` line 558-561):
-        the scalar return is encoded as a soft 3-bin distribution by linearly
-        interpolating between the two adjacent bin centres, then we minimise
-        the cross-entropy with the predicted log-probs.
-
-        Why soft, not hard?
-        -------------------
-        The previous implementation used ``F.nll_loss`` against a hard
-        bucketised target. When the policy was confidently wrong (e.g. 0.005
-        prob on the true bin) the per-sample CE was -log(0.005) ≈ 5.3 and
-        the gradient through that single sample was ~1/p ≈ 200. In bf16
-        under DDP self-play with high-variance returns this produced the
-        loss_v=0.218 spike at v33a R69 and ultimately the R107 NaN crash
-        (see ``exps/_crash_diagnosis_v33a/train.log``).
-
-        Soft CE bounds the per-sample contribution, smoothes the gradient
-        landscape, and matches Ataraxos exactly. Combined with the gradient-
-        NaN guard above, this fixes both the immediate symptom and the
-        underlying numerical instability.
+        The historical next-actor path accepts scalar-return projections for
+        archived experiments. It is not Ataraxos distributional TD. Same-seat
+        categorical training must supply all three probabilities; a scalar
+        expectation cannot distinguish a certain draw from uncertain win/loss.
         """
-        if self.cfg.net.use_cat_vf:
+        if self.cfg.net.use_cat_vf and returns.ndim == 2:
+            if values.shape != returns.shape or returns.shape[-1] != N_VF_CAT:
+                raise ValueError("outcome TD targets must match (B, 3) value log probabilities")
+            per_sample = -(returns.detach().to(values.dtype) * values).sum(dim=-1)
+        elif self.cfg.net.use_cat_vf:
+            if self.cfg.return_perspective == "same_seat":
+                raise ValueError("same-seat categorical training requires full outcome TD targets")
             # ``values`` is already log_softmax(B, N_VF_CAT) from JunqiNet._value.
             # Build the soft target: linear interpolation between adjacent bins.
             #

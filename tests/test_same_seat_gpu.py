@@ -15,9 +15,9 @@ from junqi_rl.training.game_progress import GameProgress, capture_runtime, resto
 from junqi_rl.training.config import TrainConfig, validate_config
 
 
-def components(storage):
+def components(storage, categorical=False):
     net = JunqiNetConfig(embed_dim=32, depth=1, n_head=4, cnn_channels=16,
-                        use_global_summary=False, identity_encoding="known_only")
+                        use_global_summary=False, identity_encoding="known_only", use_cat_vf=categorical)
     cfg = TrainConfig(net=net, target_completed_games=100, eval_enabled=False,
                       random_opponent=False, reward_shaping=False)
     cfg.ppo = PPOConfig(net=net, dtype="float32", minibatch_size=16,
@@ -37,7 +37,7 @@ def components(storage):
     trainer.policy.track_first_policy = True
     world = GpuRollout(4, include_global=False, identity_encoding="known_only", max_num_moves=17)
     buf = RolloutBufferGPU(num_envs=4, steps_per_env=9, obs_global_dims=0,
-        random_opponent=False, storage_mode=storage,
+        random_opponent=False, storage_mode=storage, outcome_td=categorical,
         history=world.create_rollout_history(9) if storage == "compact_history" else None,
         adv_filt_rate=1., adv_filt_thresh=0., minibatch_group="timestep",
         adv_filter_scope="rollout", advantage_normalization="raw", return_perspective="same_seat")
@@ -57,6 +57,12 @@ def advance(parts, index, reset=False):
     if not reset:
         torch.testing.assert_close(buf._carried["values"], old_pending["values"], rtol=0, atol=0)
         torch.testing.assert_close(buf._carried["behavior_log_probs"], old_pending["behavior_log_probs"], rtol=0, atol=0)
+    if cfg.net.use_cat_vf:
+        assert buf.values.ndim == buf.returns_.ndim == 3
+        targets = buf.returns_[buf.ready_mask]
+        assert (targets >= 0).all()
+        torch.testing.assert_close(targets.sum(-1), torch.ones_like(targets[:, 0]), atol=1e-5, rtol=0)
+        assert torch.isfinite(torch.tensor(list(buf.stats().values()))).all()
     expected_counts = buf.ready_mask.sum(1).cpu().tolist()
     emitted = []
     for batch in buf.minibatches(16, shuffle=False):
@@ -75,13 +81,14 @@ def advance(parts, index, reset=False):
     return actions, rows
 
 
+@pytest.mark.parametrize("categorical", [False, True])
 @pytest.mark.parametrize("storage", ["full_obs", "compact_history"])
-def test_same_seat_collection_and_pending_resume_are_exact(tmp_path, storage):
+def test_same_seat_collection_and_pending_resume_are_exact(tmp_path, storage, categorical):
     torch.manual_seed(101)
     torch.use_deterministic_algorithms(True)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-    parts = components(storage)
+    parts = components(storage, categorical)
     advance(parts, 0, reset=True)
     world, trainer, buf, progress, rng, cfg = parts
     assert progress.completed_games == 0 and buf.pending.valid.any()
@@ -91,7 +98,7 @@ def test_same_seat_collection_and_pending_resume_are_exact(tmp_path, storage):
     snapshot = torch.load(tmp_path / "runtime.pt", map_location="cuda", weights_only=False)
     expected = [advance(parts, i) for i in (1, 2, 3)]
     final_world = copy.deepcopy(world.state_dict())
-    resumed = components(storage)
+    resumed = components(storage, categorical)
     w2, t2, b2, p2, r2, c2 = resumed
     t2.load_state_dict(snapshot["trainer"])
     restore_runtime(snapshot["runtime"], w2, p2, r2, c2, rollout_buffer=b2)

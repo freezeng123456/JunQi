@@ -68,8 +68,8 @@ class RolloutBatch:
     actions         : (B,)                         int32
     old_log_probs   : (B,)                         float32
     advantages      : (B,)                         float32   (normalised)
-    returns         : (B,)                         float32
-    values          : (B,)                         float32   (old value estimates)
+    returns         : (B,) or (B, 3)               float32   (scalar or outcome TD)
+    values          : (B,) or (B, 3)               float32   (old mean or probabilities)
     adv_mask        : (B,)                         bool      high-|adv| filter
     value_only_mask : (B,)                         bool      True ⇒ this transition
                                                               should contribute to

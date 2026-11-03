@@ -39,7 +39,7 @@ print(json.dumps(dict(gpu=torch.cuda.get_device_name(), torch=torch.__version__,
 PY
 # Resume parity explicitly enables deterministic algorithms. cuBLAS requires
 # this setting before Python imports torch; production keeps its own mode.
-CUBLAS_WORKSPACE_CONFIG=:4096:8 python -m pytest -q tests/test_seat_returns.py tests/test_seat_pending.py tests/test_raw_advantage.py \
+CUBLAS_WORKSPACE_CONFIG=:4096:8 python -m pytest -q tests/test_outcome_td.py tests/test_seat_returns.py tests/test_seat_pending.py tests/test_raw_advantage.py \
   tests/test_behavior_policy_reference.py tests/test_same_seat_buffer.py tests/test_same_seat_gpu.py \
   tests/test_first_move_metrics.py tests/test_game_progress.py \
   tests/test_game_progress_gpu.py tests/test_timestep_minibatches.py \

@@ -270,6 +270,8 @@ def runtime_contract(cfg):
         contract["return_learning"] = dict(perspective="same_seat",
             advantage_normalization=cfg.ppo.advantage_normalization,
             gamma=cfg.ppo.gamma, gae_lambda=cfg.ppo.gae_lambda, td_lambda=cfg.ppo.td_lambda)
+        if cfg.net.use_cat_vf:
+            contract["return_learning"]["td_target"] = "outcome_distribution_v1"
     return contract
 
 

@@ -37,6 +37,7 @@ class PendingSeatTransitions:
         device: torch.device | str,
         obs_dtype: torch.dtype = torch.float16,
         obs_global_dims: int = 0,
+        outcome_td: bool = False,
     ) -> None:
         if type(num_envs) is not int or num_envs <= 0:
             raise ValueError("num_envs must be a positive integer")
@@ -47,6 +48,7 @@ class PendingSeatTransitions:
         self.num_envs = num_envs
         self.obs_dtype = obs_dtype
         self.obs_global_dims = obs_global_dims
+        self.outcome_td = bool(outcome_td)
         prefix = (4, num_envs)
         self.valid = torch.zeros(prefix, dtype=torch.bool, device=device)
         self.device = self.valid.device
@@ -62,7 +64,8 @@ class PendingSeatTransitions:
         )
         self.actions = torch.zeros(prefix, dtype=torch.int32, device=self.device)
         self.log_probs = torch.zeros(prefix, dtype=torch.float32, device=self.device)
-        self.values = torch.zeros(prefix, dtype=torch.float32, device=self.device)
+        self.values = torch.zeros((*prefix, 3) if self.outcome_td else prefix,
+                                  dtype=torch.float32, device=self.device)
         self.seats = torch.arange(4, dtype=torch.int8, device=self.device)[:, None].expand(prefix).clone()
         self.behavior_log_probs = torch.zeros(
             (*prefix, COMPACT_ACTION_DIM), dtype=torch.float32, device=self.device,
@@ -139,6 +142,8 @@ class PendingSeatTransitions:
         )
         state.update({name: getattr(self, name).detach().cpu().clone()
                       for name in self.TENSOR_FIELDS})
+        if self.outcome_td:
+            state['value_semantics'] = 'outcome_probabilities_v1'
         return state
 
     @torch.no_grad()
@@ -148,6 +153,8 @@ class PendingSeatTransitions:
             raise ValueError("pending state must be a mapping")
         metadata = dict(schema=self.SCHEMA, num_envs=self.num_envs,
                         obs_dtype=str(self.obs_dtype), obs_global_dims=self.obs_global_dims)
+        if self.outcome_td:
+            metadata['value_semantics'] = 'outcome_probabilities_v1'
         if set(state) != set(metadata) | set(self.TENSOR_FIELDS):
             raise ValueError("pending state fields do not match the schema")
         for name, expected in metadata.items():
@@ -178,6 +185,11 @@ class PendingSeatTransitions:
         for name in ("obs_spatial", "obs_global", "log_probs", "values"):
             if not bool(torch.isfinite(tensors[name][valid]).all()):
                 raise ValueError(f"pending state {name} contains nonfinite values")
+        if self.outcome_td:
+            probs = tensors['values'][valid]
+            if bool((probs < 0).any()) or not torch.allclose(
+                    probs.sum(-1), torch.ones_like(probs[..., 0]), atol=1e-5, rtol=0):
+                raise ValueError('pending outcome probabilities are not normalized')
         behavior = tensors["behavior_log_probs"][valid]
         if bool((torch.isnan(behavior) | torch.isposinf(behavior)).any()):
             raise ValueError("pending state behavior_log_probs contains invalid values")

@@ -232,6 +232,7 @@ class RolloutBufferGPU:
         storage_mode: str = "full_obs",
         history=None,
         obs_global_dims: int = OBS_GLOBAL_DIMS,
+        outcome_td: bool = False,
     ) -> None:
         self.num_envs = num_envs
         self.steps_per_env = steps_per_env
@@ -242,6 +243,11 @@ class RolloutBufferGPU:
         self.advantage_normalization = advantage_normalization
         self.return_perspective = return_perspective
         self.same_seat = return_perspective == "same_seat"
+        # Complete outcome TD is currently supported along same-seat chains.
+        # Keep the historical next-actor/scalar path for archived experiments.
+        self.outcome_td = bool(outcome_td)
+        if self.outcome_td and not self.same_seat:
+            raise ValueError("outcome_td requires same_seat returns")
         if self.same_seat and (random_opponent or gamma != 1.0 or
                 minibatch_group != "timestep" or value_sample_scope != "policy"):
             raise ValueError("same_seat needs self-play, gamma=1 and timestep policy batches")
@@ -375,7 +381,8 @@ class RolloutBufferGPU:
         self.log_probs = torch.zeros((T, N), dtype=torch.float32, device=dev)
 
         # Value estimates at collection time
-        self.values = torch.zeros((T, N), dtype=torch.float32, device=dev)
+        value_shape = (T, N, 3) if self.outcome_td else (T, N)
+        self.values = torch.zeros(value_shape, dtype=torch.float32, device=dev)
 
         # Rewards and terminal flags
         self.rewards = torch.zeros((T, N), dtype=torch.float32, device=dev)
@@ -385,7 +392,7 @@ class RolloutBufferGPU:
         self.seats = torch.zeros((T, N), dtype=torch.int8, device=dev)
 
         # Computed by compute_returns()
-        self.returns_ = torch.zeros((T, N), dtype=torch.float32, device=dev)
+        self.returns_ = torch.zeros(value_shape, dtype=torch.float32, device=dev)
         self.advantages_ = torch.zeros((T, N), dtype=torch.float32, device=dev)
         self.ready_mask = torch.ones((T, N), dtype=torch.bool, device=dev)
         self.input_valid = torch.ones_like(self.ready_mask)
@@ -394,7 +401,8 @@ class RolloutBufferGPU:
         if self.same_seat:
             from .seat_pending import PendingSeatTransitions
             self.pending = PendingSeatTransitions(num_envs=N, device=dev,
-                obs_dtype=obs_storage_dtype, obs_global_dims=self.obs_global_dims)
+                obs_dtype=obs_storage_dtype, obs_global_dims=self.obs_global_dims,
+                outcome_td=self.outcome_td)
             self.input_valid[:4] = False
 
         self._ptr: int = self.prefix_steps
@@ -698,8 +706,8 @@ class RolloutBufferGPU:
         act    = self.actions.view(total)
         lp     = self.log_probs.view(total)
         adv    = self.advantages_.view(total)
-        ret    = self.returns_.view(total)
-        val    = self.values.view(total)
+        ret    = self.returns_.flatten(0, 1)
+        val    = self.values.flatten(0, 1)
         # Legal mask: compact mode rebuilds from state; full mode uses stored
         # CSR/dense data.
         if self.uses_compact_history:
@@ -1038,7 +1046,10 @@ class RolloutBufferGPU:
 
     def stats(self) -> dict[str, float]:
         adv = self.advantages_.view(-1)
-        ret = self.returns_.view(-1)
+        ret = self.returns_
+        if ret.ndim == 3:
+            ret = ret[..., 2] - ret[..., 0]
+        ret = ret.reshape(-1)
         rew = self.rewards.view(-1)
         if getattr(self, "same_seat", False):
             ready = self.ready_mask.view(-1)
