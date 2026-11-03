@@ -330,7 +330,7 @@ def train(cfg: TrainConfig) -> None:
     n_params = sum(p.numel() for p in policy.parameters())
     if is_rank0:
         print(f"[train] JunqiNet parameters: {n_params:,}")
-        if cfg.opening.enabled and not cfg.resume:
+        if not cfg.resume:
             import hashlib
             digest = hashlib.sha256()
             for name, tensor in sorted(policy.state_dict().items()):
