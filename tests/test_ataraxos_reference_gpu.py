@@ -12,7 +12,7 @@ pytestmark=pytest.mark.skipif(not torch.cuda.is_available(),reason='CUDA require
 def isolated_world():
     from junqi_rl.gpu_rollout import GpuRollout
     world=GpuRollout(128,include_global=False,identity_encoding='known_only')
-    world.reset(seed=11)
+    world.reset(seed_base=11)
     original=copy.deepcopy(world.state_dict())
     try:
         yield world
