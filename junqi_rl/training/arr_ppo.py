@@ -43,6 +43,8 @@ def _is_distributed() -> bool:
 
 @dataclass
 class ArrangementPPOConfig:
+    ema_decay: float = 0.0
+    train_chunk_size: int = 0
     """Hyper-parameters for :class:`ArrangementPPOTrainer`."""
 
     lr: float = 3e-4
@@ -132,6 +134,8 @@ class ArrangementPPOTrainer:
         else:
             self._net_for_train = self.net
         self._total_batches: int = 0
+        from .ema import PolicyEMA
+        self.ema = PolicyEMA(self.net, self.cfg.ema_decay) if self.cfg.ema_decay else None
 
     def train_epoch(
         self,
@@ -166,6 +170,8 @@ class ArrangementPPOTrainer:
             if int(local_ok.item()) == 0:
                 return {}
         elif not any_local:
+            if self.ema is not None:
+                self.ema.update(self.net)
             return {}
 
         # Ensure net is in training mode (touches both wrapped and unwrapped
@@ -205,6 +211,8 @@ class ArrangementPPOTrainer:
                 if stepped and on_optimizer_step is not None:
                     on_optimizer_step(self.net)
 
+        if getattr(self, "ema", None) is not None:
+            self.ema.update(self.net)
         # Aggregate.
         out = {k: (sum(v) / len(v)) for k, v in stats.items() if len(v) > 0 and k != "arr_train/n_batches"}
         out["arr_train/n_batches"] = float(sum(stats["arr_train/n_batches"]))
@@ -217,6 +225,9 @@ class ArrangementPPOTrainer:
 
     def _step(self, batch: Batch, stats: dict[str, list[float]]) -> bool:
         """One PPO update; return True iff ``optimizer.step()`` ran."""
+        if self.cfg.train_chunk_size:
+            from .ataraxos_update import update_setup_batch
+            return update_setup_batch(self, batch, stats)
         cfg = self.cfg
         net = self._net_for_train  # DDP-wrapped (or plain) module for fwd+bwd
         # Use the unwrapped reference for non-tensor metadata access.
@@ -345,6 +356,7 @@ class ArrangementPPOTrainer:
         """Return checkpoint state for the arrangement trainer."""
         return {
             "net": self.net.state_dict(),
+            "ema": self.ema.state_dict() if self.ema is not None else None,
             "optimizer": self.optim.state_dict(),
             "grad_nan_skip_count": self._grad_nan_skip_count,
             "total_batches": self._total_batches,
@@ -354,6 +366,10 @@ class ArrangementPPOTrainer:
     def load_state_dict(self, sd: dict[str, Any]) -> None:
         """Restore checkpoint state for the arrangement trainer."""
         self.net.load_state_dict(sd["net"])
+        if self.ema is not None:
+            if sd.get("ema") is None:
+                raise ValueError("EMA-enabled resume requires saved setup EMA state")
+            self.ema.load_state_dict(sd["ema"])
         self.optim.load_state_dict(sd["optimizer"])
         self._grad_nan_skip_count = int(sd.get("grad_nan_skip_count", 0))
         self._total_batches = int(sd.get("total_batches", 0))

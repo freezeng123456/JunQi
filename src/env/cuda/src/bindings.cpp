@@ -1339,7 +1339,7 @@ No host transfers occur.
         "Upload constant tables for device-side reset (call once at init).");
 
     m.def("upload_setup_pool",
-        [](py::array_t<int8_t, py::array::c_style | py::array::forcecast> piece_types) {
+        [](py::array_t<int8_t, py::array::c_style | py::array::forcecast> piece_types, bool independent_seats) {
             auto buf = piece_types.request();
             if (buf.ndim != 2 || buf.shape[1] != 120) {
                 throw std::runtime_error(
@@ -1347,9 +1347,9 @@ No host transfers occur.
             }
             int count = (int)buf.shape[0];
             const int8_t* h_data = static_cast<const int8_t*>(buf.ptr);
-            upload_setup_pool(h_data, count);
+            upload_setup_pool(h_data, count, independent_seats);
         },
-        py::arg("piece_types"),
+        py::arg("piece_types"), py::arg("independent_seats") = false,
         "Upload pool of valid initial setups (pool_size, 120) int8.\n"
         "Called once at init; the pool is used for device-side resets.");
 

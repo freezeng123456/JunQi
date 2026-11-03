@@ -504,6 +504,8 @@ def train(cfg: TrainConfig) -> None:
             adv_filter_scope=cfg.ppo.adv_filter_scope,
             value_sample_scope=cfg.ppo.value_sample_scope,
             minibatch_group=cfg.ppo.minibatch_group,
+            timestep_order=cfg.ppo.timestep_order,
+            advantage_history_steps=cfg.ppo.advantage_history_steps,
             device=device,
             csr_legal_mask=cfg.rollout.csr_legal_mask,
             csr_k_max=cfg.rollout.csr_k_max,
@@ -810,6 +812,7 @@ def train(cfg: TrainConfig) -> None:
                 arr_gen.seat_idx[trainable_arr],
                 pool_size=cfg.arr.pool_size,
                 seed=cfg.env.seed + rollout_idx * 17,
+                independent_seats=cfg.arr.independent_seat_resets,
             )
             arr_buffer.add_arrangements(
                 arrangements=arr_gen.samples[trainable_arr],
@@ -819,6 +822,12 @@ def train(cfg: TrainConfig) -> None:
                 seat_idx=arr_gen.seat_idx[trainable_arr],
                 step=rollout_idx,
             )
+            if cfg.arr.reset_reward_window:
+                # Official buffer labels are outcomes from this collection
+                # interval, not a cumulative average across policy versions.
+                arr_buffer.counts.zero_()
+                arr_buffer.rewards.zero_()
+                arr_buffer.ready_flags.zero_()
             mc.inc("arr/pool_size", float(pool_size))
             mc.inc(
                 "arr/n_unique_pool",

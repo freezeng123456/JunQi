@@ -15,8 +15,8 @@ from junqi_rl.training.game_progress import GameProgress, capture_runtime, resto
 from junqi_rl.training.config import TrainConfig, validate_config
 
 
-def components(storage, categorical=False):
-    net = JunqiNetConfig(embed_dim=32, depth=1, n_head=4, cnn_channels=16,
+def components(storage, categorical=False, backbone="graph"):
+    net = JunqiNetConfig(backbone=backbone, embed_dim=32, depth=1, n_head=4, cnn_channels=16,
                         use_global_summary=False, identity_encoding="known_only", use_cat_vf=categorical)
     cfg = TrainConfig(net=net, target_completed_games=100, eval_enabled=False,
                       random_opponent=False, reward_shaping=False)

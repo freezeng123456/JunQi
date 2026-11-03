@@ -127,6 +127,11 @@ def power_schedule(
 
 @dataclass
 class PPOConfig:
+    ema_decay: float = 0.0
+    timestep_order: str = "chronological"
+    advantage_history_steps: int = 0
+    train_chunk_size: int = 0
+    """Split forward/backward memory only; one Adam update per complete row."""
     """All hyper-parameters for the PPO trainer.
 
     Defaults follow Ataraxos ``RLConfig`` with minor adjustments for
@@ -471,6 +476,8 @@ class PPOTrainer:
             if (self._use_amp and self._amp_dtype == torch.float16)
             else None
         )
+        from .ema import PolicyEMA
+        self.ema = PolicyEMA(self.policy, cfg.ema_decay) if cfg.ema_decay else None
 
     # -------------------------------------------------------------------------
     # Learning-rate update
@@ -1181,6 +1188,9 @@ class PPOTrainer:
 
         Returns a dict of scalar losses for logging.
         """
+        if self.cfg.train_chunk_size:
+            from .ataraxos_update import update_move_row
+            return update_move_row(self, batch)
         if batch.value_obs_spatial is not None:
             return self._update_step_split_value(batch)
         cfg = self.cfg
@@ -1502,6 +1512,7 @@ class PPOTrainer:
         cfg = self.cfg
         all_metrics: list[dict] = []
         self._sync_collect_policy()
+        self._update_lr()
 
         for _ in range(cfg.num_epochs_per_rollout):
             batches = rollout.minibatches(
@@ -1539,6 +1550,8 @@ class PPOTrainer:
                 metrics.setdefault("train/grad_skip", 0.0)
                 all_metrics.append(metrics)
 
+        if all_metrics and self.ema is not None:
+            self.ema.update(self.policy)
         self.num_rollout += 1
 
         # Aggregate — single D2H sync at epoch end.
@@ -1582,6 +1595,7 @@ class PPOTrainer:
             # cross-world-size resume works because the saved keys never
             # include the ``module.`` / ``_orig_mod.`` prefixes.
             "policy": self._policy_unwrapped.state_dict(),
+            "ema": self.ema.state_dict() if self.ema is not None else None,
             "optimizer": self.optimizer.state_dict(),
             "num_train_step": self.num_train_step,
             "num_rollout": self.num_rollout,
@@ -1600,6 +1614,10 @@ class PPOTrainer:
             source="PPO checkpoint",
         )
         self._policy_unwrapped.load_state_dict(sd["policy"])
+        if self.ema is not None:
+            if sd.get("ema") is None:
+                raise ValueError("EMA-enabled resume requires saved EMA state")
+            self.ema.load_state_dict(sd["ema"])
         self.optimizer.load_state_dict(sd["optimizer"])
         # Non-capturable AdamW keeps scalar step counters on CPU. Historical
         # blanket CUDA deserialization moved them too; PyTorch intentionally

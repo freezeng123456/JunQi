@@ -212,7 +212,7 @@ def test_training_visibility_is_explicit_and_serialized():
         validate_config(cfg)
 
 
-@pytest.mark.parametrize("section", ["ppo", "arr", "belief", "belief.ppo"])
+@pytest.mark.parametrize("section", ["arr", "belief", "belief.ppo"])
 def test_legacy_ema_config_is_ignored_and_not_serialized(section):
     values = {}
     target = values

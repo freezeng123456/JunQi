@@ -207,6 +207,7 @@ class ArrangementNetConfig:
     embed_dim = 8 * 8 * 8 = 512).
     """
 
+    seat_conditioning: bool = True
     depth: int = 4
     """Number of causal transformer layers."""
 
@@ -278,8 +279,9 @@ class ArrangementNet(nn.Module):
         nn.init.trunc_normal_(self.positional_encoding, std=self.cfg.pos_emb_std)
 
         # Seat conditioning (one row per seat).
-        self.seat_emb = nn.Embedding(N_SEATS, D)
-        nn.init.trunc_normal_(self.seat_emb.weight, std=self.cfg.pos_emb_std)
+        self.seat_emb = nn.Embedding(N_SEATS, D) if self.cfg.seat_conditioning else None
+        if self.seat_emb is not None:
+            nn.init.trunc_normal_(self.seat_emb.weight, std=self.cfg.pos_emb_std)
 
         # Causal "start token" — a zero one-hot prepended to shift the sequence
         # so slot t is predicted from prefix [<start>, x_0, ..., x_{t-1}].
@@ -351,7 +353,7 @@ class ArrangementNet(nn.Module):
         # Embed + positional + seat.
         x = self.embedder(shifted)                             # (B, T', D)
         x = x + self.positional_encoding[:, :T_prime]          # broadcast (1, T', D)
-        seat_vec = self.seat_emb(seat_idx).unsqueeze(1)        # (B, 1, D)
+        seat_vec = self.seat_emb(seat_idx).unsqueeze(1) if self.seat_emb is not None else 0.
         x = x + seat_vec                                       # broadcast over T'
 
         # Causal transformer

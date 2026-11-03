@@ -223,6 +223,8 @@ class RolloutBufferGPU:
         adv_filter_scope: str = "timestep",
         value_sample_scope: str = "policy",
         minibatch_group: str = "global",
+        timestep_order: str = "chronological",
+        advantage_history_steps: int = 0,
         device: str | torch.device = "cuda",
         csr_legal_mask: bool = True,
         csr_k_max: int = CSR_K_MAX,
@@ -235,6 +237,11 @@ class RolloutBufferGPU:
         outcome_td: bool = False,
     ) -> None:
         self.num_envs = num_envs
+        if timestep_order not in {"chronological", "shuffle"}:
+            raise ValueError("timestep_order must be chronological or shuffle")
+        self.timestep_order = timestep_order
+        from .advantage_history import AdvantageHistory
+        self.advantage_history = AdvantageHistory(advantage_history_steps) if advantage_history_steps else None
         self.steps_per_env = steps_per_env
         if advantage_normalization not in {"standardize", "raw"}:
             raise ValueError("advantage_normalization must be 'standardize' or 'raw'")
@@ -597,6 +604,12 @@ class RolloutBufferGPU:
             self.advantages_.copy_(advantages)
             self.returns_.copy_(returns)
             self.ready_mask.copy_(ready)
+            if getattr(self, "advantage_history", None) is not None:
+                p = self.prefix_steps
+                self.advantage_history.append(values=self.values[p:], rewards=self.rewards[p:],
+                    dones=self.dones[p:], seats=self.seats[p:], valid=self.input_valid[p:])
+                self._history_threshold = self.advantage_history.threshold(
+                    self.gae_lambda,self.adv_filt_rate,self.adv_filt_thresh)
             if not torch.equal(pending_indices.T >= 0, self.pending.valid):
                 raise RuntimeError("same-seat pending cache and successor accounting disagree")
             return
@@ -852,7 +865,8 @@ class RolloutBufferGPU:
 
         if self.minibatch_group == "timestep":
             # One Adam step per collect row.  Filter only shrinks the row.
-            # shuffle is ignored so t=0..T-1 stay in order.
+            # Legacy runs retain chronological order; the official baseline
+            # shuffles complete rows without changing their optimizer batches.
             if self.adv_filter_scope == "rollout":
                 # Match Ataraxos's buffer-level selection: the threshold is
                 # computed once from raw |A| over this rank's valid samples.
@@ -863,6 +877,9 @@ class RolloutBufferGPU:
                     keep_rate=self.adv_filt_rate,
                     min_thresh=self.adv_filt_thresh,
                 )
+                if getattr(self, "advantage_history", None) is not None:
+                    thresh = self._history_threshold
+                    keep = own_mask & (adv.abs() >= thresh)
                 keep_np = keep.view(T, N).cpu().numpy()
                 rows = [
                     np.flatnonzero(row).astype(np.int64, copy=False)
@@ -893,7 +910,11 @@ class RolloutBufferGPU:
             self._last_kept_min = float(min(nonempty) if nonempty else 0)
             self._last_kept_max = float(max(sizes) if sizes else 0)
             self._last_n_empty_steps = float(sum(1 for s in sizes if s == 0))
-            for t, env_idx in enumerate(rows):
+            order = np.arange(len(rows))
+            if shuffle and getattr(self, "timestep_order", "chronological") == "shuffle":
+                (rng.shuffle(order) if rng is not None else np.random.shuffle(order))
+            for t in order:
+                env_idx = rows[t]
                 if self.value_sample_scope == "all_valid":
                     policy_env = torch.from_numpy(env_idx).to(dev)
                     yield from _emit_all_valid_row(t, policy_env)

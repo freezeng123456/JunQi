@@ -221,7 +221,8 @@ def main(argv=None):
         state = torch.load(spec["path"], map_location="cpu", weights_only=False)
         resolved[name] = checkpoint_provenance(state, spec, manifest["lineage_id"],
                                                manifest["source_commit"])
-        weights = state["policy"]
+        weights = state['ema']['model'] if state.get('ema') is not None else state['policy']
+        resolved[name]['evaluation_weights'] = 'ema' if state.get('ema') is not None else 'raw'
         if not weights or any(not torch.isfinite(tensor).all().item() for tensor in weights.values()):
             raise ValueError(f"Nonfinite policy tensors in {name}")
         resolved[name]["finite_policy_tensors"] = len(weights)

@@ -486,7 +486,7 @@ void upload_reset_tables(
 
 // Upload pool of valid initial setups — call once at init.
 // h_piece_types: (count, 120) int8 — piece types for each pool entry.
-void upload_setup_pool(const int8_t* h_piece_types, int count);
+void upload_setup_pool(const int8_t* h_piece_types, int count, bool independent_seats = false);
 
 // Reset all terminated envs from the setup pool.  Zero CPU involvement.
 // seed: combined with env index for hash-based pool selection.

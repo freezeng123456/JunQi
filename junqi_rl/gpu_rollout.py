@@ -617,6 +617,7 @@ class GpuRollout:
             raise RuntimeError("facts runtime checkpoint requires known_only and a rebuilt native extension")
         return dict(version=1, identity_encoding=self.identity_encoding,
             setup_pool_revision=getattr(self, "setup_pool_revision", 0),
+            independent_setup_seats=getattr(self, "independent_setup_seats", False),
             global_dims=self.global_dims, show_mode=self.show_mode.value,
             native=self.state.checkpoint_to_host(), setup_pool=_training_setup_pool.copy())
 
@@ -632,7 +633,8 @@ class GpuRollout:
             raise ValueError("invalid saved setup pool")
         self.state.checkpoint_from_host(state["native"])
         _training_setup_pool = np.ascontiguousarray(pool).copy()
-        _cuda.upload_setup_pool(_training_setup_pool)
+        self.independent_setup_seats = state.get("independent_setup_seats", False)
+        _cuda.upload_setup_pool(_training_setup_pool, self.independent_setup_seats)
         self.setup_pool_revision = state.get("setup_pool_revision", 0)
         self._last_step_ptrs = {}
         self._last_result = None
@@ -756,7 +758,7 @@ class GpuRollout:
         """
         if _training_setup_pool is None:
             return 0
-        _cuda.upload_setup_pool(_training_setup_pool)
+        _cuda.upload_setup_pool(_training_setup_pool, getattr(self, "independent_setup_seats", False))
         return int(_training_setup_pool.shape[0])
 
     # ------------------------------------------------------------------
@@ -1151,6 +1153,7 @@ class GpuRollout:
         *,
         pool_size: int = 0,
         seed: int = 0,
+        independent_seats: bool = False,
     ) -> int:
         """Re-upload the GPU setup pool from arrangement-net samples.
 
@@ -1188,7 +1191,8 @@ class GpuRollout:
         pool = arrangements_to_pool(
             samples, seat_idx, pool_size=int(pool_size), seed=int(seed),
         )
-        refresh_gpu_setup_pool(pool)
+        _cuda.upload_setup_pool(pool, independent_seats)
+        self.independent_setup_seats = independent_seats
         _training_setup_pool = pool
         self.last_setup_pool_unique = int(np.unique(pool, axis=0).shape[0])
         self.setup_pool_revision = getattr(self, "setup_pool_revision", 0) + 1

@@ -102,6 +102,7 @@ def load_evaluation_policy(
     *,
     device: str | torch.device = "cpu",
     net_config: JunqiNetConfig | dict[str, Any] | None = None,
+    weights: str = "auto",
 ) -> JunqiNet:
     """Build a frozen eval policy from a current-format training checkpoint.
 
@@ -145,9 +146,31 @@ def load_evaluation_policy(
         state,
         source=f"eval baseline {ckpt_path}",
     )
-    policy.load_state_dict(state["policy"])
+    if weights not in {"auto", "raw", "ema"}:
+        raise ValueError("weights must be auto, raw or ema")
+    use_ema = weights == "ema" or (weights == "auto" and state.get("ema") is not None)
+    if use_ema and state.get("ema") is None:
+        raise ValueError("Requested EMA weights are missing")
+    policy.load_state_dict(state["ema"]["model"] if use_ema else state["policy"])
+    policy.evaluation_weights = "ema" if use_ema else "raw"
     policy.to(device).eval()
     return policy
+
+
+def load_evaluation_arrangement(path, *, device="cpu", weights="auto"):
+    from junqi_rl.networks.arrangement_net import ArrangementNet, ArrangementNetConfig
+    state = torch.load(path, map_location="cpu", weights_only=False)
+    cfg = _dict_to_dataclass(ArrangementNetConfig, state['train_cfg']['arr']['net'])
+    saved = state['arrangement']['trainer']
+    if weights not in {"auto", "raw", "ema"}:
+        raise ValueError("weights must be auto, raw or ema")
+    use_ema = weights == "ema" or (weights == "auto" and saved.get('ema') is not None)
+    if use_ema and saved.get('ema') is None:
+        raise ValueError("Requested setup EMA weights are missing")
+    model = ArrangementNet(cfg)
+    model.load_state_dict(saved['ema']['model'] if use_ema else saved['net'])
+    model.evaluation_weights = "ema" if use_ema else "raw"
+    return model.to(device).eval()
 
 
 def _net_config(raw: JunqiNetConfig | Mapping[str, Any]) -> JunqiNetConfig:

@@ -272,6 +272,9 @@ def runtime_contract(cfg):
             gamma=cfg.ppo.gamma, gae_lambda=cfg.ppo.gae_lambda, td_lambda=cfg.ppo.td_lambda)
         if cfg.net.use_cat_vf:
             contract["return_learning"]["td_target"] = "outcome_distribution_v1"
+        if cfg.reference_profile:
+            contract['reference_learning'] = dict(profile=cfg.reference_profile,
+                ppo=asdict(cfg.ppo))
     return contract
 
 
@@ -286,6 +289,8 @@ def capture_runtime(world, progress, minibatch_rng, cfg, legacy_environment_step
         if rollout_buffer is None:
             raise ValueError("same-seat runtime requires its pending rollout buffer")
         state["seat_pending"] = rollout_buffer.pending.state_dict()
+        if rollout_buffer.advantage_history is not None:
+            state['advantage_history'] = rollout_buffer.advantage_history.state_dict()
     return state
 
 
@@ -302,5 +307,9 @@ def restore_runtime(state, world, progress, minibatch_rng, cfg, *, arr_buffer=No
         if rollout_buffer is None or "seat_pending" not in state:
             raise ValueError("same-seat resume is missing pending decisions")
         rollout_buffer.pending.load_state_dict(state["seat_pending"])
+        if rollout_buffer.advantage_history is not None:
+            if 'advantage_history' not in state:
+                raise ValueError('reference resume requires rolling advantage history')
+            rollout_buffer.advantage_history.load_state_dict(state['advantage_history'],rollout_buffer.device)
     restore_rng(state["rng"], minibatch_rng)
     return state["legacy_environment_steps"]

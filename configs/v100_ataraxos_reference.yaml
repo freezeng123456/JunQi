@@ -1,0 +1,61 @@
+# Ataraxos move/setup learning, adapted only to JunQi rules and one V100.
+# Paper S3.2/S3.4/S3.6; implementation pinned in docs/ataraxos-reference.md.
+extends: v100_outcome_td_baseline.yaml
+reference_profile: ataraxos_v100
+save_dir: exps/ataraxos_reference_20261103/control
+resume: ''
+init_policy: ''
+seed: 20261103
+target_completed_games: 20000
+checkpoint_keep: 4
+save_every_games: 5000
+total_rollouts: 5000
+log_every: 1
+env:
+  num_envs: 1536
+  steps_per_env: 400  # 4 * (101 - 1); same per-seat collection cadence as code
+  max_num_moves: 4000
+  seed: 20261103
+net:
+  backbone: ataraxos
+  depth: 8
+  embed_dim: 384
+  n_head: 8
+  ff_factor: 4
+  action_key_dim: 384
+  pos_emb_std: 0.1
+  dropout: 0.0
+  identity_encoding: known_only
+  use_global_summary: false
+  use_cat_vf: true
+ppo:
+  timestep_order: shuffle
+  advantage_history_steps: 4404  # max game + 4 * train_every_per_player
+  ema_decay: 0.999
+  train_chunk_size: 32
+  act_chunk_size: 32
+  temperature_coef: 0.05
+  temperature_decay: 0.3
+  temperature_floor: 0.001  # official implementation clamp
+  temperature_ceil: 0.1
+  lr_coef: 0.5
+  lr_decay: 1.1
+  lr_ceil: 0.0001
+  lr_floor: 0.000005
+  lr_schedule_unit: rollout
+  temperature_schedule_unit: rollout
+  minibatch_size: 1536  # timestep grouping keeps a whole filtered row
+arr:
+  refresh_every: 1
+  n_arr: 4000  # paper: 1000 lineups per player; four players here
+  pool_size: 0  # per-seat banks are sampled independently in the reset kernel
+  independent_seat_resets: true
+  reset_reward_window: true
+  storage_duration: 11  # ceil(max_game / 400) + one rollout
+  reg_temp_floor: 0.001
+  net:
+    seat_conditioning: false
+  ppo:
+    batch_size: 1024
+    train_chunk_size: 64
+    ema_decay: 0.999

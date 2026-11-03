@@ -2881,6 +2881,7 @@ struct SetupPool {
 };
 
 static SetupPool g_setup_pool;
+static bool g_setup_independent_seats = false;
 
 // Upload constant tables (called once from Python).
 void upload_reset_tables(
@@ -2896,8 +2897,9 @@ void upload_reset_tables(
 }
 
 // Upload setup pool (called once from Python).
-void upload_setup_pool(const int8_t* h_piece_types, int count) {
+void upload_setup_pool(const int8_t* h_piece_types, int count, bool independent_seats) {
     g_setup_pool.upload(h_piece_types, count);
+    g_setup_independent_seats = independent_seats;
 }
 
 // ---------------------------------------------------------------------------
@@ -3013,6 +3015,7 @@ __global__ void reset_terminated_envs_kernel(
     // Pool + seed
     const int8_t* d_pool_piece_types,  // (pool_size, 120)
     int pool_size,
+    bool independent_seats,
     int64_t seed)
 {
     int env = blockIdx.x * blockDim.x + threadIdx.x;
@@ -3028,7 +3031,16 @@ __global__ void reset_terminated_envs_kernel(
     h ^= (h >> 31);
     int pool_idx = (int)(h % (uint64_t)pool_size);
 
-    const int8_t* pool_types = d_pool_piece_types + pool_idx * 120;
+    int seat_pool_idx[4] = {pool_idx, pool_idx, pool_idx, pool_idx};
+    if (independent_seats) {
+        for (int seat = 0; seat < 4; ++seat) {
+            uint64_t z = h + 0x9e3779b97f4a7c15ULL * (uint64_t)(seat + 1);
+            z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+            z ^= z >> 31;
+            seat_pool_idx[seat] = (int)(z % (uint64_t)pool_size);
+        }
+    }
 
     // === Clear cell_piece_id (289 cells) ===
     int16_t* cpid = d_cell_piece_id + env * 289;
@@ -3040,7 +3052,7 @@ __global__ void reset_terminated_envs_kernel(
     int base120 = env * 120;
     for (int pid = 0; pid < 120; ++pid) {
         int slot = pid % 30;
-        int8_t ptype = pool_types[pid];
+        int8_t ptype = d_pool_piece_types[seat_pool_idx[pid / 30] * 120 + pid];
 
         d_piece_seat_arr[base120 + pid] = PIECE_SEAT_INIT[pid];
         d_piece_type_arr[base120 + pid] = ptype;
@@ -3192,6 +3204,7 @@ void reset_terminated_envs(
         d_state.d_cm_attacked_by_known_gongb,
         g_setup_pool.d_piece_types,
         g_setup_pool.pool_size,
+        g_setup_independent_seats,
         seed);
     KERNEL_CHECK();
 }

@@ -39,6 +39,8 @@ class ArrangementTrainConfig:
     """Optional arrangement-policy training."""
 
     enabled: bool = False
+    independent_seat_resets: bool = False
+    reset_reward_window: bool = False
     refresh_every: int = 1
     n_arr: int = 1024
     # Combined 4-seat boards uploaded to CUDA. 0 = zip n_arr//4 frozen
@@ -89,6 +91,7 @@ class RolloutTrainConfig:
 class TrainConfig:
     """Complete training configuration."""
 
+    reference_profile: str = ""
     env: EnvConfig = field(default_factory=EnvConfig)
     net: JunqiNetConfig = field(default_factory=JunqiNetConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
@@ -256,7 +259,7 @@ def _dict_to_dataclass(
 
     # Read historical YAML without reintroducing an averaging path. Keep
     # every other unknown-key error so typos cannot silently change a run.
-    if cls in (PPOConfig, ArrangementTrainConfig, BeliefTrainConfig, BeliefPPOConfig) and "ema_decay" in values:
+    if cls in (ArrangementTrainConfig, BeliefTrainConfig, BeliefPPOConfig) and "ema_decay" in values:
         location = f"{path}.ema_decay" if path else f"{cls.__name__}.ema_decay"
         warnings.warn(
             f"{location} is ignored: parameter EMA has been removed; current parameters are used",
@@ -324,6 +327,14 @@ _NON_CONFIG_ARGS = {"config", "extra", "resume_cli", "validate_only"}
 def validate_config(cfg: TrainConfig) -> None:
     """Fail before allocating models when a configuration is inconsistent."""
     cfg.opening.validate()
+    if cfg.reference_profile:
+        from .ataraxos_contract import validate_reference
+        validate_reference(cfg)
+    if cfg.ppo.timestep_order not in {"chronological", "shuffle"}:
+        raise ValueError("invalid timestep order")
+    for ppo in (cfg.ppo, cfg.arr.ppo):
+        if ppo.train_chunk_size < 0 or not (ppo.ema_decay == 0 or 0 < ppo.ema_decay < 1):
+            raise ValueError("invalid chunk size or EMA decay")
     if cfg.opening.enabled and not cfg.target_completed_games:
         raise ValueError("opening monitoring requires counted GPU training")
     if type(cfg.net.use_global_summary) is not bool:

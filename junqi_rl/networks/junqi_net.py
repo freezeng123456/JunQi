@@ -96,6 +96,9 @@ class JunqiNetConfig:
     larger 4-player board (17×17 vs 10×10) and 16,641-action space.
     """
 
+    backbone: str = "graph"
+    """graph retains historical weights; ataraxos uses the official linear/ReLU trunk."""
+
     # Spatial stem. Historical ``cnn_*`` field names are retained for
     # config/checkpoint compatibility.
     cnn_channels: int = 128
@@ -410,14 +413,19 @@ class JunqiNet(nn.Module):
         self._nan_fwd_count: int = 0
 
         D = cfg.embed_dim
+        official = cfg.backbone == "ataraxos"
+        if cfg.backbone not in {"graph", "ataraxos"}:
+            raise ValueError("backbone must be graph or ataraxos")
+        if official and cfg.use_global_summary:
+            raise ValueError("Ataraxos backbone uses a zero-padded value token")
 
         # -- Graph stem --------------------------------------------------------
-        self.stem = GraphStem(
+        self.stem = nn.Linear(OBS_CHANNELS, D) if official else GraphStem(
             OBS_CHANNELS, cfg.cnn_channels, cfg.cnn_layers, cfg.ff_factor
         )
 
         # Project stem output channels to embed_dim (may be a no-op if equal)
-        if cfg.cnn_channels != D:
+        if not official and cfg.cnn_channels != D:
             self.patch_proj: nn.Module = nn.Linear(cfg.cnn_channels, D)
         else:
             self.patch_proj = nn.Identity()
@@ -442,12 +450,17 @@ class JunqiNet(nn.Module):
             self.register_parameter("cls_token", None)
         else:
             self.global_proj = None
-            self.cls_token = nn.Parameter(torch.zeros(1, 1, D))
+            if official:
+                self.register_buffer("cls_token", torch.zeros(1, 1, D), persistent=False)
+            else:
+                self.cls_token = nn.Parameter(torch.zeros(1, 1, D))
 
         # -- Transformer trunk ------------------------------------------------
+        from .ataraxos_block import AtaraxosBlock
+        block = AtaraxosBlock if official else TransformerBlock
         self.transformer = nn.Sequential(
             *[
-                TransformerBlock(D, cfg.n_head, cfg.ff_factor, cfg.dropout)
+                block(D, cfg.n_head, cfg.ff_factor, cfg.dropout)
                 for _ in range(cfg.depth)
             ]
         )
@@ -458,8 +471,8 @@ class JunqiNet(nn.Module):
         #   score[b, src, dst] = q[b, src] · k[b, dst]^T / sqrt(key_dim)
         # which is then flattened to (B, 129*129) = (B, 16641).
         Kd = cfg.action_key_dim
-        self.q_proj = nn.Linear(D, Kd, bias=False)
-        self.k_proj = nn.Linear(D, Kd, bias=False)
+        self.q_proj = nn.Linear(D, Kd, bias=official)
+        self.k_proj = nn.Linear(D, Kd, bias=official)
 
         # -- Value head --------------------------------------------------------
         if cfg.use_cat_vf:
@@ -467,7 +480,8 @@ class JunqiNet(nn.Module):
         else:
             self.value_head = nn.Linear(D, 1)
 
-        self._init_weights()
+        if not official:
+            self._init_weights()
         # Construct AFTER baseline initialization: disabled state dict and RNG
         # consumption are unchanged; enabled base weights are identical too.
         self.combat_head = None
