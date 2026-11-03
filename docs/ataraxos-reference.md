@@ -33,6 +33,8 @@ Sources: [paper S3](https://arxiv.org/html/2511.07312v2) and
   Actors sample from current weights. Checkpoints retain raw weights,
   optimizer, EMA weights/counters, pending decisions and rolling history.
   Evaluation defaults to EMA and can explicitly select raw weights.
+  Large pending observations/legal masks/behavior distributions use lossless
+  zlib storage in reference checkpoints; restore validates exact byte counts.
 - Setup PPO: batch 1024, 5 epochs, LR 5e-5, clip .2, KL .1,
   value .5, entropy-prediction 1, gradient norm .5. Setup entropy coefficient
   `max(.001, .1/(iteration+1)^.3)`, normalization 10. Each collection interval

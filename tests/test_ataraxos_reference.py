@@ -161,3 +161,16 @@ def test_eval_loads_ema_and_explicit_raw_and_resume_preserves_ema(tmp_path):
     restored=PPOTrainer(JunqiNet(net.cfg),cfg);restored.load_state_dict(state)
     assert restored.ema.updates==1
     torch.testing.assert_close(restored.ema.model.value_head.bias,a.ema.model.value_head.bias)
+
+
+def test_pending_compression_is_lossless_and_bounded():
+    import zlib
+    from junqi_rl.training.seat_pending import PendingSeatTransitions
+    source=PendingSeatTransitions(2,'cpu',outcome_td=True)
+    source.obs_spatial.uniform_();source.behavior_log_probs.normal_()
+    packed=source.state_dict(compress=True)
+    target=PendingSeatTransitions(2,'cpu',outcome_td=True);target.load_state_dict(packed)
+    for field in source.TENSOR_FIELDS:
+        torch.testing.assert_close(getattr(source,field),getattr(target,field),atol=0,rtol=0)
+    packed['legal_mask']['data']=zlib.compress(b'bad')
+    with pytest.raises(ValueError,match='compressed size'):target.load_state_dict(packed)

@@ -288,7 +288,8 @@ def capture_runtime(world, progress, minibatch_rng, cfg, legacy_environment_step
     if cfg.ppo.return_perspective == "same_seat":
         if rollout_buffer is None:
             raise ValueError("same-seat runtime requires its pending rollout buffer")
-        state["seat_pending"] = rollout_buffer.pending.state_dict()
+        state["seat_pending"] = (rollout_buffer.pending.state_dict(compress=True)
+            if cfg.reference_profile else rollout_buffer.pending.state_dict())
         if rollout_buffer.advantage_history is not None:
             state['advantage_history'] = rollout_buffer.advantage_history.state_dict()
     return state

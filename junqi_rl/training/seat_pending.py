@@ -8,6 +8,7 @@ behavior probability from a newer policy.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import zlib
 
 import torch
 from torch import Tensor
@@ -134,7 +135,7 @@ class PendingSeatTransitions:
         """Invalidate every slot; stale payloads remain unreachable."""
         self.valid.zero_()
 
-    def state_dict(self) -> dict[str, object]:
+    def state_dict(self, *, compress: bool = False) -> dict[str, object]:
         """Return independent CPU storage, with no derived indices or RNG."""
         state: dict[str, object] = dict(
             schema=self.SCHEMA, num_envs=self.num_envs,
@@ -142,6 +143,11 @@ class PendingSeatTransitions:
         )
         state.update({name: getattr(self, name).detach().cpu().clone()
                       for name in self.TENSOR_FIELDS})
+        if compress:
+            for name in ('obs_spatial', 'legal_mask', 'behavior_log_probs'):
+                tensor = state[name]
+                state[name] = dict(codec='zlib-v1',
+                    data=zlib.compress(tensor.contiguous().numpy().tobytes(), level=1))
         if self.outcome_td:
             state['value_semantics'] = 'outcome_probabilities_v1'
         return state
@@ -164,6 +170,13 @@ class PendingSeatTransitions:
         for name in self.TENSOR_FIELDS:
             value = state[name]
             expected = getattr(self, name)
+            if isinstance(value, Mapping) and value.get('codec') == 'zlib-v1':
+                size = expected.numel() * expected.element_size()
+                decoder = zlib.decompressobj()
+                raw = decoder.decompress(value['data'], size + 1)
+                if len(raw) != size or not decoder.eof or decoder.unused_data:
+                    raise ValueError(f'pending state {name} compressed size mismatch')
+                value = torch.frombuffer(bytearray(raw), dtype=expected.dtype).reshape(expected.shape)
             if not isinstance(value, Tensor) or value.shape != expected.shape:
                 raise ValueError(f"pending state {name} shape mismatch")
             if value.dtype != expected.dtype or value.layout != torch.strided:
