@@ -38,10 +38,14 @@ def test_independent_seat_reset_is_product_of_banks_and_resumes():
     world.reset_from_setup_pool(seed=25)
     restored=world.state.checkpoint_to_host()['arrays'][key]
     np.testing.assert_array_equal(restored,snapshot[key])
+    # New worlds share the native reset bank and must checkpoint its actual
+    # sampling mode, rather than silently recording the legacy default.
+    another=GpuRollout(4,include_global=False,identity_encoding='known_only')
+    assert another.independent_setup_seats and another.state_dict()['independent_setup_seats']
 
 
 def test_reference_optimizer_ema_shuffle_and_history_resume_exact(tmp_path):
-    from test_same_seat_gpu import components,advance
+    from tests.test_same_seat_gpu import components,advance
     from junqi_rl.training.ema import PolicyEMA
     from junqi_rl.training.advantage_history import AdvantageHistory
     from junqi_rl.training.game_progress import capture_runtime,restore_runtime

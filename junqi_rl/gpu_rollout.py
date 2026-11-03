@@ -455,6 +455,7 @@ _reset_pool_uploaded = False
 # Host copy of the pool training draws from. Evaluation overwrites the
 # device pool with a fixed distribution, so training needs a way back.
 _training_setup_pool: np.ndarray | None = None
+_training_setup_independent_seats = False
 
 
 def _pack_from_batched(b: BatchedGameState) -> dict[str, np.ndarray]:
@@ -603,6 +604,7 @@ class GpuRollout:
             mixed_setup=self._mixed_setup,
             mixed_own_team_styles=self._mixed_own_team_styles,
         )
+        self.independent_setup_seats = _training_setup_independent_seats
 
     @property
     def obs(self):
@@ -617,12 +619,12 @@ class GpuRollout:
             raise RuntimeError("facts runtime checkpoint requires known_only and a rebuilt native extension")
         return dict(version=1, identity_encoding=self.identity_encoding,
             setup_pool_revision=getattr(self, "setup_pool_revision", 0),
-            independent_setup_seats=getattr(self, "independent_setup_seats", False),
+            independent_setup_seats=_training_setup_independent_seats,
             global_dims=self.global_dims, show_mode=self.show_mode.value,
             native=self.state.checkpoint_to_host(), setup_pool=_training_setup_pool.copy())
 
     def load_state_dict(self, state):
-        global _training_setup_pool
+        global _training_setup_pool, _training_setup_independent_seats
         if (state["version"] != 1 or not self.known_only
                 or state["identity_encoding"] != self.identity_encoding
                 or state["global_dims"] != self.global_dims
@@ -634,6 +636,7 @@ class GpuRollout:
         self.state.checkpoint_from_host(state["native"])
         _training_setup_pool = np.ascontiguousarray(pool).copy()
         self.independent_setup_seats = state.get("independent_setup_seats", False)
+        _training_setup_independent_seats = self.independent_setup_seats
         _cuda.upload_setup_pool(_training_setup_pool, self.independent_setup_seats)
         self.setup_pool_revision = state.get("setup_pool_revision", 0)
         self._last_step_ptrs = {}
@@ -687,7 +690,7 @@ class GpuRollout:
            canonical lineup per game; see :func:`_build_canonical_pool`).
         3. neither — legacy uniform-random for all seats.
         """
-        global _reset_pool_uploaded, _training_setup_pool
+        global _reset_pool_uploaded, _training_setup_pool, _training_setup_independent_seats
         if _reset_pool_uploaded:
             return
 
@@ -727,6 +730,7 @@ class GpuRollout:
             pool = _build_setup_pool(pool_size, seed=42)
         _cuda.upload_setup_pool(pool)
         _training_setup_pool = pool
+        _training_setup_independent_seats = False
         _reset_pool_uploaded = True
 
     def upload_fixed_evaluation_setup_pool(
@@ -758,7 +762,8 @@ class GpuRollout:
         """
         if _training_setup_pool is None:
             return 0
-        _cuda.upload_setup_pool(_training_setup_pool, getattr(self, "independent_setup_seats", False))
+        self.independent_setup_seats = _training_setup_independent_seats
+        _cuda.upload_setup_pool(_training_setup_pool, _training_setup_independent_seats)
         return int(_training_setup_pool.shape[0])
 
     # ------------------------------------------------------------------
@@ -1182,7 +1187,7 @@ class GpuRollout:
         pool_size : int
             Number of combined-setup entries in the new pool.
         """
-        global _training_setup_pool
+        global _training_setup_pool, _training_setup_independent_seats
         import numpy as np
         from junqi_rl.arrangement.pool_upload import (
             arrangements_to_pool,
@@ -1193,6 +1198,7 @@ class GpuRollout:
         )
         _cuda.upload_setup_pool(pool, independent_seats)
         self.independent_setup_seats = independent_seats
+        _training_setup_independent_seats = independent_seats
         _training_setup_pool = pool
         self.last_setup_pool_unique = int(np.unique(pool, axis=0).shape[0])
         self.setup_pool_revision = getattr(self, "setup_pool_revision", 0) + 1
