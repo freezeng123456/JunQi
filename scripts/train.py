@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import signal
 import sys
 
@@ -262,6 +263,7 @@ def train(cfg: TrainConfig) -> None:
     # large H20 rollouts, where ``full_obs`` would consume most of each GPU.
 
     # ---- Reproducibility ----
+    random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
     if cfg.torch_deterministic:
