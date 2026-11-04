@@ -33,8 +33,11 @@ separates acceptance from production. The acceptance harness intentionally uses
 a bounded rollout ceiling; production always uses the completed-game target.
 No acceptance result is evidence of playing strength or long-run non-collapse.
 
-A two-node allocation with four V100 GPUs per node can be launched using Slurm
-with `--nodes=2 --gpus=8 --gpus-per-node=4 --ntasks-per-node=1` and an appropriate
-CPU allocation. The launcher preserves scheduler device visibility and derives
-ranks from Slurm/torchrun. Benchmark estimates must describe the measured node
-layout; they are not a claim of ideal eightfold acceleration.
+Live BSCC-N26 submission policy rejected multi-node jobs during this task;
+only single-node allocations of 1–8 GPUs are allowed. Use one eight-GPU node
+with `--nodes=1 --gpus=8 --ntasks=1 --cpus-per-task=80`. The launcher preserves
+scheduler device visibility and derives ranks from Slurm/torchrun. An available
+two-GPU allocation may run `acceptance2` first. The single eight-GPU `campaign`
+job then runs eight-rank restart acceptance and production-size benchmarking,
+and starts the million-game run only after both acceptance receipts pass.
+Resource queue time is separate from measured training time.
