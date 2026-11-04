@@ -49,6 +49,7 @@ if [[ "$MODE" == acceptance || "$MODE" == acceptance2 || "$MODE" == campaign ]];
     exit 0
   fi
   launch "$GPUS_PER_NODE" scripts/accept_distributed_reference.py --mode benchmark --output "$ARTIFACTS/full"
+  python scripts/estimate_reference_runtime.py "$ARTIFACTS/full/benchmark"
   python -m pytest tests/test_ataraxos_reference_gpu.py tests/test_optimizer_resume_devices.py -q > "$ARTIFACTS/single-gpu-regression.txt"
   python -c "import json,pathlib; p=pathlib.Path('$ARTIFACTS'); assert all(json.loads((p/f'world{n}/acceptance.json').read_text())['passed'] for n in (2,8)); (p/'ACCEPTED.json').write_text(json.dumps({'job_id':'$SLURM_JOB_ID','passed':True,'world_sizes':[2,8]}))"
   if [[ "$MODE" == campaign ]]; then
