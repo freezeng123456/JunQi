@@ -76,7 +76,8 @@ def save_checkpoint(
     distributed = active() and cfg.ppo.train_chunk_size > 0
     runtime = None
     if distributed:
-        from .distributed_checkpoint import save_runtime
+        from .distributed_checkpoint import save_runtime, verify_learners
+        consensus = verify_learners(trainer, arr_trainer)
         runtime = save_runtime(checkpoint_path, trainer.runtime_state_provider)
         if torch.distributed.get_rank() != 0:
             outcome = objects(None)[0]
@@ -85,6 +86,8 @@ def save_checkpoint(
             return checkpoint_path
     state = trainer.state_dict()
     state["train_cfg"] = _dataclass_to_dict(cfg)
+    if distributed:
+        state["distributed_consensus"] = consensus
     runtime_provider = getattr(trainer, "runtime_state_provider", None)
     if runtime is not None:
         state["runtime_state"] = runtime

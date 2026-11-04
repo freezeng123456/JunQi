@@ -34,6 +34,8 @@ def main():
     a=load(root/'continuous/ckpt_000003.pt');b=load(root/'restarted/ckpt_000003.pt')
     for key in ('policy','optimizer','ema','arrangement','num_rollout','num_train_step'):
         equal(a[key],b[key],key)
+    assert a['distributed_consensus']['identical'] and b['distributed_consensus']['identical']
+    assert a['distributed_consensus']['world_size']==args.world
     assert a['num_train_step']>0 and a['arrangement']['trainer']['total_batches']>0
     hashes={}
     per_rank=[]

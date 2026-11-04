@@ -118,6 +118,19 @@ def _worker(rank, rendezvous, directory):
         save_checkpoint(learner,config,2,directory,arr_trainer=arr)
         assert not Path(path).exists()
         assert not list(Path(directory).glob('ckpt_000001.rank*.runtime.pt'))
+        # Failed re-publication cannot corrupt a previously committed checkpoint.
+        import junqi_rl.training.checkpoint as checkpoint_module
+        original_write=checkpoint_module.atomic_write
+        def failing_write(path, writer):
+            if str(path).endswith('ckpt_000002.pt'):
+                raise OSError('intentional publish failure')
+            return original_write(path,writer)
+        checkpoint_module.atomic_write=failing_write
+        with pytest.raises((OSError,RuntimeError),match='intentional publish failure'):
+            save_checkpoint(learner,config,2,directory,arr_trainer=arr)
+        checkpoint_module.atomic_write=original_write
+        committed=torch.load(Path(directory)/'ckpt_000002.pt',map_location='cpu',weights_only=False)
+        assert load_runtime(Path(directory)/'ckpt_000002.pt',committed['runtime_state'])['games']['completed_games']==rank+1
         # One rank's nonfinite loss must fail on every rank before any optimizer step.
         with pytest.raises(FloatingPointError,match='intentional'):
             sync.fail_together(rank==1,'cpu','intentional nonfinite')

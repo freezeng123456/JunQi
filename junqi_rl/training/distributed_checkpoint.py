@@ -2,6 +2,7 @@
 from pathlib import Path
 import hashlib
 import json
+import uuid
 import torch
 import torch.distributed as dist
 from ._checkpoint_io import atomic_write
@@ -18,7 +19,9 @@ def digest(path):
 
 def save_runtime(checkpoint_path, provider):
     rank, world = dist.get_rank(), dist.get_world_size()
-    path = Path(checkpoint_path).with_suffix(f'.rank{rank:03d}.runtime.pt')
+    # A retry must not overwrite shards referenced by the last committed manifest.
+    revision = objects(uuid.uuid4().hex if rank == 0 else None)[0]
+    path = Path(checkpoint_path).with_suffix(f'.rank{rank:03d}.{revision}.runtime.pt')
     result = None
     try:
         runtime = provider()
@@ -52,7 +55,7 @@ def load_runtime(checkpoint_path, state):
 def remove_shards(checkpoint_path):
     """Only remove shards owned by this numbered checkpoint after its pruning."""
     path = Path(checkpoint_path)
-    for shard in path.parent.glob(path.stem + '.rank[0-9][0-9][0-9].runtime.pt'):
+    for shard in path.parent.glob(path.stem + '.rank[0-9][0-9][0-9].*.runtime.pt'):
         shard.unlink()
 
 
@@ -73,3 +76,28 @@ def trim_journals(save_dir, rollout):
                 if row[key] <= rollout:
                     out.write(line)
         temp.replace(path)
+
+
+def verify_learners(trainer, arrangement=None):
+    """Require identical parameters, EMA and update clocks on every rank."""
+    modules = {'policy': trainer.policy}
+    if trainer.ema is not None:
+        modules['policy_ema'] = trainer.ema.model
+    counters = dict(move_updates=trainer.num_train_step, rollout=trainer.num_rollout)
+    if arrangement is not None:
+        modules['setup'] = arrangement.net
+        if arrangement.ema is not None:
+            modules['setup_ema'] = arrangement.ema.model
+        counters['setup_updates'] = arrangement._total_batches
+    hashes = {}
+    for label, module in modules.items():
+        h = hashlib.sha256()
+        for name, tensor in sorted(module.state_dict().items()):
+            h.update(name.encode())
+            h.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+        hashes[label] = h.hexdigest()
+    receipt = dict(hashes=hashes, counters=counters)
+    all_receipts = objects(receipt)
+    if any(item != receipt for item in all_receipts):
+        raise RuntimeError('Learner parameters or update counters diverged across ranks')
+    return dict(receipt, world_size=dist.get_world_size(), identical=True)
