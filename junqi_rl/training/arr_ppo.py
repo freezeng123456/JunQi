@@ -122,7 +122,11 @@ class ArrangementPPOTrainer:
         self._grad_nan_skip_count: int = 0
         # DDP wrapper only used inside _step's forward+backward so the
         # gradient hooks fire exactly where they should.
-        if _is_distributed():
+        if _is_distributed() and self.cfg.train_chunk_size:
+            from .distributed_reference import broadcast_module
+            broadcast_module(self.net)
+            self._net_for_train = self.net
+        elif _is_distributed():
             param_device = next(self.net.parameters()).device
             ddp_kwargs: dict[str, Any] = {"find_unused_parameters": False}
             if param_device.type == "cuda" and param_device.index is not None:
@@ -158,6 +162,9 @@ class ArrangementPPOTrainer:
         """
         if buffer.need_arrangements:
             raise RuntimeError("Buffer has no arrangements; call add_arrangements first")
+        if _is_distributed() and self.cfg.train_chunk_size:
+            from .distributed_reference import setup_epoch
+            return setup_epoch(self, buffer, on_optimizer_step)
         any_local = bool(buffer.ready_flags.any())
         if _is_distributed():
             ref_param = next(self.net.parameters())

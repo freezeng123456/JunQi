@@ -239,10 +239,14 @@ class GameProgress:
 
 
 def capture_rng(minibatch_rng):
-    return dict(python=random.getstate(), numpy=np.random.get_state(),
+    from .distributed_reference import active
+    local_cuda = active() and torch.cuda.is_available()
+    return dict(cuda_scope="rank" if local_cuda else "all",
+        python=random.getstate(), numpy=np.random.get_state(),
         minibatch=copy.deepcopy(minibatch_rng.bit_generator.state),
         torch_cpu=torch.get_rng_state(),
-        torch_cuda=torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [])
+        torch_cuda=([torch.cuda.get_rng_state()] if local_cuda else
+            torch.cuda.get_rng_state_all() if torch.cuda.is_available() else []))
 
 
 def restore_rng(state, minibatch_rng):
@@ -250,7 +254,9 @@ def restore_rng(state, minibatch_rng):
     np.random.set_state(state["numpy"])
     minibatch_rng.bit_generator.state = state["minibatch"]
     torch.set_rng_state(state["torch_cpu"].cpu())
-    if state["torch_cuda"]:
+    if state["torch_cuda"] and state.get("cuda_scope") == "rank":
+        torch.cuda.set_rng_state(state["torch_cuda"][0].cpu())
+    elif state["torch_cuda"]:
         if len(state["torch_cuda"]) != torch.cuda.device_count():
             raise ValueError("CUDA RNG device count mismatch")
         torch.cuda.set_rng_state_all([value.cpu() for value in state["torch_cuda"]])

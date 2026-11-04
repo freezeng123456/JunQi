@@ -72,10 +72,23 @@ def save_checkpoint(
     checkpoint_path = os.path.join(save_dir, f"ckpt_{rollout_idx:06d}.pt")
     os.makedirs(os.path.dirname(checkpoint_path) or ".", exist_ok=True)
 
+    from .distributed_reference import active, objects
+    distributed = active() and cfg.ppo.train_chunk_size > 0
+    runtime = None
+    if distributed:
+        from .distributed_checkpoint import save_runtime
+        runtime = save_runtime(checkpoint_path, trainer.runtime_state_provider)
+        if torch.distributed.get_rank() != 0:
+            outcome = objects(None)[0]
+            if outcome is not None:
+                raise RuntimeError(outcome)
+            return checkpoint_path
     state = trainer.state_dict()
     state["train_cfg"] = _dataclass_to_dict(cfg)
     runtime_provider = getattr(trainer, "runtime_state_provider", None)
-    if runtime_provider is not None:
+    if runtime is not None:
+        state["runtime_state"] = runtime
+    elif runtime_provider is not None:
         state["runtime_state"] = runtime_provider()
     if arr_trainer is not None:
         state["arrangement"] = {
@@ -87,13 +100,30 @@ def save_checkpoint(
     if opening_monitor is not None:
         state["opening_monitor"] = opening_monitor.state_dict()
 
-    atomic_write(checkpoint_path, lambda handle: torch.save(state, handle))
-    update_checkpoint_alias(
-        checkpoint_path,
-        os.path.join(save_dir, "ckpt_latest.pt"),
-        copy_fallback=True,
-    )
-    prune_numbered_checkpoints(save_dir, cfg.checkpoint_keep)
+    try:
+        atomic_write(checkpoint_path, lambda handle: torch.save(state, handle))
+        update_checkpoint_alias(checkpoint_path, os.path.join(save_dir, "ckpt_latest.pt"), copy_fallback=True)
+        removed = prune_numbered_checkpoints(save_dir, cfg.checkpoint_keep)
+        if distributed:
+            from .distributed_checkpoint import remove_shards
+            for path in removed:
+                remove_shards(path)
+        if cfg.export_milestone_weights:
+            # Keep stage comparisons without retaining Adam or every rank's live games.
+            export = {k: v for k,v in state.items() if k not in ('optimizer','runtime_state')}
+            if 'arrangement' in export:
+                export['arrangement'] = {'trainer': {k:v for k,v in state['arrangement']['trainer'].items()
+                    if k not in ('optimizer','optim')}}
+            export['capabilities'] = {'training_resume':False,'move_inference':True,'setup_inference':True}
+            export['completed_games'] = state.get('runtime_state',{}).get('games',{}).get('completed_games',0)
+            target = os.path.join(save_dir, f"weights_{export['completed_games']:09d}.pt")
+            atomic_write(target, lambda handle: torch.save(export, handle))
+    except Exception as exc:
+        if distributed:
+            objects(f'{type(exc).__name__}: {exc}')
+        raise
+    if distributed:
+        objects(None)
     return checkpoint_path
 
 

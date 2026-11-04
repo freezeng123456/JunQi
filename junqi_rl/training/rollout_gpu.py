@@ -779,6 +779,14 @@ class RolloutBufferGPU:
 
         def _emit(idx: Tensor, vo: Tensor, row: int | None = None):
             if idx.numel() == 0:
+                # An empty rank participates in a globally nonempty logical row.
+                yield RolloutBatch(
+                    obs_spatial=torch.empty((0, OBS_CHANNELS, BOARD_SIZE, BOARD_SIZE), device=dev),
+                    obs_global=torch.empty((0, self.obs_global_dims), device=dev),
+                    legal_mask=torch.empty((0, FLAT_ACTION_DIM), device=dev, dtype=torch.bool),
+                    actions=act[:0].long(), old_log_probs=lp[:0], advantages=policy_adv[:0],
+                    returns=ret[:0], values=val[:0],
+                    adv_mask=torch.empty(0, device=dev, dtype=torch.bool), value_only_mask=vo)
                 return
             seats_batch = seats_flat.index_select(0, idx)
             carried = getattr(self, "same_seat", False) and row is not None and row < 4
@@ -913,12 +921,19 @@ class RolloutBufferGPU:
             order = np.arange(len(rows))
             if shuffle and getattr(self, "timestep_order", "chronological") == "shuffle":
                 (rng.shuffle(order) if rng is not None else np.random.shuffle(order))
+            from . import distributed_reference as distributed
+            shared_rows = distributed.active() and self.advantage_history is not None
+            if shared_rows:
+                order = distributed.common_order(order, dev)
+                global_sizes = torch.tensor(sizes, device=dev, dtype=torch.long)
+                torch.distributed.all_reduce(global_sizes)
+                order = order[global_sizes.cpu().numpy()[order] > 0]
             for t in order:
                 env_idx = rows[t]
                 if self.value_sample_scope == "all_valid":
                     policy_env = torch.from_numpy(env_idx).to(dev)
                     yield from _emit_all_valid_row(t, policy_env)
-                elif env_idx.size:
+                elif env_idx.size or shared_rows:
                     flat = torch.from_numpy(
                         (t * N + env_idx).astype(np.int64)
                     ).to(dev)

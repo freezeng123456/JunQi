@@ -33,10 +33,15 @@ REFERENCE = {
 
 
 def validate_reference(cfg):
-    if cfg.reference_profile != 'ataraxos_v100':
+    if cfg.reference_profile not in ('ataraxos_v100', 'ataraxos_v100_distributed'):
         raise ValueError('Unknown reference profile')
     errors=[]
+    world = cfg.distributed_world_size if cfg.reference_profile.endswith('_distributed') else 1
+    if world not in (1,2,4,8,16):
+        raise ValueError('Unsupported reference world size')
     for key, expected in REFERENCE.items():
+        if key in ('env.num_envs','arr.n_arr','arr.ppo.batch_size'):
+            expected //= world
         value=cfg
         for part in key.split('.'):value=getattr(value,part)
         if value != expected:errors.append(f'{key}: expected {expected!r}, got {value!r}')

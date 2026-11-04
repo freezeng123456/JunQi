@@ -51,7 +51,8 @@ class AdvantageHistory:
     def threshold(self, lam, keep_rate, minimum):
         adv = history_advantages(**self.data,lam=lam)
         chosen = adv[self.data['valid']].abs().float()
-        return max(minimum,float(chosen.quantile(1-keep_rate))) if chosen.numel() else minimum
+        from .distributed_reference import global_quantile
+        return global_quantile(chosen, 1-keep_rate, minimum)
 
     def state_dict(self):
         return dict(steps=self.steps,data={k:v.cpu().clone() for k,v in self.data.items()})

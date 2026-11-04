@@ -35,12 +35,15 @@ def test_single_process_ppo_streams_minibatches() -> None:
     trainer.cfg = SimpleNamespace(
         num_epochs_per_rollout=1,
         minibatch_size=2,
+        train_chunk_size=0,
     )
     trainer.num_rollout = 0
     trainer._nan_skip_count = 0
     trainer._grad_nan_skip_count = 0
     trainer._policy_unwrapped = object()
     trainer._sync_collect_policy = lambda: None
+    trainer._update_lr = lambda: None
+    trainer.ema = None
     rollout = _GuardedRollout()
 
     def update_step(batch_index: int) -> dict[str, object]:
@@ -64,6 +67,7 @@ def test_distributed_ppo_still_aligns_minibatch_count(monkeypatch) -> None:
     trainer.cfg = SimpleNamespace(
         num_epochs_per_rollout=1,
         minibatch_size=2,
+        train_chunk_size=0,
     )
     trainer.device = torch.device("cpu")
     trainer.num_rollout = 0
@@ -71,6 +75,8 @@ def test_distributed_ppo_still_aligns_minibatch_count(monkeypatch) -> None:
     trainer._grad_nan_skip_count = 0
     trainer._policy_unwrapped = object()
     trainer._sync_collect_policy = lambda: None
+    trainer._update_lr = lambda: None
+    trainer.ema = None
     consumed: list[int] = []
 
     class Rollout:
@@ -107,6 +113,7 @@ def test_distributed_fixed_timestep_plan_streams_compact_history(
     trainer.cfg = SimpleNamespace(
         num_epochs_per_rollout=1,
         minibatch_size=2,
+        train_chunk_size=0,
     )
     trainer._nan_skip_count = 0
     trainer._grad_nan_skip_count = 0
@@ -114,6 +121,8 @@ def test_distributed_fixed_timestep_plan_streams_compact_history(
     trainer.num_rollout = 0
     trainer._policy_unwrapped = object()
     trainer._sync_collect_policy = lambda: None
+    trainer._update_lr = lambda: None
+    trainer.ema = None
     consumed: list[int] = []
 
     class Rollout:

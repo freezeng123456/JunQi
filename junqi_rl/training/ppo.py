@@ -431,7 +431,10 @@ class PPOTrainer:
         train_module: torch.nn.Module = policy
         if cfg.torch_compile:
             train_module = torch.compile(train_module)  # type: ignore[assignment]
-        if _is_distributed():
+        if _is_distributed() and cfg.train_chunk_size:
+            from .distributed_reference import broadcast_module
+            broadcast_module(policy)
+        elif _is_distributed():
             ddp_kwargs: dict[str, Any] = {
                 "find_unused_parameters": False,
                 # Gradient bucketing in MB; default 25 MB is fine for ~1-15 M
@@ -1524,7 +1527,7 @@ class PPOTrainer:
                 getattr(rollout, "minibatch_group", None) == "timestep"
                 and getattr(rollout, "value_sample_scope", None) == "all_valid"
             )
-            if _is_distributed() and not fixed_batch_count:
+            if _is_distributed() and not fixed_batch_count and not cfg.train_chunk_size:
                 # DDP ranks must execute the same number of backward passes.
                 # Materialise only in distributed mode so we can all-reduce
                 # the local batch counts and truncate to the minimum.

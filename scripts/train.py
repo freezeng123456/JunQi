@@ -84,6 +84,8 @@ def _init_distributed(cfg: "TrainConfig") -> tuple[int, int, int]:
     if world_size <= 1:
         return 1, 0, 0
     backend = "nccl" if torch.cuda.is_available() else "gloo"
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
     if not dist.is_initialized():
         dist.init_process_group(backend=backend)
     if torch.cuda.is_available():
@@ -239,8 +241,18 @@ def train(cfg: TrainConfig) -> None:
     world_size, global_rank, _local_rank = _init_distributed(cfg)
     is_rank0 = global_rank == 0
     is_distributed = world_size > 1
-    if cfg.target_completed_games and is_distributed:
-        raise ValueError("completed-game runtime continuation currently supports a single GPU")
+    distributed_reference = is_distributed and cfg.ppo.train_chunk_size > 0
+    if (distributed_reference or cfg.reference_profile) and cfg.distributed_world_size != world_size:
+        raise ValueError(f"Configured world size {cfg.distributed_world_size}, launcher provided {world_size}")
+    if cfg.target_completed_games and is_distributed and not distributed_reference:
+        raise ValueError("Completed-game distributed runs require the reference chunk learner")
+    if distributed_reference and (not cfg.target_completed_games or cfg.opening.enabled or cfg.eval_enabled
+            or cfg.belief.enabled or cfg.random_opponent or not cfg.arr.enabled
+            or cfg.ppo.minibatch_group != 'timestep' or cfg.ppo.advantage_history_steps <= 0
+            or cfg.ppo.return_perspective != 'same_seat' or cfg.ppo.value_sample_scope != 'policy'
+            or cfg.ppo.advantage_normalization != 'raw' or not cfg.arr.ppo.train_chunk_size):
+        raise ValueError("Distributed reference requires same-seat counted self-play with setup, global history, raw filtered rows, and offline evaluation")
+    from junqi_rl.training import distributed_reference as distributed
 
     # ``compact_history`` is process-local: every DDP rank owns a distinct
     # GpuRollout, CUDA device, history allocation, and minibatch reconstruction
@@ -742,6 +754,8 @@ def train(cfg: TrainConfig) -> None:
         )
 
     game_progress = None
+    completed_games = 0
+    global_progress = None
     eval_rng_state = None
     restored_world = False
     legacy_environment_steps = start_rollout * cfg.env.num_envs * cfg.env.steps_per_env
@@ -751,11 +765,18 @@ def train(cfg: TrainConfig) -> None:
             track_first_policy=cfg.track_first_policy)
         trainer.policy.track_first_policy = cfg.track_first_policy
         if resume_sd is not None and "runtime_state" in resume_sd:
+            runtime = resume_sd["runtime_state"]
+            if distributed_reference:
+                from junqi_rl.training.distributed_checkpoint import load_runtime, trim_journals
+                runtime = load_runtime(cfg.resume, runtime)
+                if is_rank0:
+                    trim_journals(cfg.save_dir, start_rollout)
+                dist.barrier()
             legacy_environment_steps = restore_runtime(
-                resume_sd["runtime_state"], env, game_progress, rng, cfg, arr_buffer=arr_buffer,
+                runtime, env, game_progress, rng, cfg, arr_buffer=arr_buffer,
                 rollout_buffer=rollout)
             restored_world = True
-            print(f"[games] Restored live games and RNG; completed={game_progress.completed_games}")
+            print(f"[games] Restored live games and RNG; rank completed={game_progress.completed_games}")
         elif resume_sd is not None:
             if cfg.ppo.return_perspective == "same_seat":
                 raise ValueError("same-seat resume requires live runtime and pending decisions; "
@@ -763,14 +784,19 @@ def train(cfg: TrainConfig) -> None:
             old_cfg = resume_sd.get("train_cfg", {}).get("env", {})
             legacy_environment_steps = start_rollout * old_cfg.get("num_envs", cfg.env.num_envs) * old_cfg.get("steps_per_env", cfg.env.steps_per_env)
             print("[games] Legacy checkpoint: completed-game history unknown; starting a new tracked lineage with fresh games")
+        if distributed_reference:
+            game_progress.lineage_id = distributed.objects(game_progress.lineage_id)[0]
+        global_progress = distributed.merge_summaries(distributed.objects(game_progress.summary()))
+        completed_games = global_progress['completed_games']
         trainer.runtime_state_provider = lambda: capture_runtime(
             env, game_progress, rng, cfg, legacy_environment_steps, saved_rng=eval_rng_state,
             arr_buffer=arr_buffer, rollout_buffer=rollout)
-        next_game_save = (game_progress.completed_games // cfg.save_every_games + 1) * cfg.save_every_games
-        next_game_eval = (game_progress.completed_games // cfg.eval_every_games + 1) * cfg.eval_every_games
+        next_game_save = (completed_games // cfg.save_every_games + 1) * cfg.save_every_games
+        next_game_eval = (completed_games // cfg.eval_every_games + 1) * cfg.eval_every_games
         print(f"[games] Target={cfg.target_completed_games}; legacy environment steps={legacy_environment_steps}")
+    last_saved_rollout = None
     final_rollout = start_rollout
-    game_target_reached = bool(game_progress is not None and game_progress.completed_games >= cfg.target_completed_games)
+    game_target_reached = bool(game_progress is not None and completed_games >= cfg.target_completed_games)
     opening_monitor = None
     opening_collapse = False
     if cfg.opening.enabled:
@@ -781,8 +807,8 @@ def train(cfg: TrainConfig) -> None:
             if "opening_monitor" not in resume_sd:
                 raise ValueError("resume checkpoint is missing the opening-monitor state")
             opening_monitor.load_state_dict(resume_sd["opening_monitor"])
-        if opening_monitor.due(game_progress.completed_games):
-            opening_monitor.check(trainer.policy, completed_games=game_progress.completed_games,
+        if opening_monitor.due(completed_games):
+            opening_monitor.check(trainer.policy, completed_games=completed_games,
                 rollout=start_rollout)
 
     for rollout_idx in range(start_rollout, cfg.total_rollouts):
@@ -1025,19 +1051,29 @@ def train(cfg: TrainConfig) -> None:
                 if matched != expected:
                     raise RuntimeError(f"Lost layout rewards: matched {matched}/{expected}")
                 mc.inc("arr/terminal_credits", float(matched))
-            if cfg.write_training_games:
+            if distributed_reference:
+                for record in records:
+                    record['rank'] = global_rank
+                    record['local_game_id'] = record['game_id']
+                    record['game_id'] = record['game_id'] * world_size + global_rank
+                records = [r for rank_records in distributed.objects(records) for r in rank_records]
+                records.sort(key=lambda r: (r['tracked_environment_steps'], r['rank'], r['local_game_id']))
+            global_progress = distributed.merge_summaries(distributed.objects(game_progress.summary()))
+            completed_games = global_progress['completed_games']
+            if cfg.write_training_games and is_rank0:
                 with open(os.path.join(cfg.save_dir, "training_games.jsonl"), "a") as out:
                     for record in records:
                         out.write(json.dumps(record) + "\n")
-            progress_row = dict(game_progress.summary(), rollout=final_rollout,
+            progress_row = dict(global_progress, rollout=final_rollout,
                 optimizer_updates=trainer.num_train_step,
-                total_environment_steps=legacy_environment_steps + game_progress.environment_steps,
+                total_environment_steps=legacy_environment_steps * world_size + global_progress['tracked_environment_steps'],
                 elapsed_s=logger.elapsed())
-            with open(os.path.join(cfg.save_dir, "game_progress.jsonl"), "a") as out:
-                out.write(json.dumps(progress_row) + "\n")
-            game_target_reached = game_progress.completed_games >= cfg.target_completed_games
-            if final_rollout % cfg.log_every == 0 or game_target_reached:
-                print(f"[games] completed={game_progress.completed_games}/{cfg.target_completed_games} "
+            if is_rank0:
+                with open(os.path.join(cfg.save_dir, "game_progress.jsonl"), "a") as out:
+                    out.write(json.dumps(progress_row) + "\n")
+            game_target_reached = completed_games >= cfg.target_completed_games
+            if is_rank0 and (final_rollout % cfg.log_every == 0 or game_target_reached):
+                print(f"[games] completed={completed_games}/{cfg.target_completed_games} "
                       f"mean_moves={progress_row['mean_completed_game_moves']:.1f} "
                       f"reasons={dict(game_progress.reasons)}")
 
@@ -1091,10 +1127,13 @@ def train(cfg: TrainConfig) -> None:
                 if arr_metrics.get("arr_train/n_batches", 0) and game_progress is not None:
                     arr_buffer.ready_flags.zero_()
             if game_progress is not None:
+                global_credits = distributed.global_count(matched, device)
+                global_buffer_rows = distributed.global_count(len(arr_buffer), device)
+            if game_progress is not None and is_rank0:
                 with open(os.path.join(cfg.save_dir, "arrangement_progress.jsonl"), "a") as out:
-                    json.dump(dict(rollout=final_rollout, completed_games=game_progress.completed_games,
-                        terminal_credits=matched, optimizer_updates=arr_trainer._total_batches,
-                        buffer_rows=len(arr_buffer), metrics=arr_metrics), out)
+                    json.dump(dict(rollout=final_rollout, completed_games=completed_games,
+                        terminal_credits=global_credits, optimizer_updates=arr_trainer._total_batches,
+                        buffer_rows=global_buffer_rows, metrics=arr_metrics), out)
                     out.write("\n")
             mc.inc("time/arr_train_s", time.time() - t_arr_train0)
 
@@ -1228,10 +1267,10 @@ def train(cfg: TrainConfig) -> None:
             mc.reset()
 
         # Probe full opening probabilities at game boundaries, never per move.
-        if opening_monitor is not None and opening_monitor.due(game_progress.completed_games):
+        if opening_monitor is not None and opening_monitor.due(completed_games):
             opening_result = opening_monitor.check(trainer.policy,
-                completed_games=game_progress.completed_games, rollout=rollout_idx + 1)
-            print(f"[opening] games={game_progress.completed_games} "
+                completed_games=completed_games, rollout=rollout_idx + 1)
+            print(f"[opening] games={completed_games} "
                 f"mass={opening_result['fixed']['max_conditional_source_mass']:.5f} "
                 f"Hsrc={opening_result['fixed']['normalized_source_entropy']:.5f} "
                 f"streak={opening_result['collapse_streak']} status={opening_result['status']}")
@@ -1246,28 +1285,30 @@ def train(cfg: TrainConfig) -> None:
                 break
 
         # ---- Periodic checkpoint (rank-0 only; others wait at barrier) ----
-        save_due = ((game_progress.completed_games >= next_game_save or game_target_reached)
+        save_due = ((completed_games >= next_game_save or game_target_reached)
                     if game_progress is not None else (rollout_idx + 1) % cfg.save_every == 0)
         if save_due:
             if game_progress is not None:
-                next_game_save = (game_progress.completed_games // cfg.save_every_games + 1) * cfg.save_every_games
-            if is_rank0:
+                next_game_save = (completed_games // cfg.save_every_games + 1) * cfg.save_every_games
+            if is_rank0 or distributed_reference:
                 ckpt_path = save_checkpoint(
                     trainer, cfg, rollout_idx + 1, cfg.save_dir,
                     arr_trainer=arr_trainer,
                     belief_trainer=belief_trainer,
                 )
+            last_saved_rollout = rollout_idx + 1
+            if is_rank0:
                 print(f"[train] Checkpoint saved: {ckpt_path}")
                 if game_progress is not None:
                     with open(os.path.join(cfg.save_dir, "checkpoint_games.jsonl"), "a") as out:
-                        out.write(json.dumps(dict(completed_games=game_progress.completed_games,
-                            crossed_milestone=(game_progress.completed_games // cfg.save_every_games) * cfg.save_every_games,
+                        out.write(json.dumps(dict(completed_games=completed_games,
+                            crossed_milestone=(completed_games // cfg.save_every_games) * cfg.save_every_games,
                             rollout=rollout_idx + 1, checkpoint=ckpt_path,
                             opening_check=None if opening_monitor is None else opening_monitor.last_result)) + "\n")
                     if cfg.track_first_policy:
                         from junqi_rl.training.first_move_metrics import write_milestone
-                        write_milestone(cfg.save_dir, ckpt_path, game_progress.completed_games,
-                            (game_progress.completed_games // cfg.save_every_games) * cfg.save_every_games)
+                        write_milestone(cfg.save_dir, ckpt_path, completed_games,
+                            (completed_games // cfg.save_every_games) * cfg.save_every_games)
                 # Log config text once on first save
                 if rollout_idx + 1 == cfg.save_every:
                     with open(cfg_path) as f:
@@ -1277,11 +1318,11 @@ def train(cfg: TrainConfig) -> None:
 
         # ---- Periodic evaluation (rank-0 only; others wait) ----
         # Evaluate the actual learner policy used for collection.
-        eval_due = cfg.eval_enabled and ((game_progress.completed_games >= next_game_eval or game_target_reached)
+        eval_due = cfg.eval_enabled and ((completed_games >= next_game_eval or game_target_reached)
                     if game_progress is not None else (rollout_idx + 1) % cfg.eval_every == 0)
         if eval_due:
             if game_progress is not None:
-                next_game_eval = (game_progress.completed_games // cfg.eval_every_games + 1) * cfg.eval_every_games
+                next_game_eval = (completed_games // cfg.eval_every_games + 1) * cfg.eval_every_games
             eval_should_stop = torch.zeros(1, dtype=torch.long,
                                            device=device if device.type == "cuda" else "cpu")
             if is_rank0:
@@ -1389,7 +1430,7 @@ def train(cfg: TrainConfig) -> None:
                         if game_progress is not None:
                             from junqi_rl.analysis.protocol import paired_score_interval
                             paired = paired_score_interval(h2h_records, seed=h2h_seed)
-                            paired.update(completed_training_games=game_progress.completed_games,
+                            paired.update(completed_training_games=completed_games,
                                 baseline_checkpoint=cfg.eval_baseline_ckpt, rollout=rollout_idx + 1,
                                 wins=h2h["h2h/wins"], losses=h2h["h2h/losses"], draws=h2h["h2h/draws"])
                             with open(os.path.join(cfg.save_dir, f"paired_h2h_{rollout_idx+1:06d}.json"), "w") as out:
@@ -1402,7 +1443,7 @@ def train(cfg: TrainConfig) -> None:
                                 num_games=baseline_games, num_envs=cfg.env.num_envs, device=device,
                                 seed=eval_seed + 100_019, max_moves=cfg.env.max_num_moves,
                                 autocast_dtype=cfg.ppo.get_dtype())
-                            agent_result.update(completed_training_games=game_progress.completed_games
+                            agent_result.update(completed_training_games=completed_games
                                 if game_progress is not None else None,
                                 baseline_checkpoint=cfg.eval_baseline_ckpt, rollout=rollout_idx + 1)
                             with open(os.path.join(cfg.save_dir, f"agent_h2h_{rollout_idx+1:06d}.json"), "w") as out:
@@ -1511,9 +1552,11 @@ def train(cfg: TrainConfig) -> None:
         if game_target_reached:
             break
 
-        # ---- Stop if requested ----
+        # ---- Stop if requested; any rank's signal stops the complete group ----
+        if distributed_reference:
+            _stop_requested[0] = bool(distributed.global_count(_stop_requested[0], device))
         if _stop_requested[0]:
-            if is_rank0:
+            if is_rank0 or distributed_reference:
                 print("[train] Graceful stop: saving final checkpoint.")
                 save_checkpoint(
                     trainer, cfg, rollout_idx + 1, cfg.save_dir,
@@ -1525,8 +1568,8 @@ def train(cfg: TrainConfig) -> None:
             break
 
     # ---- Final checkpoint ----
-    if not _stop_requested[0]:
-        if is_rank0:
+    if not _stop_requested[0] and last_saved_rollout != final_rollout:
+        if is_rank0 or distributed_reference:
             final_path = save_checkpoint(
                 trainer, cfg, final_rollout, cfg.save_dir,
                 arr_trainer=arr_trainer,
@@ -1538,13 +1581,14 @@ def train(cfg: TrainConfig) -> None:
 
     if game_progress is not None:
         status = "opening_collapse" if opening_collapse else ("target_reached" if game_target_reached else ("interrupted" if _stop_requested[0] else "rollout_ceiling"))
-        result = dict(game_progress.summary(), status=status,
+        result = dict(global_progress, status=status,
             target_completed_games=cfg.target_completed_games, rollout=final_rollout,
             optimizer_updates=trainer.num_train_step,
             legacy_environment_steps=legacy_environment_steps,
             legacy_completed_games=None, elapsed_s=logger.elapsed())
-        with open(os.path.join(cfg.save_dir, "training_result.json"), "w") as out:
-            json.dump(result, out, indent=2)
+        if is_rank0:
+            with open(os.path.join(cfg.save_dir, "training_result.json"), "w") as out:
+                json.dump(result, out, indent=2)
         if not game_target_reached and not _stop_requested[0]:
             raise RuntimeError("rollout safety ceiling reached before completed-game target")
 

@@ -92,6 +92,8 @@ class TrainConfig:
     """Complete training configuration."""
 
     reference_profile: str = ""
+    distributed_world_size: int = 1
+    export_milestone_weights: bool = False
     env: EnvConfig = field(default_factory=EnvConfig)
     net: JunqiNetConfig = field(default_factory=JunqiNetConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
