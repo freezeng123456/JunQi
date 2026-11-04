@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 """Estimate from measured production-size rollouts; distinguish queue time."""
 import argparse,json,math
+import torch
 from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('benchmark');p.add_argument('--target',type=int,default=1000000)
 a=p.parse_args();root=Path(a.benchmark)
 rows=[json.loads(line) for line in (root/'game_progress.jsonl').read_text().splitlines()]
 assert len(rows)>=3
 first,last=rows[0],rows[-1]
+completed=json.loads((root/'training_result.json').read_text())
+checkpoint=torch.load(root/f"ckpt_{completed['rollout']:06d}.pt",map_location='cpu',weights_only=False)
+consensus=checkpoint['distributed_consensus']
+initial=json.loads((root/'policy_initialization.json').read_text())
+assert consensus['identical'] and consensus['world_size']==8
+assert consensus['hashes']['policy'] != initial['parameter_sha256']
+assert consensus['counters']['move_updates']>0 and consensus['counters']['setup_updates']>0
+
 elapsed=last['elapsed_s']-first['elapsed_s']
 steps=last['tracked_environment_steps']-first['tracked_environment_steps']
 games=last['completed_games']-first['completed_games']
@@ -15,6 +24,7 @@ steps_per_s=steps/elapsed;games_per_s=games/elapsed
 # The preceding completed 20,427-game formal baseline measured this game length.
 reference_mean_moves=847.616
 result=dict(world_size=last['world_size'],warmup_rollouts_excluded=1,
+    full_network_acceptance=consensus,policy_changed_from_initialization=True,
     measured_interval_s=elapsed,measured_environment_actions=steps,measured_completed_games=games,
     actions_per_second=steps_per_s,completed_games_per_second=games_per_s,
     target_completed_games=a.target,
